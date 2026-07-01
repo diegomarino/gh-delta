@@ -1,0 +1,33 @@
+{
+  "name": "gh-delta",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Deterministic GitHub issue and pull request delta detector for agent watch loops",
+  "license": "MIT",
+  "bin": {
+    "gh-delta": "./gh-delta.mjs",
+    "gh-delta-tick": "./gh-delta-tick.mjs"
+  },
+  "files": [
+    "gh-delta.mjs",
+    "gh-delta-tick.mjs",
+    "lib",
+    "docs",
+    "README.md",
+    "RUNBOOK.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "keywords": [
+    "github",
+    "cli",
+    "automation",
+    "pull-requests",
+    "issues"
+  ]
+}
