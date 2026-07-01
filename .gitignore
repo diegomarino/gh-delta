@@ -1,5 +1,7 @@
 state/*.json
 state/*.tmp
 node_modules/
+.npm-cache/
 .DS_Store
 coverage/
+*.tgz

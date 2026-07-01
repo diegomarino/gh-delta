@@ -1,7 +1,12 @@
 // Fingerprint tests: stable hashes prevent phantom deltas from API ordering noise.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { canonicalizeCiRollup, hashReviews, prFingerprint, issueFingerprint } from '../lib/fingerprint.mjs';
+import {
+  canonicalizeCiRollup,
+  hashReviews,
+  prFingerprint,
+  issueFingerprint,
+} from '../lib/fingerprint.mjs';
 
 test('canonicalizeCiRollup is order-independent', () => {
   const a = [
@@ -24,25 +29,51 @@ test('canonicalizeCiRollup handles StatusContext shape (context/state)', () => {
 });
 
 test('hashReviews is order-independent and reflects state', () => {
-  const one = [{ author: { login: 'alice' }, state: 'APPROVED' }, { author: { login: 'bob' }, state: 'COMMENTED' }];
+  const one = [
+    { author: { login: 'alice' }, state: 'APPROVED' },
+    { author: { login: 'bob' }, state: 'COMMENTED' },
+  ];
   const rev = [one[1], one[0]];
   assert.equal(hashReviews(one), hashReviews(rev));
-  const changed = [{ author: { login: 'alice' }, state: 'CHANGES_REQUESTED' }, { author: { login: 'bob' }, state: 'COMMENTED' }];
+  const changed = [
+    { author: { login: 'alice' }, state: 'CHANGES_REQUESTED' },
+    { author: { login: 'bob' }, state: 'COMMENTED' },
+  ];
   assert.notEqual(hashReviews(one), hashReviews(changed));
 });
 
 test('hashReviews changes for a new review with same author and state', () => {
-  const before = [{ id: 'r1', submittedAt: '2026-07-01T10:00:00Z', author: { login: 'alice' }, state: 'COMMENTED' }];
-  const after = [{ id: 'r2', submittedAt: '2026-07-01T11:00:00Z', author: { login: 'alice' }, state: 'COMMENTED' }];
+  const before = [
+    {
+      id: 'r1',
+      submittedAt: '2026-07-01T10:00:00Z',
+      author: { login: 'alice' },
+      state: 'COMMENTED',
+    },
+  ];
+  const after = [
+    {
+      id: 'r2',
+      submittedAt: '2026-07-01T11:00:00Z',
+      author: { login: 'alice' },
+      state: 'COMMENTED',
+    },
+  ];
   assert.notEqual(hashReviews(before), hashReviews(after));
 });
 
 test('prFingerprint extracts the tracked fields', () => {
   const pr = {
-    number: 42, state: 'OPEN', updatedAt: '2026-07-01T10:00:00Z', isDraft: false,
+    number: 42,
+    state: 'OPEN',
+    updatedAt: '2026-07-01T10:00:00Z',
+    isDraft: false,
     statusCheckRollup: [{ name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' }],
-    reviewDecision: 'APPROVED', latestReviews: [{ author: { login: 'alice' }, state: 'APPROVED' }],
-    mergeable: 'MERGEABLE', comments: [{}, {}, {}], headRefOid: 'abc123',
+    reviewDecision: 'APPROVED',
+    latestReviews: [{ author: { login: 'alice' }, state: 'APPROVED' }],
+    mergeable: 'MERGEABLE',
+    comments: [{}, {}, {}],
+    headRefOid: 'abc123',
   };
   const fp = prFingerprint(pr);
   assert.equal(fp.state, 'OPEN');
@@ -57,14 +88,18 @@ test('prFingerprint extracts the tracked fields', () => {
 
 test('prFingerprint marks capped comment arrays as overflow', () => {
   const pr = {
-    state: 'OPEN', updatedAt: '2026-07-01T10:00:00Z', comments: Array.from({ length: 100 }, () => ({})),
+    state: 'OPEN',
+    updatedAt: '2026-07-01T10:00:00Z',
+    comments: Array.from({ length: 100 }, () => ({})),
   };
   assert.equal(prFingerprint(pr).commentsOverflow, true);
 });
 
 test('issueFingerprint sorts labels and counts comments', () => {
   const issue = {
-    number: 7, state: 'OPEN', updatedAt: '2026-07-01T10:00:00Z',
+    number: 7,
+    state: 'OPEN',
+    updatedAt: '2026-07-01T10:00:00Z',
     labels: [{ name: 'worker' }, { name: 'backend' }],
     comments: [{}, {}],
   };
@@ -76,7 +111,8 @@ test('issueFingerprint sorts labels and counts comments', () => {
 
 test('issueFingerprint marks capped comment arrays as overflow', () => {
   const issue = {
-    state: 'OPEN', updatedAt: '2026-07-01T10:00:00Z',
+    state: 'OPEN',
+    updatedAt: '2026-07-01T10:00:00Z',
     labels: [],
     comments: Array.from({ length: 100 }, () => ({})),
   };

@@ -22,8 +22,20 @@ const issueDelta = {
   number: 17,
   title: 'Backfill customer imports',
   classes: ['relabeled'],
-  from: { state: 'OPEN', updatedAt: '2026-07-01T09:00:00.000Z', labels: ['worker'], comments: 0, commentsOverflow: false },
-  to: { state: 'OPEN', updatedAt: '2026-07-01T10:05:00.000Z', labels: ['backend', 'worker'], comments: 0, commentsOverflow: false },
+  from: {
+    state: 'OPEN',
+    updatedAt: '2026-07-01T09:00:00.000Z',
+    labels: ['worker'],
+    comments: 0,
+    commentsOverflow: false,
+  },
+  to: {
+    state: 'OPEN',
+    updatedAt: '2026-07-01T10:05:00.000Z',
+    labels: ['backend', 'worker'],
+    comments: 0,
+    commentsOverflow: false,
+  },
   line: 'ISSUE #17 "Backfill customer imports": relabeled',
 };
 
@@ -32,8 +44,30 @@ const prDelta = {
   number: 42,
   title: 'Add billing webhook',
   classes: ['ci-changed', 'review-changed'],
-  from: { state: 'OPEN', updatedAt: '2026-07-01T09:00:00.000Z', isDraft: false, ci: 'old', review: 'REVIEW_REQUIRED', reviews: 'old', mergeable: 'UNKNOWN', comments: 0, commentsOverflow: false, head: 'sha1' },
-  to: { state: 'OPEN', updatedAt: '2026-07-01T10:05:00.000Z', isDraft: false, ci: 'new', review: 'APPROVED', reviews: 'new', mergeable: 'UNKNOWN', comments: 0, commentsOverflow: false, head: 'sha1' },
+  from: {
+    state: 'OPEN',
+    updatedAt: '2026-07-01T09:00:00.000Z',
+    isDraft: false,
+    ci: 'old',
+    review: 'REVIEW_REQUIRED',
+    reviews: 'old',
+    mergeable: 'UNKNOWN',
+    comments: 0,
+    commentsOverflow: false,
+    head: 'sha1',
+  },
+  to: {
+    state: 'OPEN',
+    updatedAt: '2026-07-01T10:05:00.000Z',
+    isDraft: false,
+    ci: 'new',
+    review: 'APPROVED',
+    reviews: 'new',
+    mergeable: 'UNKNOWN',
+    comments: 0,
+    commentsOverflow: false,
+    head: 'sha1',
+  },
   line: 'PR #42 "Add billing webhook": ci-changed, review-changed',
 };
 
@@ -50,10 +84,13 @@ test('baseline tick prints a heartbeat and baseline note', async () => {
     },
   });
 
-  const { code, output } = await runTick(['--repo', 'owner/repo', '--state-file', '/tmp/watch.json'], {
-    detector,
-    now: () => '2026-07-01T10:00:00.000Z',
-  });
+  const { code, output } = await runTick(
+    ['--repo', 'owner/repo', '--state-file', '/tmp/watch.json'],
+    {
+      detector,
+      now: () => '2026-07-01T10:00:00.000Z',
+    },
+  );
 
   assert.equal(code, 0);
   assert.match(output, /2026-07-01T10:00:00.000Z \| 0 delta\(s\)/);
@@ -95,10 +132,13 @@ test('delta tick prints each delta with suggested action', async () => {
     },
   });
 
-  const { code, output } = await runTick(['--repo', 'owner/repo', '--state-file', '/tmp/watch.json'], {
-    detector,
-    now: () => '2026-07-01T10:05:00.000Z',
-  });
+  const { code, output } = await runTick(
+    ['--repo', 'owner/repo', '--state-file', '/tmp/watch.json'],
+    {
+      detector,
+      now: () => '2026-07-01T10:05:00.000Z',
+    },
+  );
 
   assert.equal(code, 10);
   assert.match(output, /2026-07-01T10:05:00.000Z \| 3 delta\(s\)/);
@@ -120,10 +160,13 @@ test('error tick reports snapshot-preserving failure', async () => {
     },
   });
 
-  const { code, output } = await runTick(['--repo', 'owner/repo', '--state-file', '/tmp/watch.json'], {
-    detector,
-    now: () => '2026-07-01T10:10:00.000Z',
-  });
+  const { code, output } = await runTick(
+    ['--repo', 'owner/repo', '--state-file', '/tmp/watch.json'],
+    {
+      detector,
+      now: () => '2026-07-01T10:10:00.000Z',
+    },
+  );
 
   assert.equal(code, 1);
   assert.match(output, /error \| 0 delta\(s\)/);
@@ -153,10 +196,15 @@ test('tick asks the detector for detailed delta lines by default', async () => {
 });
 
 test('tick catches detector argument exceptions', async () => {
-  const { code, output } = await runTick(['--repo', 'owner/repo', '--state-file', '/tmp/watch.json'], {
-    detector: () => { throw new Error('Unknown option --bogus'); },
-    now: () => '2026-07-01T10:20:00.000Z',
-  });
+  const { code, output } = await runTick(
+    ['--repo', 'owner/repo', '--state-file', '/tmp/watch.json'],
+    {
+      detector: () => {
+        throw new Error('Unknown option --bogus');
+      },
+      now: () => '2026-07-01T10:20:00.000Z',
+    },
+  );
   assert.equal(code, 1);
   assert.match(output, /error \| 0 delta\(s\)/);
   assert.match(output, /Unknown option --bogus/);
@@ -175,22 +223,40 @@ test('outpost URL sends one JSON POST per delta on code 10', async () => {
     return { ok: true, status: 202 };
   };
 
-  const { code, output } = await runTick([
-    '--repo', 'owner/repo',
-    '--branch', 'watch',
-    '--state-file', '/tmp/watch.json',
-    '--outpost-url', 'https://example.com/gh-delta',
-  ], { detector, outpostFetch });
+  const { code, output } = await runTick(
+    [
+      '--repo',
+      'owner/repo',
+      '--branch',
+      'watch',
+      '--state-file',
+      '/tmp/watch.json',
+      '--outpost-url',
+      'https://example.com/gh-delta',
+    ],
+    { detector, outpostFetch },
+  );
 
   assert.equal(code, 10);
   assert.equal(posts.length, 2);
-  assert.deepEqual(capturedArgs, ['--repo', 'owner/repo', '--branch', 'watch', '--state-file', '/tmp/watch.json', '--detail']);
+  assert.deepEqual(capturedArgs, [
+    '--repo',
+    'owner/repo',
+    '--branch',
+    'watch',
+    '--state-file',
+    '/tmp/watch.json',
+    '--detail',
+  ]);
   assert.equal(posts[0].url, 'https://example.com/gh-delta');
   assert.equal(posts[0].options.method, 'POST');
   assert.equal(posts[0].options.headers['Content-Type'], 'application/json');
   assert.equal(posts[0].body.type, 'gh-delta.delta');
   assert.equal(posts[0].body.schemaVersion, 1);
-  assert.equal(posts[0].body.eventId, 'gh-delta.delta.v1:owner/repo:watch:issue:17:relabeled:2026-07-01T10:05:00.000Z');
+  assert.equal(
+    posts[0].body.eventId,
+    'gh-delta.delta.v1:owner/repo:watch:issue:17:relabeled:2026-07-01T10:05:00.000Z',
+  );
   assert.equal(posts[0].body.repo, 'owner/repo');
   assert.equal(posts[0].body.branch, 'watch');
   assert.equal(posts[0].body.detectedAt, '2026-07-01T10:05:00.000Z');
@@ -215,33 +281,63 @@ test('outpost URL does not POST on code 0 or code 1', async () => {
     return { ok: true, status: 202 };
   };
 
-  await runTick(['--repo', 'owner/repo', '--state-file', '/tmp/watch.json', '--outpost-url', 'https://example.com/gh-delta'], {
-    detector: () => reportWithDeltas({ code: 0, deltas: [] }),
-    outpostFetch,
-  });
-  await runTick(['--repo', 'owner/repo', '--state-file', '/tmp/watch.json', '--outpost-url', 'https://example.com/gh-delta'], {
-    detector: () => ({
-      code: 1,
-      report: { error: 'gh: API rate limit exceeded', repo: 'owner/repo', at: '2026-07-01T10:10:00.000Z' },
-    }),
-    outpostFetch,
-  });
+  await runTick(
+    [
+      '--repo',
+      'owner/repo',
+      '--state-file',
+      '/tmp/watch.json',
+      '--outpost-url',
+      'https://example.com/gh-delta',
+    ],
+    {
+      detector: () => reportWithDeltas({ code: 0, deltas: [] }),
+      outpostFetch,
+    },
+  );
+  await runTick(
+    [
+      '--repo',
+      'owner/repo',
+      '--state-file',
+      '/tmp/watch.json',
+      '--outpost-url',
+      'https://example.com/gh-delta',
+    ],
+    {
+      detector: () => ({
+        code: 1,
+        report: {
+          error: 'gh: API rate limit exceeded',
+          repo: 'owner/repo',
+          at: '2026-07-01T10:10:00.000Z',
+        },
+      }),
+      outpostFetch,
+    },
+  );
 
   assert.equal(posts, 0);
 });
 
 test('invalid outpost URL returns code 1 before detector fetch', async () => {
   let detectorCalled = false;
-  const { code, output } = await runTick([
-    '--repo', 'owner/repo',
-    '--state-file', '/tmp/watch.json',
-    '--outpost-url', 'ftp://example.com/gh-delta',
-  ], {
-    detector: () => {
-      detectorCalled = true;
-      throw new Error('should not fetch');
+  const { code, output } = await runTick(
+    [
+      '--repo',
+      'owner/repo',
+      '--state-file',
+      '/tmp/watch.json',
+      '--outpost-url',
+      'ftp://example.com/gh-delta',
+    ],
+    {
+      detector: () => {
+        detectorCalled = true;
+        throw new Error('should not fetch');
+      },
     },
-  });
+  );
 
   assert.equal(code, 1);
   assert.equal(detectorCalled, false);
@@ -249,14 +345,20 @@ test('invalid outpost URL returns code 1 before detector fetch', async () => {
 });
 
 test('outpost POST failure warns without changing code 10 or leaking URL secrets', async () => {
-  const { code, output } = await runTick([
-    '--repo', 'owner/repo',
-    '--state-file', '/tmp/watch.json',
-    '--outpost-url', 'https://example.com/gh-delta?token=supersecret',
-  ], {
-    detector: () => reportWithDeltas({ deltas: [issueDelta] }),
-    outpostFetch: async () => ({ ok: false, status: 500, statusText: 'Server Error' }),
-  });
+  const { code, output } = await runTick(
+    [
+      '--repo',
+      'owner/repo',
+      '--state-file',
+      '/tmp/watch.json',
+      '--outpost-url',
+      'https://example.com/gh-delta?token=supersecret',
+    ],
+    {
+      detector: () => reportWithDeltas({ deltas: [issueDelta] }),
+      outpostFetch: async () => ({ ok: false, status: 500, statusText: 'Server Error' }),
+    },
+  );
 
   assert.equal(code, 10);
   assert.match(output, /outpost warning: ISSUE #17 failed: HTTP 500/);

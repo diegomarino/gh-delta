@@ -183,18 +183,18 @@ developer polling loops or webhook-driven automation.
 
 ## Delta Classes
 
-| class | typical orchestrator action |
-| --- | --- |
-| `new` (PR) | a worker opened a PR; read it and queue review |
-| `ci-changed` | CI green: consider merge path; CI red: nudge worker with the failure |
-| `review-changed` | approved: merge candidate; changes requested: relay to worker |
-| `became-mergeable` | conflicts resolved; merge candidate |
-| `merged` / `closed` | slice done; advance build order or sync spawn base |
-| `new-comments` | read PR threads; fold review comments before merge |
-| `relabeled` | scope or state change on an issue; reassess dispatch |
-| `missing` | previous object disappeared from fetch; check pagination, permissions, or scope |
-| `still-missing` | object remains absent; unresolved operational issue, not a fresh delta |
-| `updated` | catch-all (`updatedAt` or head-only); inspect GitHub before dismissing |
+| class               | typical orchestrator action                                                     |
+| ------------------- | ------------------------------------------------------------------------------- |
+| `new` (PR)          | a worker opened a PR; read it and queue review                                  |
+| `ci-changed`        | CI green: consider merge path; CI red: nudge worker with the failure            |
+| `review-changed`    | approved: merge candidate; changes requested: relay to worker                   |
+| `became-mergeable`  | conflicts resolved; merge candidate                                             |
+| `merged` / `closed` | slice done; advance build order or sync spawn base                              |
+| `new-comments`      | read PR threads; fold review comments before merge                              |
+| `relabeled`         | scope or state change on an issue; reassess dispatch                            |
+| `missing`           | previous object disappeared from fetch; check pagination, permissions, or scope |
+| `still-missing`     | object remains absent; unresolved operational issue, not a fresh delta          |
+| `updated`           | catch-all (`updatedAt` or head-only); inspect GitHub before dismissing          |
 
 ## Operating Rules
 

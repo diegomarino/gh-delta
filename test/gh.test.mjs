@@ -5,7 +5,10 @@ import { fetchPRs, fetchIssues, PR_FIELDS, ISSUE_FIELDS } from '../lib/gh.mjs';
 
 test('fetchPRs sends --state all and --limit 500 with the PR fields', () => {
   let captured;
-  const exec = (cmd, args) => { captured = { cmd, args }; return '[]'; };
+  const exec = (cmd, args) => {
+    captured = { cmd, args };
+    return '[]';
+  };
   const out = fetchPRs('owner/repo', exec);
   assert.deepEqual(out, []);
   assert.equal(captured.cmd, 'gh');
@@ -30,7 +33,10 @@ test('fetchPRs fails closed when the result reaches the hard limit', () => {
 
 test('fetchIssues sends the issue field set', () => {
   let captured;
-  const exec = (cmd, args) => { captured = { cmd, args }; return '[]'; };
+  const exec = (cmd, args) => {
+    captured = { cmd, args };
+    return '[]';
+  };
   fetchIssues('o/r', exec);
   assert.ok(captured.args.includes(ISSUE_FIELDS));
   assert.deepEqual(captured.args.slice(0, 2), ['issue', 'list']);
@@ -43,7 +49,14 @@ test('fetchIssues fails closed when the result reaches the hard limit', () => {
 });
 
 test('PR_FIELDS carries the review-vs-comment-distinct signals', () => {
-  for (const f of ['statusCheckRollup', 'reviewDecision', 'latestReviews', 'mergeable', 'comments', 'headRefOid']) {
+  for (const f of [
+    'statusCheckRollup',
+    'reviewDecision',
+    'latestReviews',
+    'mergeable',
+    'comments',
+    'headRefOid',
+  ]) {
     assert.ok(PR_FIELDS.includes(f), `missing ${f}`);
   }
 });

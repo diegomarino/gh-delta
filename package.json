@@ -4,10 +4,44 @@
   "type": "module",
   "description": "Deterministic GitHub issue and pull request delta detector for agent watch loops",
   "license": "MIT",
+  "packageManager": "npm@10.9.8",
+  "main": "./gh-delta.mjs",
+  "exports": {
+    ".": {
+      "import": "./gh-delta.mjs"
+    },
+    "./tick": {
+      "import": "./gh-delta-tick.mjs"
+    },
+    "./detect": {
+      "import": "./lib/detect.mjs"
+    },
+    "./fingerprint": {
+      "import": "./lib/fingerprint.mjs"
+    },
+    "./outpost": {
+      "import": "./lib/outpost.mjs"
+    },
+    "./snapshot": {
+      "import": "./lib/snapshot.mjs"
+    },
+    "./args": {
+      "import": "./lib/args.mjs"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "gh-delta": "./gh-delta.mjs",
     "gh-delta-tick": "./gh-delta-tick.mjs"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegomarino/gh-delta.git"
+  },
+  "bugs": {
+    "url": "https://github.com/diegomarino/gh-delta/issues"
+  },
+  "homepage": "https://github.com/diegomarino/gh-delta#readme",
   "files": [
     "gh-delta.mjs",
     "gh-delta-tick.mjs",
@@ -15,19 +49,36 @@
     "docs",
     "README.md",
     "RUNBOOK.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "test:coverage": "node --test --experimental-test-coverage",
+    "lint": "eslint .",
+    "format": "prettier . --write",
+    "format:check": "prettier . --check",
+    "check": "npm run lint && npm run format:check && npm test",
+    "pack:dry-run": "npm pack --dry-run --cache .npm-cache",
+    "release:check": "npm run check && npm run test:coverage && npm run pack:dry-run",
+    "prepublishOnly": "npm run release:check"
   },
   "keywords": [
     "github",
+    "github-cli",
     "cli",
     "automation",
+    "watcher",
+    "delta",
     "pull-requests",
     "issues"
-  ]
+  ],
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "eslint": "^9.39.4",
+    "prettier": "^3.9.4"
+  }
 }

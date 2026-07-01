@@ -3,6 +3,7 @@
 // heartbeat text and suggested next actions, but still leaves judgment to an agent.
 import { run as runDetector } from './gh-delta.mjs';
 import { sendOutposts, validateOutpostUrl } from './lib/outpost.mjs';
+import { parseOutpostArgs } from './lib/args.mjs';
 
 const usage = `Usage:
   gh-delta-tick --repo <owner/name> --state-file <path> [--branch <name>] [--entities pr,issue] [--outpost-url <url>]
@@ -59,31 +60,11 @@ function tickArgs(argv) {
   return hasFlag(argv, '--detail') ? argv : [...argv, '--detail'];
 }
 
-function extractOutpostUrl(argv) {
-  const detectorArgs = [];
-  let outpostUrl;
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === '--outpost-url') {
-      if (outpostUrl !== undefined) return { error: '--outpost-url may only be provided once' };
-      const value = argv[i + 1];
-      if (value === undefined) return { error: '--outpost-url requires a URL' };
-      outpostUrl = value;
-      i++;
-      continue;
-    }
-    if (arg.startsWith('--outpost-url=')) {
-      if (outpostUrl !== undefined) return { error: '--outpost-url may only be provided once' };
-      outpostUrl = arg.slice('--outpost-url='.length);
-      continue;
-    }
-    detectorArgs.push(arg);
-  }
-  return { detectorArgs, outpostUrl };
-}
-
 function deltaLabel(delta) {
-  return delta.line ?? `${delta.entity.toUpperCase()} #${delta.number} "${delta.title}": ${delta.classes.join(', ')}`;
+  return (
+    delta.line ??
+    `${delta.entity.toUpperCase()} #${delta.number} "${delta.title}": ${delta.classes.join(', ')}`
+  );
 }
 
 function suggestionFor(classes = []) {
@@ -93,13 +74,15 @@ function suggestionFor(classes = []) {
 }
 
 function formatDeltas(deltas = []) {
-  return deltas.map((delta) => {
-    return [
-      deltaLabel(delta),
-      `classes: ${delta.classes.join(', ')}`,
-      `suggested action: ${suggestionFor(delta.classes)}`,
-    ].join('\n');
-  }).join('\n\n');
+  return deltas
+    .map((delta) => {
+      return [
+        deltaLabel(delta),
+        `classes: ${delta.classes.join(', ')}`,
+        `suggested action: ${suggestionFor(delta.classes)}`,
+      ].join('\n');
+    })
+    .join('\n\n');
 }
 
 function formatOutput({ code, report, now }) {
@@ -118,27 +101,14 @@ function formatOutput({ code, report, now }) {
   const deltas = report.deltas ?? [];
   const heartbeat = `${at} | ${deltas.length} delta(s)`;
   if (report.baseline) {
-    return [
-      heartbeat,
-      '',
-      `Baseline seeded for ${report.repo}.`,
-      'No action taken.',
-    ].join('\n');
+    return [heartbeat, '', `Baseline seeded for ${report.repo}.`, 'No action taken.'].join('\n');
   }
 
   if (deltas.length === 0) {
-    return [
-      heartbeat,
-      '',
-      'No GitHub deltas since the last snapshot.',
-    ].join('\n');
+    return [heartbeat, '', 'No GitHub deltas since the last snapshot.'].join('\n');
   }
 
-  return [
-    heartbeat,
-    '',
-    formatDeltas(deltas),
-  ].join('\n');
+  return [heartbeat, '', formatDeltas(deltas)].join('\n');
 }
 
 function formatOutpostWarnings(warnings = []) {
@@ -160,7 +130,7 @@ export async function runTick(argv, deps = {}) {
 
   if (hasFlag(argv, '--help')) return { code: 0, output: usage };
 
-  const parsed = extractOutpostUrl(argv);
+  const parsed = parseOutpostArgs(argv);
   if (parsed.error) {
     return {
       code: 1,

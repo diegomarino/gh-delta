@@ -9,6 +9,7 @@ sessions, merge pull requests, or send messages to workers.
 ```text
 watch loop / timer
   -> gh-delta.mjs
+      -> lib/args.mjs      parse shared CLI option policy
       -> lib/gh.mjs        fetch current GitHub state with gh
       -> lib/snapshot.mjs  read previous snapshot
       -> lib/detect.mjs    compare old and current fingerprints
@@ -23,6 +24,7 @@ each cron fire can stay short and stateless.
 
 The core correctness logic is pure:
 
+- `args.mjs` parses reusable CLI argument policy without touching process I/O.
 - `fingerprint.mjs` converts GitHub objects into stable fingerprints.
 - `detect.mjs` compares fingerprints and emits delta classes.
 
@@ -32,8 +34,24 @@ The impure edges are isolated:
 - `snapshot.mjs` performs filesystem I/O.
 - `outpost.mjs` validates optional outpost URLs, builds schema v1 payloads, and
   sends short-timeout HTTP POSTs.
-- `gh-delta.mjs` parses CLI flags and maps results to exit codes.
+- `gh-delta.mjs` wires CLI flags, GitHub fetches, snapshot I/O, and exit codes.
 - `gh-delta-tick.mjs` formats one scheduler-owned tick for agents/operators.
+
+## Package Surface
+
+The npm package exposes the two CLIs and a small ESM import surface:
+
+- `gh-delta`: detector CLI.
+- `gh-delta-tick`: one-tick operator wrapper.
+- `gh-delta/detect`: pure delta classification.
+- `gh-delta/fingerprint`: GitHub object fingerprint helpers.
+- `gh-delta/outpost`: outpost payload and delivery helpers.
+- `gh-delta/snapshot`: snapshot path/read/write helpers.
+- `gh-delta/args`: shared argument parsing helpers.
+
+Everything under `lib/` should stay dependency-free unless the added dependency
+materially improves correctness. The package currently has no runtime
+dependencies.
 
 ## GitHub Fetch Contract
 

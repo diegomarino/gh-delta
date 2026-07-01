@@ -18,10 +18,21 @@ the action.
 
 ## Quick Start
 
+Install from npm once published:
+
+```bash
+npm install --global gh-delta
+gh-delta --help
+gh-delta-tick --help
+```
+
+Or run from a source checkout:
+
 ```bash
 git clone https://github.com/<owner>/gh-delta.git
 cd gh-delta
-npm test
+npm install
+npm run check
 
 node ./gh-delta.mjs \
   --repo owner/repo \
@@ -194,6 +205,7 @@ queue if you need at-least-once action delivery.
 
 `gh-delta` is split into pure logic and impure edges:
 
+- `lib/args.mjs`: shared CLI argument helpers for entity selection and outposts.
 - `lib/fingerprint.mjs`: stable fingerprints for PRs and issues.
 - `lib/detect.mjs`: compares snapshots and classifies deltas.
 - `lib/gh.mjs`: calls `gh pr list` and `gh issue list`.
@@ -213,6 +225,19 @@ paginated fetcher for larger repositories.
 
 ```bash
 npm test
+npm run test:coverage
+npm run lint
+npm run format:check
+npm run check
+npm run release:check
 ```
 
-The project intentionally has no runtime dependencies.
+`npm run check` is the normal local gate: ESLint, Prettier check, then the Node
+test suite. `npm run release:check` adds the coverage report and `npm pack
+--dry-run` package-content verification.
+
+The project intentionally has no runtime dependencies. Development tooling is
+limited to ESLint and Prettier.
+
+See [docs/release-checklist.md](docs/release-checklist.md) before publishing a
+new npm release.

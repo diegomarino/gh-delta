@@ -25,7 +25,7 @@ test('readSnapshot throws for corrupt JSON', () => {
 test('writeSnapshotAtomic round-trips and leaves no temp file', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-'));
   const p = join(dir, 'snap.json');
-  const data = { pr: { '42': { state: 'OPEN' } }, issue: {} };
+  const data = { pr: { 42: { state: 'OPEN' } }, issue: {} };
   writeSnapshotAtomic(p, data);
   assert.deepEqual(JSON.parse(readFileSync(p, 'utf8')), data);
   assert.deepEqual(readSnapshot(p), data);
@@ -35,8 +35,12 @@ test('writeSnapshotAtomic uses a unique temporary path per write', () => {
   const calls = [];
   const fs = {
     mkdirSync: () => {},
-    writeFileSync: (path) => { calls.push(['write', path]); },
-    renameSync: (from, to) => { calls.push(['rename', from, to]); },
+    writeFileSync: (path) => {
+      calls.push(['write', path]);
+    },
+    renameSync: (from, to) => {
+      calls.push(['rename', from, to]);
+    },
   };
   writeSnapshotAtomic('/tmp/snap.json', { n: 1 }, { fs, uniqueSuffix: () => 'a' });
   writeSnapshotAtomic('/tmp/snap.json', { n: 2 }, { fs, uniqueSuffix: () => 'b' });
