@@ -1,3 +1,4 @@
+// Shared argument parser tests: both CLIs depend on this contract.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 

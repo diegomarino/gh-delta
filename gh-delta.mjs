@@ -31,6 +31,13 @@ function line(d) {
 }
 
 // deps keeps the CLI testable without shelling out to gh or touching disk.
+/**
+ * Run one detector pass and return a machine-readable result.
+ *
+ * The function performs argument validation, fetches requested GitHub entity
+ * families, compares them with the prior snapshot, and writes the next snapshot
+ * only after a successful fetch and diff. It never exits the process directly.
+ */
 export function run(argv, deps = {}) {
   const {
     fetchPRs = ghPRs,
@@ -96,6 +103,12 @@ export function run(argv, deps = {}) {
   }
 }
 
+/**
+ * Run the detector and optionally deliver one outpost event per delta.
+ *
+ * Outpost validation happens before GitHub fetches. Delivery happens after the
+ * snapshot write and returns warnings instead of changing the detector code.
+ */
 export async function runWithOutpost(argv, deps = {}) {
   const {
     outpostFetch = globalThis.fetch,

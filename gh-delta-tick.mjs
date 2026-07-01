@@ -120,6 +120,13 @@ function formatOutpostWarnings(warnings = []) {
   ].join('\n');
 }
 
+/**
+ * Run one operator-friendly watcher tick.
+ *
+ * The wrapper asks the detector for detailed lines, converts the result into
+ * heartbeat text, and optionally sends outposts. It never creates schedules or
+ * rearms itself.
+ */
 export async function runTick(argv, deps = {}) {
   const {
     detector = (args) => runDetector(args),

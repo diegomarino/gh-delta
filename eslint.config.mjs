@@ -1,3 +1,4 @@
+// Project-wide static analysis policy for Node ESM source and tests.
 import js from '@eslint/js';
 import { defineConfig } from 'eslint/config';
 
