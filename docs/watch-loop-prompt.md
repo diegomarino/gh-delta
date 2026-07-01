@@ -11,10 +11,12 @@ Replace the placeholders before scheduling it.
 Run the GitHub delta detector for `<owner/name>` and act on what it reports.
 
 1. Run exactly this:
-   node ./gh-delta-tick.mjs \
+   node ./gh-delta.mjs \
      --repo <owner/name> \
-     --branch <watch-loop-or-branch-name> \
-     --state-file ./state/<repo-or-loop>.json
+     --monitor-id <stable-monitor-id> \
+     --state-dir ./state \
+     --entities pr,issue \
+     --format text
 
 2. Read its exit code:
    - 0  = baseline seeded or no change. Report the printed heartbeat and STOP
@@ -40,6 +42,12 @@ Run the GitHub delta detector for `<owner/name>` and act on what it reports.
      base.
    - new-comments: read the PR/issue threads; fold in any review comments before
      merging.
+   - unresolved-threads-added: unresolved PR review threads appeared. Read and
+     resolve them before merging.
+   - unresolved-threads-resolved: unresolved PR review threads were resolved.
+     Re-check CI and review state before merging.
+   - review-threads-changed: PR review thread activity changed. Inspect review
+     threads before acting.
    - relabeled: an issue's scope/state changed. Reassess whether or what to
      dispatch.
    - missing: a previously known object disappeared from the fetch. Check
@@ -64,8 +72,8 @@ Rules:
   in anything with merit before merging.
 - If the same delta keeps refiring every tick, stop and report it instead of
   acting on it repeatedly.
-- If the command reports that GitHub returned 500 PRs or issues, narrow the watch
-  scope before continuing.
+- If the command reports that GitHub returned 500 PRs/issues or incomplete
+  paginated review threads, narrow the monitor scope before continuing.
 ```
 
 ## Setup Sequence
@@ -75,9 +83,10 @@ Rules:
    ```bash
    node ./gh-delta.mjs \
      --repo <owner/name> \
-     --branch <watch-loop-or-branch-name> \
-     --detail \
-     --state-file ./state/<repo-or-loop>.json
+     --monitor-id <stable-monitor-id> \
+     --state-dir ./state \
+     --entities pr,issue \
+     --format json
    ```
 
 2. Create the scheduler with the prompt above.

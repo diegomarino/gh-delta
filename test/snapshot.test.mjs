@@ -6,9 +6,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { snapshotPath, readSnapshot, writeSnapshotAtomic } from '../lib/snapshot.mjs';
 
-test('snapshotPath is scoped by repo slug and branch', () => {
-  const p = snapshotPath('owner/repo', 'watch/main', '/tmp/state');
-  assert.equal(p, '/tmp/state/owner-repo-watch-main.json');
+test('snapshotPath is scoped by repo, monitor id, and selected entities', () => {
+  const p = snapshotPath('owner/repo', 'prs/fast', 'pr', '/tmp/state');
+  assert.equal(p, '/tmp/state/owner-repo__prs-fast__pr.json');
+});
+
+test('snapshotPath uses canonical entity order for combined monitors', () => {
+  const p = snapshotPath('owner/repo', 'all', 'issue,pr', '/tmp/state');
+  assert.equal(p, '/tmp/state/owner-repo__all__pr-issue.json');
 });
 
 test('readSnapshot returns null for a missing file', () => {

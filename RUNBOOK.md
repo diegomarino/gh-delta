@@ -1,14 +1,14 @@
 # gh-delta Watch Loop Runbook
 
 `gh-delta` is only the detector. It compares GitHub state with a local snapshot,
-prints a JSON report, and exits with a machine-readable code. The caller owns the
-clock.
+prints JSON or operator text, and exits with a machine-readable code. The caller
+owns the clock.
 
 The safest default is a cron-native loop:
 
 1. Seed the baseline once.
 2. Create a recurring scheduler outside the tick.
-3. Each scheduled fire runs a self-contained prompt.
+3. Each scheduled fire runs one self-contained `gh-delta` command.
 4. The tick never rearms itself.
 
 This avoids double-scheduling and avoids assuming a runtime-specific wake-up API
@@ -18,20 +18,21 @@ such as `ScheduleWakeup`.
 
 - Node.js 18 or newer.
 - GitHub CLI (`gh`) installed and authenticated.
-- A writable path for the snapshot state file.
+- A writable path or directory for snapshot state.
 - A scheduler: cron, launchd, systemd, GitHub Actions, Claude Code `/loop`,
   Claude Code `CronCreate`, Codex automation, or another equivalent clock owner.
 
-## Seed the Baseline
+## Seed The Baseline
 
 Run the detector once before creating the recurring job:
 
 ```bash
 node ./gh-delta.mjs \
   --repo <owner/name> \
-  --branch <watch-loop-or-branch-name> \
-  --detail \
-  --state-file ./state/<repo-or-loop>.json
+  --monitor-id <stable-monitor-id> \
+  --state-dir ./state \
+  --entities pr,issue \
+  --format json
 ```
 
 The first successful run should return a report with `"baseline": true` and exit
@@ -56,7 +57,7 @@ tick exit code.
 Use this order inside each tick:
 
 1. Do not create or modify the schedule from inside the tick.
-2. Run `gh-delta-tick`.
+2. Run `gh-delta --format text`.
 3. Branch on its exit code.
 4. Act on each listed delta when exit code is `10`.
 5. Stop this tick.
@@ -64,29 +65,33 @@ Use this order inside each tick:
 Tick command:
 
 ```bash
-node ./gh-delta-tick.mjs \
+node ./gh-delta.mjs \
   --repo <owner/name> \
-  --branch <watch-loop-or-branch-name> \
-  --state-file ./state/<repo-or-loop>.json
+  --monitor-id <stable-monitor-id> \
+  --state-dir ./state \
+  --entities pr,issue \
+  --format text
 ```
 
 Optional outpost command:
 
 ```bash
-node ./gh-delta-tick.mjs \
+node ./gh-delta.mjs \
   --repo <owner/name> \
-  --branch <watch-loop-or-branch-name> \
-  --state-file ./state/<repo-or-loop>.json \
+  --monitor-id <stable-monitor-id> \
+  --state-dir ./state \
+  --entities pr,issue \
+  --format text \
   --outpost-url https://example.com/gh-delta
 ```
 
 Exit codes:
 
-- `0`: baseline established or no change since the last check. Report the printed
-  heartbeat and stop.
+- `0`: baseline established or no change since the last check. Report the
+  printed heartbeat and stop.
 - `10`: deltas found. Read the printed delta list, act on each delta, and stop.
-- `1`: argument, `gh`, network, or parse error. The snapshot was not updated. Log
-  the error and stop; the next scheduled fire retries.
+- `1`: argument, `gh`, network, or parse error. The snapshot was not updated.
+  Log the error and stop; the next scheduled fire retries.
 
 Heartbeat format:
 
@@ -94,15 +99,14 @@ Heartbeat format:
 <timestamp> | <N> delta(s)
 ```
 
-Use `gh-delta.mjs` directly only when you need the raw JSON report for another
-program.
+Use `--format json` when another program needs the raw structured report.
 
 ## Outpost Mode
 
 `--outpost-url` must be an `http:` or `https:` URL. Invalid configuration exits
 `1` before GitHub is fetched.
 
-When the detector exits `10`, the tick sends one JSON `POST` per delta with
+When the detector exits `10`, `gh-delta` sends one JSON `POST` per delta with
 `Content-Type: application/json`. It does not POST on exit `0` or `1`. POST
 failure, timeout, DNS failure, `4xx`, or `5xx` prints an `outpost warning` but
 does not change the detector result.
@@ -113,9 +117,9 @@ Payloads use schema v1:
 {
   "type": "gh-delta.delta",
   "schemaVersion": 1,
-  "eventId": "gh-delta.delta.v1:owner/repo:watch:issue:17:relabeled:2026-07-01T12:00:00.000Z",
+  "eventId": "gh-delta.delta.v1:owner/repo:prs-5m:issue:17:relabeled:2026-07-01T12:00:00.000Z",
   "repo": "owner/repo",
-  "branch": "watch",
+  "monitorId": "prs-5m",
   "detectedAt": "2026-07-01T12:00:00.000Z",
   "entity": "issue",
   "number": 17,
@@ -140,11 +144,11 @@ headers or tokens must not be printed in logs.
 
 ## Scheduler Choices
 
-### Plain Cron or Equivalent
+### Plain Cron Or Equivalent
 
 Use cron, launchd, systemd timers, or GitHub Actions when the watcher should be
-owned by infrastructure outside the agent session. The scheduler invokes the tick
-prompt or wrapper at a fixed cadence.
+owned by infrastructure outside the agent session. The scheduler invokes the
+tick prompt or wrapper at a fixed cadence.
 
 ### Claude Code Session Scheduling
 
@@ -159,9 +163,10 @@ session-scoped tasks expire after seven days.
 
 `ScheduleWakeup` is not a general-purpose scheduler. It is tied to dynamic
 `/loop` self-pacing, and Claude Code's subagent documentation explicitly lists it
-among the tools that are not available to subagents. If a watcher tick is running
-inside a subagent, assume it cannot self-rearm with `ScheduleWakeup`; create the
-session cron from the main conversation or use `/loop` before delegating work.
+among the tools that are not available to subagents. If a watcher tick is
+running inside a subagent, assume it cannot self-rearm with `ScheduleWakeup`;
+create the session cron from the main conversation or use `/loop` before
+delegating work.
 
 ### Claude Code Cloud Routines
 
@@ -183,18 +188,21 @@ developer polling loops or webhook-driven automation.
 
 ## Delta Classes
 
-| class               | typical orchestrator action                                                     |
-| ------------------- | ------------------------------------------------------------------------------- |
-| `new` (PR)          | a worker opened a PR; read it and queue review                                  |
-| `ci-changed`        | CI green: consider merge path; CI red: nudge worker with the failure            |
-| `review-changed`    | approved: merge candidate; changes requested: relay to worker                   |
-| `became-mergeable`  | conflicts resolved; merge candidate                                             |
-| `merged` / `closed` | slice done; advance build order or sync spawn base                              |
-| `new-comments`      | read PR threads; fold review comments before merge                              |
-| `relabeled`         | scope or state change on an issue; reassess dispatch                            |
-| `missing`           | previous object disappeared from fetch; check pagination, permissions, or scope |
-| `still-missing`     | object remains absent; unresolved operational issue, not a fresh delta          |
-| `updated`           | catch-all (`updatedAt` or head-only); inspect GitHub before dismissing          |
+| class                         | typical orchestrator action                                                     |
+| ----------------------------- | ------------------------------------------------------------------------------- |
+| `new` (PR)                    | a worker opened a PR; read it and queue review                                  |
+| `ci-changed`                  | CI green: consider merge path; CI red: nudge worker with the failure            |
+| `review-changed`              | approved: merge candidate; changes requested: relay to worker                   |
+| `became-mergeable`            | conflicts resolved; merge candidate                                             |
+| `merged` / `closed`           | slice done; advance build order or sync spawn base                              |
+| `new-comments`                | read PR threads; fold review comments before merge                              |
+| `unresolved-threads-added`    | unresolved review threads appeared; resolve before merge                        |
+| `unresolved-threads-resolved` | review threads resolved; re-check CI and review state                           |
+| `review-threads-changed`      | review thread activity changed; inspect before acting                           |
+| `relabeled`                   | scope or state change on an issue; reassess dispatch                            |
+| `missing`                     | previous object disappeared from fetch; check pagination, permissions, or scope |
+| `still-missing`               | object remains absent; unresolved operational issue, not a fresh delta          |
+| `updated`                     | catch-all (`updatedAt` or head-only); inspect GitHub before dismissing          |
 
 ## Operating Rules
 
@@ -207,10 +215,11 @@ developer polling loops or webhook-driven automation.
 - Do not call `ScheduleWakeup` from a subagent-owned tick; Claude Code does not
   expose it to subagents.
 - Do not create another cron from inside a cron-owned tick.
-- Do not run overlapping ticks against the same state file. If your scheduler can
-  overlap jobs, add external locking or increase the interval.
-- If the command reports that GitHub returned 500 PRs or issues, narrow the watch
-  scope before continuing. The tool fails closed rather than silently truncating.
+- Do not run overlapping ticks against the same state file. If your scheduler
+  can overlap jobs, add external locking or increase the interval.
+- If the command reports that GitHub returned 500 PRs/issues or incomplete
+  paginated review threads, narrow the monitor scope before continuing. The tool
+  fails closed rather than silently truncating.
 - Do not merge a PR blind on green CI alone. Read review comments first.
 - If the same delta refires every tick, stop and investigate instead of acting
   repeatedly.

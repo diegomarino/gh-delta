@@ -25,18 +25,32 @@ test('parseEntitySelection accepts pr, issue, or both and rejects empty selectio
   assert.deepEqual(parseEntitySelection('pr,issue'), {
     wantsPr: true,
     wantsIssue: true,
+    selected: ['pr', 'issue'],
+    key: 'pr-issue',
     invalid: [],
     ok: true,
   });
   assert.deepEqual(parseEntitySelection('issue'), {
     wantsPr: false,
     wantsIssue: true,
+    selected: ['issue'],
+    key: 'issue',
+    invalid: [],
+    ok: true,
+  });
+  assert.deepEqual(parseEntitySelection('issue,pr'), {
+    wantsPr: true,
+    wantsIssue: true,
+    selected: ['pr', 'issue'],
+    key: 'pr-issue',
     invalid: [],
     ok: true,
   });
   assert.deepEqual(parseEntitySelection(''), {
     wantsPr: false,
     wantsIssue: false,
+    selected: [],
+    key: '',
     invalid: [],
     ok: false,
   });

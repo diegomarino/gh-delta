@@ -11,8 +11,7 @@ npm ci --cache .npm-cache
 npm run release:check
 node ./gh-delta.mjs --help
 node ./gh-delta.mjs --help-json
-node ./gh-delta-tick.mjs --help
-node ./gh-delta-tick.mjs --help-json
+node ./gh-delta.mjs --version
 ```
 
 Expected:
@@ -22,7 +21,7 @@ Expected:
 - all Node tests pass;
 - the coverage report completes;
 - `npm pack --dry-run` lists only expected public package files;
-- both CLIs print human help and JSON help, then exit `0`.
+- the CLI prints human help, JSON help, and version output, then exits `0`.
 
 ## Publish Safety
 
@@ -54,7 +53,6 @@ Before the first public publish:
 The package should contain:
 
 - `gh-delta.mjs`;
-- `gh-delta-tick.mjs`;
 - `lib/*.mjs`;
 - `docs/*.md`;
 - `README.md`;
@@ -65,6 +63,7 @@ The package should contain:
 
 It should not contain:
 
+- `gh-delta-tick.mjs`;
 - `test/`;
 - `.github/`;
 - `node_modules/`;

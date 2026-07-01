@@ -1,7 +1,10 @@
 // CLI contract tests: exit codes, snapshot safety, and user-facing detail output.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { run } from '../gh-delta.mjs';
+import { readFileSync } from 'node:fs';
+import { run, runCommand } from '../gh-delta.mjs';
+
+const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 const basePr = {
   number: 42,
@@ -20,12 +23,18 @@ const basePr = {
 function deps(prSeq, { existing = null } = {}) {
   let writes = 0;
   let stored = existing;
+  let readPath;
+  let writePath;
   return {
     fetchPRs: () => prSeq.shift(),
     fetchIssues: () => [],
-    readSnapshot: () => stored,
-    writeSnapshotAtomic: (_p, d) => {
+    readSnapshot: (p) => {
+      readPath = p;
+      return stored;
+    },
+    writeSnapshotAtomic: (p, d) => {
       writes++;
+      writePath = p;
       stored = d;
     },
     now: () => '2026-07-01T12:00:00Z',
@@ -35,18 +44,37 @@ function deps(prSeq, { existing = null } = {}) {
     get stored() {
       return stored;
     },
+    get readPath() {
+      return readPath;
+    },
+    get writePath() {
+      return writePath;
+    },
   };
 }
 
 test('first run returns code 0 (baseline) and writes the snapshot', () => {
   const d = deps([[basePr]]);
   const { code, report } = run(
-    ['--repo', 'o/r', '--branch', 'main', '--state-file', '/tmp/x.json'],
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'],
     d,
   );
   assert.equal(code, 0);
   assert.equal(report.baseline, true);
+  assert.equal(report.monitorId, 'main');
+  assert.deepEqual(report.entities, ['pr', 'issue']);
   assert.equal(d.writes, 1);
+});
+
+test('--state-dir derives a monitor-scoped snapshot path', () => {
+  const d = deps([[basePr]]);
+  const { code } = run(
+    ['--repo', 'o/r', '--monitor-id', 'prs-fast', '--state-dir', '/tmp/state', '--entities', 'pr'],
+    d,
+  );
+  assert.equal(code, 0);
+  assert.equal(d.readPath, '/tmp/state/o-r__prs-fast__pr.json');
+  assert.equal(d.writePath, '/tmp/state/o-r__prs-fast__pr.json');
 });
 
 test('a delta returns code 10 and rewrites the snapshot', () => {
@@ -70,7 +98,7 @@ test('a delta returns code 10 and rewrites the snapshot', () => {
     },
   });
   const { code, report } = run(
-    ['--repo', 'o/r', '--branch', 'main', '--state-file', '/tmp/x.json'],
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'],
     d,
   );
   assert.equal(code, 10);
@@ -80,7 +108,7 @@ test('a delta returns code 10 and rewrites the snapshot', () => {
 test('no change returns code 0 and still refreshes snapshot', () => {
   const seed = { pr: {}, issue: {} };
   const d = deps([[]], { existing: seed });
-  const { code } = run(['--repo', 'o/r', '--branch', 'main', '--state-file', '/tmp/x.json'], d);
+  const { code } = run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
   assert.equal(code, 0);
 });
 
@@ -96,7 +124,7 @@ test('a gh failure returns code 1 and does NOT write the snapshot', () => {
     },
     now: () => '2026-07-01T12:00:00Z',
   };
-  const { code } = run(['--repo', 'o/r', '--branch', 'main', '--state-file', '/tmp/x.json'], d);
+  const { code } = run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
   assert.equal(code, 1);
 });
 
@@ -120,7 +148,7 @@ test('--detail attaches a human line to each delta', () => {
     },
   });
   const { report } = run(
-    ['--repo', 'o/r', '--branch', 'main', '--state-file', '/tmp/x.json', '--detail'],
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--detail'],
     d,
   );
   assert.ok(report.deltas[0].line.includes('#42'));
@@ -160,10 +188,30 @@ test('--help-json returns machine-readable help without fetching GitHub', () => 
   assert.equal(help.helpSchemaVersion, 1);
   assert.equal(help.command, 'gh-delta');
   assert.match(help.usage, /^gh-delta --repo/);
+  assert.ok(help.options.some((option) => option.name === '--monitor-id'));
+  assert.ok(help.options.some((option) => option.name === '--state-dir'));
+  assert.ok(help.options.some((option) => option.name === '--format'));
   assert.ok(help.options.some((option) => option.name === '--help-json'));
+  assert.ok(help.options.some((option) => option.name === '--version'));
+  assert.equal(help.version, packageJson.version);
   assert.equal(help.options.find((option) => option.name === '--repo')?.required, true);
   assert.match(help.exitCodes.find((entry) => entry.code === 10)?.meaning ?? '', /Deltas found/);
-  assert.equal(help.output.format, 'json');
+  assert.deepEqual(help.output.formats, ['json', 'text']);
+});
+
+test('--version returns package version without fetching GitHub', () => {
+  const d = {
+    fetchPRs: () => {
+      throw new Error('should not fetch');
+    },
+    fetchIssues: () => {
+      throw new Error('should not fetch');
+    },
+    now: () => '2026-07-01T12:00:00Z',
+  };
+  const { code, report } = run(['--version'], d);
+  assert.equal(code, 0);
+  assert.equal(report, `gh-delta ${packageJson.version}\n`);
 });
 
 test('missing --repo returns code 1 before fetching', () => {
@@ -181,7 +229,7 @@ test('missing --repo returns code 1 before fetching', () => {
   assert.match(report.error, /--repo/);
 });
 
-test('missing --state-file returns code 1 before fetching', () => {
+test('missing --monitor-id returns code 1 before fetching', () => {
   const d = {
     fetchPRs: () => {
       throw new Error('should not fetch');
@@ -191,9 +239,42 @@ test('missing --state-file returns code 1 before fetching', () => {
     },
     now: () => '2026-07-01T12:00:00Z',
   };
-  const { code, report } = run(['--repo', 'o/r'], d);
+  const { code, report } = run(['--repo', 'o/r', '--state-file', '/tmp/x.json'], d);
   assert.equal(code, 1);
-  assert.match(report.error, /--state-file/);
+  assert.match(report.error, /--monitor-id/);
+});
+
+test('missing state path returns code 1 before fetching', () => {
+  const d = {
+    fetchPRs: () => {
+      throw new Error('should not fetch');
+    },
+    fetchIssues: () => {
+      throw new Error('should not fetch');
+    },
+    now: () => '2026-07-01T12:00:00Z',
+  };
+  const { code, report } = run(['--repo', 'o/r', '--monitor-id', 'main'], d);
+  assert.equal(code, 1);
+  assert.match(report.error, /--state-file.*--state-dir/);
+});
+
+test('--state-file and --state-dir are mutually exclusive', () => {
+  const d = {
+    fetchPRs: () => {
+      throw new Error('should not fetch');
+    },
+    fetchIssues: () => {
+      throw new Error('should not fetch');
+    },
+    now: () => '2026-07-01T12:00:00Z',
+  };
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--state-dir', '/tmp'],
+    d,
+  );
+  assert.equal(code, 1);
+  assert.match(report.error, /mutually exclusive/);
 });
 
 test('invalid --entities returns code 1 before fetching', () => {
@@ -207,7 +288,16 @@ test('invalid --entities returns code 1 before fetching', () => {
     now: () => '2026-07-01T12:00:00Z',
   };
   const { code, report } = run(
-    ['--repo', 'o/r', '--state-file', '/tmp/x.json', '--entities', 'release'],
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/x.json',
+      '--entities',
+      'release',
+    ],
     d,
   );
   assert.equal(code, 1);
@@ -215,15 +305,18 @@ test('invalid --entities returns code 1 before fetching', () => {
 });
 
 test('unknown arguments return structured code 1 error', () => {
-  const { code, report } = run(['--repo', 'o/r', '--state-file', '/tmp/x.json', '--bogus'], {
-    fetchPRs: () => {
-      throw new Error('should not fetch');
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--bogus'],
+    {
+      fetchPRs: () => {
+        throw new Error('should not fetch');
+      },
+      fetchIssues: () => {
+        throw new Error('should not fetch');
+      },
+      now: () => '2026-07-01T12:00:00Z',
     },
-    fetchIssues: () => {
-      throw new Error('should not fetch');
-    },
-    now: () => '2026-07-01T12:00:00Z',
-  });
+  );
   assert.equal(code, 1);
   assert.match(report.error, /Unknown option|--bogus/);
 });
@@ -247,7 +340,7 @@ test('--entities pr preserves existing issue snapshot entries', () => {
   };
   const d = deps([[basePr]], { existing });
   const { code } = run(
-    ['--repo', 'o/r', '--branch', 'main', '--state-file', '/tmp/x.json', '--entities', 'pr'],
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--entities', 'pr'],
     d,
   );
   assert.equal(code, 0);
@@ -256,25 +349,27 @@ test('--entities pr preserves existing issue snapshot entries', () => {
 
 test('corrupt snapshot read failure returns code 1 and does NOT write', () => {
   let writes = 0;
-  const { code, report } = run(['--repo', 'o/r', '--state-file', '/tmp/x.json'], {
-    fetchPRs: () => [basePr],
-    fetchIssues: () => [],
-    readSnapshot: () => {
-      throw new Error('invalid snapshot JSON at /tmp/x.json');
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'],
+    {
+      fetchPRs: () => [basePr],
+      fetchIssues: () => [],
+      readSnapshot: () => {
+        throw new Error('invalid snapshot JSON at /tmp/x.json');
+      },
+      writeSnapshotAtomic: () => {
+        writes++;
+      },
+      now: () => '2026-07-01T12:00:00Z',
     },
-    writeSnapshotAtomic: () => {
-      writes++;
-    },
-    now: () => '2026-07-01T12:00:00Z',
-  });
+  );
   assert.equal(code, 1);
   assert.equal(writes, 0);
   assert.match(report.error, /invalid snapshot JSON/);
 });
 
-test('gh-delta --outpost-url sends code 10 deltas after the snapshot write', async () => {
+test('gh-delta sends outpost payloads with monitor id after the snapshot write', async () => {
   const { runWithOutpost } = await import('../gh-delta.mjs');
-  assert.equal(typeof runWithOutpost, 'function');
   const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: {
       pr: {
@@ -304,7 +399,7 @@ test('gh-delta --outpost-url sends code 10 deltas after the snapshot write', asy
     [
       '--repo',
       'o/r',
-      '--branch',
+      '--monitor-id',
       'main',
       '--state-file',
       '/tmp/x.json',
@@ -319,18 +414,75 @@ test('gh-delta --outpost-url sends code 10 deltas after the snapshot write', asy
   assert.equal(posts.length, 1);
   assert.equal(posts[0].url, 'https://example.com/gh-delta');
   assert.equal(posts[0].body.type, 'gh-delta.delta');
+  assert.equal(posts[0].body.monitorId, 'main');
+  assert.equal(posts[0].body.branch, undefined);
   assert.equal(
     posts[0].body.eventId,
     'gh-delta.delta.v1:o/r:main:pr:42:merged:2026-07-01T12:00:00Z',
   );
 });
 
+test('--format text prints operator output from the main gh-delta binary', async () => {
+  const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
+    existing: {
+      pr: {
+        42: {
+          state: 'OPEN',
+          updatedAt: '2026-07-01T10:00:00Z',
+          isDraft: false,
+          ci: 'da39a3ee5e6b',
+          review: 'REVIEW_REQUIRED',
+          reviews: 'da39a3ee5e6b',
+          mergeable: 'UNKNOWN',
+          comments: 0,
+          commentsOverflow: false,
+          head: 'sha1',
+        },
+      },
+      issue: {},
+    },
+  });
+
+  const { code, output } = await runCommand(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--format', 'text'],
+    d,
+  );
+
+  assert.equal(code, 10);
+  assert.match(output, /2026-07-01T12:00:00Z \| 1 delta\(s\)/);
+  assert.match(output, /PR #42 "add widget": merged/);
+  assert.match(output, /suggested action: item completed or closed/);
+  assert.doesNotMatch(output, /"deltas"/);
+});
+
+test('--format json prints the detector report JSON from the main gh-delta binary', async () => {
+  const d = deps([[basePr]]);
+
+  const { code, output } = await runCommand(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--format', 'json'],
+    d,
+  );
+
+  assert.equal(code, 0);
+  const report = JSON.parse(output);
+  assert.equal(report.monitorId, 'main');
+  assert.equal(report.baseline, true);
+});
+
 test('gh-delta rejects invalid --outpost-url before fetching GitHub', async () => {
   const { runWithOutpost } = await import('../gh-delta.mjs');
-  assert.equal(typeof runWithOutpost, 'function');
   let fetches = 0;
   const { code, report } = await runWithOutpost(
-    ['--repo', 'o/r', '--state-file', '/tmp/x.json', '--outpost-url', 'file:///tmp/outpost.json'],
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/x.json',
+      '--outpost-url',
+      'file:///tmp/outpost.json',
+    ],
     {
       fetchPRs: () => {
         fetches++;

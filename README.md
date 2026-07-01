@@ -1,14 +1,15 @@
 # gh-delta
 
 `gh-delta` is a small deterministic GitHub watcher for agent or automation loops.
-It compares the current GitHub issue and pull request state with a local snapshot,
-prints a JSON report, and exits with a code that tells the caller whether anything
-changed.
+It runs one detection pass, compares current GitHub issue and pull request state
+with a local snapshot, prints JSON or operator text, and exits with a
+machine-readable code. Scheduling belongs to cron, an automation system, or the
+caller.
 
 The tool does not decide what to do. It only detects changes such as new PRs,
-merged PRs, CI status changes, review decision changes, new comments, relabeling,
-missing objects, and catch-all updates. Your orchestrator, script, or agent owns
-the action.
+merged PRs, CI status changes, review decision changes, unresolved review
+threads, new comments, relabeling, missing objects, and catch-all updates. Your
+orchestrator, script, or agent owns the action.
 
 ## Requirements
 
@@ -24,7 +25,7 @@ Install from npm once published:
 npm install --global gh-delta
 gh-delta --help
 gh-delta --help-json
-gh-delta-tick --help
+gh-delta --version
 ```
 
 Or run from a source checkout:
@@ -37,78 +38,103 @@ npm run check
 
 node ./gh-delta.mjs \
   --repo owner/repo \
-  --branch watch \
-  --detail \
-  --state-file ./state/owner-repo-watch.json
+  --monitor-id prs \
+  --state-dir ./state \
+  --entities pr \
+  --format json
 ```
 
-The first successful run establishes the baseline and exits `0`. Later runs compare
-against that baseline.
+The first successful run establishes the baseline and exits `0`. Later runs
+compare against that baseline.
 
-For scheduled watcher ticks, prefer the operator-friendly wrapper:
+For scheduled watcher ticks, use text output:
 
 ```bash
-node ./gh-delta-tick.mjs \
+node ./gh-delta.mjs \
   --repo owner/repo \
-  --branch watch \
-  --state-file ./state/owner-repo-watch.json
+  --monitor-id prs-5m \
+  --state-dir ./state \
+  --entities pr \
+  --format text
 ```
 
 To notify an external endpoint when deltas appear, add an HTTP(S) outpost:
 
 ```bash
-node ./gh-delta-tick.mjs \
+node ./gh-delta.mjs \
   --repo owner/repo \
-  --branch watch \
-  --state-file ./state/owner-repo-watch.json \
+  --monitor-id prs-5m \
+  --state-dir ./state \
+  --entities pr \
+  --format text \
   --outpost-url https://example.com/gh-delta
 ```
 
 ## CLI
 
 ```bash
-gh-delta --repo <owner/name> --state-file <path> [--branch <name>] [--entities pr,issue] [--detail] [--outpost-url <url>]
-gh-delta-tick --repo <owner/name> --state-file <path> [--branch <name>] [--entities pr,issue] [--outpost-url <url>]
+gh-delta --repo <owner/name> --monitor-id <id> (--state-dir <dir> | --state-file <path>) [--entities pr,issue] [--format json|text] [--detail] [--outpost-url <url>]
 ```
 
 Options:
 
 - `--repo`: repository in `owner/name` form. Required.
-- `--state-file`: local snapshot JSON path. Required.
-- `--branch`: branch, worktree, or watch-loop name to include in reports.
+- `--monitor-id`: stable monitor identity used in reports, event IDs, and
+  derived snapshot paths. Required.
+- `--state-dir`: directory for a derived snapshot path scoped by repo, monitor
+  id, and selected entities. Mutually exclusive with `--state-file`.
+- `--state-file`: explicit snapshot JSON path. Mutually exclusive with
+  `--state-dir`.
 - `--entities`: `pr`, `issue`, or `pr,issue`. Defaults to `pr,issue`. When a
   partial entity set is used, the unrequested side of the snapshot is preserved.
-- `--detail`: add a human-readable `line` field to each delta.
+- `--format`: `json` or `text`. Defaults to `json`.
+- `--detail`: add a human-readable `line` field to each delta in JSON output.
+  Text output adds detail automatically.
 - `--outpost-url`: HTTP(S) endpoint that receives one JSON `POST` per delta when
   the detector exits `10`.
 - `--help`: print usage.
 - `--help-json`: print versioned, machine-readable help for LLMs, agents, and
   other tooling. The top-level `helpSchemaVersion` field starts at `1`.
+- `--version`: print the package version from `package.json`.
 
-`gh-delta` prints the structured JSON detector report. `gh-delta-tick` runs the
-same detector once, then prints a heartbeat and suggested next actions for an
-agent or operator. Neither command creates schedules, timers, automations, or
-wake-ups.
-
-Both commands keep human help and JSON help in sync:
-
-```bash
-gh-delta --help-json
-gh-delta-tick --help-json
-```
+`gh-delta` never creates schedules, timers, automations, or wake-ups.
 
 Exit codes:
 
 - `0`: baseline established or no deltas.
 - `10`: deltas found.
-- `1`: argument, GitHub CLI, network, or parse error. On errors, the snapshot is not
-  updated.
+- `1`: argument, GitHub CLI, network, or parse error. On errors, the snapshot is
+  not updated.
+
+## Snapshot Identity
+
+With `--state-dir`, the snapshot path is derived from:
+
+```text
+repo + monitor-id + entities
+```
+
+Example:
+
+```bash
+gh-delta --repo org/app --monitor-id prs-5m --state-dir ./state --entities pr
+```
+
+uses:
+
+```text
+./state/org-app__prs-5m__pr.json
+```
+
+Use different `--monitor-id` values for monitors that should keep independent
+state. Reusing the same monitor id and entity set points multiple invocations at
+the same snapshot.
 
 ## Outpost Delivery
 
 `--outpost-url` is optional. Without it, behavior is unchanged. With it,
-`gh-delta` and `gh-delta-tick` validate the URL before fetching GitHub state, then
-send one HTTP `POST` per delta only when the detector exits `10`.
+`gh-delta` validates the URL before fetching GitHub state, then sends one HTTP
+`POST` per delta only when the detector exits `10`.
 
 Outpost delivery is fire-and-forget and at-most-once:
 
@@ -116,7 +142,7 @@ Outpost delivery is fire-and-forget and at-most-once:
 - no batching;
 - no outbox, JSONL queue, SQLite store, or acknowledgement layer;
 - outpost failure, timeout, DNS failure, `4xx`, or `5xx` does not change the
-  detector or tick exit code;
+  detector exit code;
 - the snapshot has already advanced before outpost delivery is attempted.
 
 The external endpoint is responsible for filtering events, deduplicating by
@@ -129,9 +155,9 @@ Payload schema v1:
 {
   "type": "gh-delta.delta",
   "schemaVersion": 1,
-  "eventId": "gh-delta.delta.v1:owner/repo:watch:issue:17:relabeled:2026-07-01T12:00:00.000Z",
+  "eventId": "gh-delta.delta.v1:owner/repo:prs-5m:issue:17:relabeled:2026-07-01T12:00:00.000Z",
   "repo": "owner/repo",
-  "branch": "watch",
+  "monitorId": "prs-5m",
   "detectedAt": "2026-07-01T12:00:00.000Z",
   "entity": "issue",
   "number": 17,
@@ -150,9 +176,9 @@ Payload schema v1:
 }
 ```
 
-`eventId` is deterministic for a given repo, branch, entity, number, class list,
-and detector timestamp. PR payloads currently use an empty `labels` array because
-the PR fetch does not collect labels.
+`eventId` is deterministic for a given repo, monitor id, entity, number, class
+list, and detector timestamp. PR payloads currently use an empty `labels` array
+because the PR fetch does not collect labels.
 
 ## Report Shape
 
@@ -160,7 +186,8 @@ the PR fetch does not collect labels.
 {
   "baseline": false,
   "repo": "owner/repo",
-  "branch": "watch",
+  "monitorId": "prs-5m",
+  "entities": ["pr"],
   "at": "2026-07-01T12:00:00.000Z",
   "deltas": [
     {
@@ -188,6 +215,10 @@ the PR fetch does not collect labels.
 - `review-changed`: review decision or latest review states changed.
 - `became-mergeable`: PR moved from conflicting to mergeable.
 - `new-comments`: comment count increased.
+- `unresolved-threads-added`: unresolved PR review thread count increased.
+- `unresolved-threads-resolved`: unresolved PR review thread count decreased.
+- `review-threads-changed`: PR review thread total changed while unresolved
+  count stayed stable.
 - `relabeled`: issue labels changed.
 - `missing`: an object from the previous snapshot disappeared from a fetched
   collection. Check pagination, permissions, or scope before trusting the tick.
@@ -198,18 +229,17 @@ the PR fetch does not collect labels.
 
 ## Watch Loop Use
 
-See [RUNBOOK.md](RUNBOOK.md) for timer-driven loop patterns. `gh-delta` does not
-schedule itself. The recommended setup is cron-native: seed the baseline once,
-then create a recurring scheduler whose prompt runs one detector tick and stops.
-Do not call `ScheduleWakeup` or create another cron from inside a cron-owned
-tick.
+See [RUNBOOK.md](RUNBOOK.md) for timer-driven loop patterns. The recommended
+setup is cron-native: seed the baseline once, then create a recurring scheduler
+whose prompt runs one detector pass with `--format text` and stops. Do not call
+`ScheduleWakeup` or create another cron from inside a cron-owned tick.
 
 See [docs/watch-loop-prompt.md](docs/watch-loop-prompt.md) for a prompt template
 for cron-owned watcher ticks.
 
-Delivery note: successful detections advance the snapshot before any agent action
-or outpost finishes. Keep scheduler logs for tick output, or add an external
-queue if you need at-least-once action delivery.
+Delivery note: successful detections advance the snapshot before any agent
+action or outpost finishes. Keep scheduler logs for text output, or add an
+external queue if you need at-least-once action delivery.
 
 ## Design Notes
 
@@ -218,20 +248,27 @@ queue if you need at-least-once action delivery.
 - `lib/args.mjs`: shared CLI argument helpers for entity selection and outposts.
 - `lib/fingerprint.mjs`: stable fingerprints for PRs and issues.
 - `lib/detect.mjs`: compares snapshots and classifies deltas.
-- `lib/gh.mjs`: calls `gh pr list` and `gh issue list`.
+- `lib/gh.mjs`: calls `gh pr list`, `gh issue list`, and `gh api graphql` for
+  PR review thread counts.
 - `lib/snapshot.mjs`: reads and atomically writes snapshot files.
-- `lib/outpost.mjs`: validates outpost URLs, builds schema v1 payloads, and sends
-  short-timeout HTTP POSTs.
+- `lib/outpost.mjs`: validates outpost URLs, builds schema v1 payloads, and
+  sends short-timeout HTTP POSTs.
+- `lib/text-output.mjs`: formats operator text and outpost warnings.
+- `lib/version.mjs`: reads package metadata for `--version` and help JSON.
 - `lib/help.mjs`: shared human and machine-readable CLI help metadata.
 - `lib/entrypoint.mjs`: symlink-safe bin entrypoint detection for npm/npx.
-- `gh-delta.mjs`: CLI wiring and exit codes.
-- `gh-delta-tick.mjs`: one-tick wrapper with heartbeat text and suggested actions.
+- `gh-delta.mjs`: CLI wiring, output formats, outposts, and exit codes.
 
 More detail is in [docs/architecture.md](docs/architecture.md).
 
 Current v0.1 scope: the GitHub CLI fetch fails closed if either PR or issue
-results hit the hard `500` item limit. Use a narrower watch scope or wait for a
-paginated fetcher for larger repositories.
+results hit the hard `500` item limit, or if an open PR has more than 100 review
+threads and nested review-thread pagination would be required. Use a narrower
+monitor scope or wait for a broader paginated fetcher for larger repositories.
+
+Research for future entity types and selectors lives under
+[docs/entities-research](docs/entities-research/README.md). Those notes are not
+public CLI contract.
 
 ## Development
 

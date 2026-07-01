@@ -10,9 +10,6 @@
     ".": {
       "import": "./gh-delta.mjs"
     },
-    "./tick": {
-      "import": "./gh-delta-tick.mjs"
-    },
     "./detect": {
       "import": "./lib/detect.mjs"
     },
@@ -28,11 +25,13 @@
     "./args": {
       "import": "./lib/args.mjs"
     },
+    "./version": {
+      "import": "./lib/version.mjs"
+    },
     "./package.json": "./package.json"
   },
   "bin": {
-    "gh-delta": "./gh-delta.mjs",
-    "gh-delta-tick": "./gh-delta-tick.mjs"
+    "gh-delta": "./gh-delta.mjs"
   },
   "repository": {
     "type": "git",
@@ -44,7 +43,6 @@
   "homepage": "https://github.com/diegomarino/gh-delta#readme",
   "files": [
     "gh-delta.mjs",
-    "gh-delta-tick.mjs",
     "lib",
     "docs",
     "README.md",

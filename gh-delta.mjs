@@ -4,14 +4,37 @@
 import { parseArgs } from 'node:util';
 import { fetchPRs as ghPRs, fetchIssues as ghIssues } from './lib/gh.mjs';
 import { detectDeltas } from './lib/detect.mjs';
-import { readSnapshot as fsRead, writeSnapshotAtomic as fsWrite } from './lib/snapshot.mjs';
+import {
+  readSnapshot as fsRead,
+  snapshotPath,
+  writeSnapshotAtomic as fsWrite,
+} from './lib/snapshot.mjs';
 import { sendOutposts, validateOutpostUrl } from './lib/outpost.mjs';
 import { parseEntitySelection, parseOutpostArgs } from './lib/args.mjs';
 import { isDirectEntrypoint } from './lib/entrypoint.mjs';
 import { renderHelpJson, renderHelpText } from './lib/help.mjs';
+import { formatOutpostWarnings, formatTextOutput } from './lib/text-output.mjs';
+import { renderVersionText } from './lib/version.mjs';
 
 function line(d) {
   return `${d.entity.toUpperCase()} #${d.number} "${d.title}": ${d.classes.join(', ')}`;
+}
+
+function hasFlag(argv, flag) {
+  return argv.includes(flag);
+}
+
+function outputFormat(argv) {
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--format') return argv[i + 1] ?? 'json';
+    if (arg.startsWith('--format=')) return arg.slice('--format='.length);
+  }
+  return 'json';
+}
+
+function argsForOutputFormat(argv) {
+  return outputFormat(argv) === 'text' && !hasFlag(argv, '--detail') ? [...argv, '--detail'] : argv;
 }
 
 // deps keeps the CLI testable without shelling out to gh or touching disk.
@@ -37,12 +60,15 @@ export function run(argv, deps = {}) {
       args: argv,
       options: {
         repo: { type: 'string' },
-        branch: { type: 'string' },
+        'monitor-id': { type: 'string' },
         entities: { type: 'string', default: 'pr,issue' },
         'state-file': { type: 'string' },
+        'state-dir': { type: 'string' },
+        format: { type: 'string', default: 'json' },
         detail: { type: 'boolean', default: false },
         help: { type: 'boolean', default: false },
         'help-json': { type: 'boolean', default: false },
+        version: { type: 'boolean', default: false },
       },
     }));
   } catch (err) {
@@ -50,12 +76,33 @@ export function run(argv, deps = {}) {
   }
   if (values.help) return { code: 0, report: renderHelpText('gh-delta') };
   if (values['help-json']) return { code: 0, report: renderHelpJson('gh-delta') };
+  if (values.version) return { code: 0, report: renderVersionText() };
   if (!values.repo)
     return { code: 1, report: { error: 'missing required --repo <owner/name>', at } };
-  if (!values['state-file'])
+  if (!values['monitor-id'])
     return {
       code: 1,
-      report: { error: 'missing required --state-file <path>', repo: values.repo, at },
+      report: { error: 'missing required --monitor-id <id>', repo: values.repo, at },
+    };
+  if (values['state-file'] && values['state-dir'])
+    return {
+      code: 1,
+      report: {
+        error: '--state-file and --state-dir are mutually exclusive',
+        repo: values.repo,
+        monitorId: values['monitor-id'],
+        at,
+      },
+    };
+  if (!values['state-file'] && !values['state-dir'])
+    return {
+      code: 1,
+      report: {
+        error: 'provide either --state-file <path> or --state-dir <dir>',
+        repo: values.repo,
+        monitorId: values['monitor-id'],
+        at,
+      },
     };
   const entitySelection = parseEntitySelection(values.entities);
   if (!entitySelection.ok) {
@@ -64,27 +111,55 @@ export function run(argv, deps = {}) {
       report: {
         error: `--entities must include pr, issue, or both; got "${values.entities}"`,
         repo: values.repo,
+        monitorId: values['monitor-id'],
+        at,
+      },
+    };
+  }
+  if (values.format !== 'json' && values.format !== 'text') {
+    return {
+      code: 1,
+      report: {
+        error: '--format must be json or text',
+        repo: values.repo,
+        monitorId: values['monitor-id'],
         at,
       },
     };
   }
   try {
+    const stateFile =
+      values['state-file'] ??
+      snapshotPath(values.repo, values['monitor-id'], entitySelection.key, values['state-dir']);
     // Fetch broadly; filtering too early would make close/merge/relabel events disappear.
     const current = {
       pr: entitySelection.wantsPr ? fetchPRs(values.repo) : undefined,
       issue: entitySelection.wantsIssue ? fetchIssues(values.repo) : undefined,
     };
-    const old = readSnapshot(values['state-file']);
+    const old = readSnapshot(stateFile);
     const { baseline, deltas, snapshot } = detectDeltas(old, current);
     if (values.detail) for (const d of deltas) d.line = line(d);
-    writeSnapshotAtomic(values['state-file'], snapshot);
+    writeSnapshotAtomic(stateFile, snapshot);
     const summary = baseline
       ? `baseline established: ${Object.keys(snapshot.pr).length} PRs, ${Object.keys(snapshot.issue).length} issues`
       : `${deltas.length} delta(s)`;
-    const report = { baseline, repo: values.repo, branch: values.branch, at, deltas, summary };
+    const report = {
+      baseline,
+      repo: values.repo,
+      monitorId: values['monitor-id'],
+      entities: entitySelection.selected,
+      at,
+      deltas,
+      summary,
+    };
     return { code: baseline || deltas.length === 0 ? 0 : 10, report };
   } catch (err) {
-    const report = { error: String(err?.message ?? err), repo: values.repo, at };
+    const report = {
+      error: String(err?.message ?? err),
+      repo: values.repo,
+      monitorId: values['monitor-id'],
+      at,
+    };
     return { code: 1, report };
   }
 }
@@ -126,18 +201,38 @@ export async function runWithOutpost(argv, deps = {}) {
   return { ...result, warnings };
 }
 
-function formatOutpostWarnings(warnings = []) {
-  return warnings
-    .map((warning) => `outpost warning: ${warning.label} failed: ${warning.reason}`)
-    .join('\n');
+/**
+ * Run the public CLI command and return process-ready stdout/stderr strings.
+ */
+export async function runCommand(argv, deps = {}) {
+  const format = outputFormat(argv);
+  const result = await runWithOutpost(argsForOutputFormat(argv), deps);
+  const now = deps.now ?? (() => new Date().toISOString());
+
+  if (format === 'text') {
+    return {
+      ...result,
+      output: `${formatTextOutput({ code: result.code, report: result.report, now })}${formatOutpostWarnings(result.warnings)}\n`,
+      stderr: '',
+    };
+  }
+
+  return {
+    ...result,
+    output:
+      typeof result.report === 'string'
+        ? result.report
+        : `${JSON.stringify(result.report, null, 2)}\n`,
+    stderr: result.warnings?.length
+      ? `${formatOutpostWarnings(result.warnings).trimStart()}\n`
+      : '',
+  };
 }
 
 // CLI entrypoint: only runs when invoked directly, not when imported by tests.
 if (isDirectEntrypoint(import.meta.url)) {
-  const { code, report, warnings } = await runWithOutpost(process.argv.slice(2));
-  if (warnings?.length) process.stderr.write(`${formatOutpostWarnings(warnings)}\n`);
-  process.stdout.write(
-    typeof report === 'string' ? report : `${JSON.stringify(report, null, 2)}\n`,
-  );
+  const { code, output, stderr } = await runCommand(process.argv.slice(2));
+  if (stderr) process.stderr.write(stderr);
+  process.stdout.write(output);
   process.exit(code);
 }

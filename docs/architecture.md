@@ -1,26 +1,133 @@
 # Architecture
 
-`gh-delta` is intentionally narrow: it turns `(old snapshot, current GitHub state)`
-into a categorized JSON delta report. It does not schedule itself, open browser
-sessions, merge pull requests, or send messages to workers.
+`gh-delta` is intentionally narrow: it turns `(old snapshot, current GitHub
+state)` into a categorized delta report. It does not schedule itself, open
+browser sessions, merge pull requests, or send messages to workers.
 
 ## Boundaries
 
 ```text
 watch loop / timer
   -> gh-delta.mjs
-      -> lib/args.mjs      parse shared CLI option policy
-      -> lib/gh.mjs        fetch current GitHub state with gh
-      -> lib/snapshot.mjs  read previous snapshot
-      -> lib/detect.mjs    compare old and current fingerprints
-      -> lib/snapshot.mjs  atomically write new snapshot
-      -> lib/outpost.mjs   optional HTTP POST per delta
+      -> lib/args.mjs         parse shared CLI option policy
+      -> lib/gh.mjs           fetch current GitHub state with gh
+      -> lib/snapshot.mjs     read previous snapshot
+      -> lib/detect.mjs       compare old and current fingerprints
+      -> lib/snapshot.mjs     atomically write new snapshot
+      -> lib/outpost.mjs      optional HTTP POST per delta
+      -> lib/text-output.mjs  optional operator text formatting
   -> caller decides what to do with deltas
 ```
 
-Scheduled agent loops normally call `gh-delta-tick.mjs` instead. That wrapper
-uses `gh-delta.mjs`, then formats heartbeat text and suggested next actions so
-each cron fire can stay short and stateless.
+The public CLI is one one-shot command. `--format json` prints the structured
+report for programs. `--format text` prints an operator heartbeat and suggested
+actions for scheduled logs. Neither format creates schedules, timers,
+automations, or wake-ups.
+
+## Runtime Flow
+
+The process entrypoint is deliberately thin:
+
+```text
+process argv
+  -> choose requested output format
+  -> when format is text, add detector detail unless already requested
+  -> run the detector, with optional outpost delivery
+  -> render stdout/stderr
+  -> exit with the detector code
+```
+
+Argument and configuration flow:
+
+```text
+start
+  -> strip and validate optional --outpost-url
+     -> invalid URL or non-HTTP(S) URL
+        -> exit 1
+        -> no GitHub fetch
+        -> no snapshot read or write
+  -> parse detector arguments
+     -> unknown option or parse error
+        -> exit 1
+        -> no GitHub fetch
+        -> no snapshot read or write
+     -> --help or --help-json
+        -> exit 0
+        -> no GitHub fetch
+        -> no snapshot read or write
+     -> --version
+        -> read package metadata
+        -> exit 0
+        -> no GitHub fetch
+        -> no snapshot read or write
+     -> missing --repo or --monitor-id
+        -> exit 1
+        -> no GitHub fetch
+        -> no snapshot read or write
+     -> both --state-file and --state-dir
+        -> exit 1
+        -> no GitHub fetch
+        -> no snapshot read or write
+     -> neither --state-file nor --state-dir
+        -> exit 1
+        -> no GitHub fetch
+        -> no snapshot read or write
+     -> invalid --entities or --format
+        -> exit 1
+        -> no GitHub fetch
+        -> no snapshot read or write
+```
+
+Snapshot path selection:
+
+```text
+validated args
+  -> --state-file present
+     -> use that exact path
+  -> --state-dir present
+     -> derive <state-dir>/<repo>__<monitor-id>__<entities>.json
+```
+
+Detection flow:
+
+```text
+resolved snapshot path
+  -> fetch requested GitHub entities
+     -> GitHub CLI, network, parse, or hard-limit error
+        -> exit 1
+        -> snapshot is not read or written
+     -> open PR review thread GraphQL count is incomplete
+        -> exit 1
+        -> snapshot is not read or written
+  -> read snapshot file
+     -> file does not exist
+        -> old snapshot is null
+        -> current GitHub state becomes the baseline
+        -> write new snapshot
+        -> exit 0
+     -> file is valid JSON
+        -> compare old snapshot with current GitHub state
+        -> preserve unrequested entity families
+        -> write refreshed snapshot
+        -> exit 0 when there are no deltas
+        -> exit 10 when there are deltas
+     -> file is invalid JSON
+        -> exit 1
+        -> target snapshot is not replaced
+```
+
+Outpost flow:
+
+```text
+detector result
+  -> exit 0 or exit 1
+     -> do not POST
+  -> exit 10 with --outpost-url
+     -> snapshot has already advanced
+     -> POST one payload per delta
+     -> collect delivery failures as warnings
+     -> keep detector exit code 10
+```
 
 The core correctness logic is pure:
 
@@ -30,43 +137,78 @@ The core correctness logic is pure:
 
 The impure edges are isolated:
 
-- `gh.mjs` shells out to `gh`.
-- `snapshot.mjs` performs filesystem I/O.
+- `gh.mjs` shells out to `gh` for list fetches and GraphQL enrichment.
+- `snapshot.mjs` performs filesystem I/O and derives monitor-scoped snapshot
+  paths.
 - `outpost.mjs` validates optional outpost URLs, builds schema v1 payloads, and
   sends short-timeout HTTP POSTs.
+- `text-output.mjs` formats heartbeat text and outpost warnings.
+- `version.mjs` reads package metadata for version output and help JSON.
 - `help.mjs` keeps human `--help` and machine-readable `--help-json` output in
   one versioned source of truth.
 - `entrypoint.mjs` detects direct CLI invocation through real paths so npm/npx
-  `.bin` symlinks start the package bins correctly.
-- `gh-delta.mjs` wires CLI flags, GitHub fetches, snapshot I/O, and exit codes.
-- `gh-delta-tick.mjs` formats one scheduler-owned tick for agents/operators.
+  `.bin` symlinks start the package bin correctly.
+- `gh-delta.mjs` wires CLI flags, GitHub fetches, snapshot I/O, output formats,
+  outposts, and exit codes.
 
 ## Package Surface
 
-The npm package exposes the two CLIs and a small ESM import surface:
+The npm package exposes one CLI and a small ESM import surface:
 
-- `gh-delta`: detector CLI.
-- `gh-delta-tick`: one-tick operator wrapper.
+- `gh-delta`: one-shot detector CLI.
 - `gh-delta/detect`: pure delta classification.
 - `gh-delta/fingerprint`: GitHub object fingerprint helpers.
 - `gh-delta/outpost`: outpost payload and delivery helpers.
 - `gh-delta/snapshot`: snapshot path/read/write helpers.
 - `gh-delta/args`: shared argument parsing helpers.
+- `gh-delta/version`: package metadata and version text helpers.
 
 Everything under `lib/` should stay dependency-free unless the added dependency
 materially improves correctness. The package currently has no runtime
 dependencies.
 
+## Monitor Identity
+
+`--monitor-id` is the stable identity of a recurring monitor. It is not a branch,
+selector, interval, or execution id. Every scheduled fire for the same monitor
+should reuse the same `--monitor-id`.
+
+With `--state-dir`, snapshot paths are derived from:
+
+```text
+repo + monitor-id + entities
+```
+
+Example:
+
+```text
+./state/org-app__prs-5m__pr.json
+```
+
+`--state-file` bypasses path derivation for operators that need a fully explicit
+path, but `--monitor-id` is still required because reports and outpost event IDs
+use it.
+
 ## GitHub Fetch Contract
 
 PRs are fetched with `--state all --limit 500`. Both flags matter:
 
-- `--state all` keeps merged and closed PRs observable. Without it, a merged PR can
-  disappear from the result set and become indistinguishable from scope loss.
+- `--state all` keeps merged and closed PRs observable. Without it, a merged PR
+  can disappear from the result set and become indistinguishable from scope loss.
 - `--limit 500` avoids the default low limit hiding older PRs or issues. It is
   not full pagination. If GitHub returns exactly 500 PRs or issues, `gh-delta`
-  exits `1` without writing the snapshot because the watch scope may be
+  exits `1` without writing the snapshot because the monitor scope may be
   truncated.
+
+Open PRs are then enriched with `gh api graphql --paginate --slurp` to count PR
+review threads:
+
+- `reviewThreads.totalCount` becomes the tracked review-thread total.
+- `reviewThreads.nodes[].isResolved` is counted into unresolved review threads.
+- top-level PR pagination is handled by `gh api graphql --paginate`.
+- nested `reviewThreads(first: 100)` pagination is not followed yet. If any open
+  PR reports more review-thread pages, `gh-delta` exits `1` without writing the
+  snapshot because unresolved-thread counts would be incomplete.
 
 The PR fingerprint tracks:
 
@@ -79,6 +221,8 @@ The PR fingerprint tracks:
 - mergeability
 - comment count
 - comment-array overflow flag
+- review thread count
+- unresolved review thread count
 - head SHA
 
 The issue fingerprint tracks:
@@ -90,10 +234,10 @@ The issue fingerprint tracks:
 - comment-array overflow flag
 
 GitHub CLI list commands expose comment arrays, not GraphQL `totalCount` fields.
-When those arrays reach the observed cap, `gh-delta` treats an `updatedAt` bump as
-`new-comments` instead of degrading it to plain `updated`. This is intentionally
-conservative until a future GraphQL fetcher can use exact totals for issue
-comments, PR conversation comments, reviews, and review threads.
+When those arrays reach the observed cap, `gh-delta` treats an `updatedAt` bump
+as `new-comments` instead of degrading it to plain `updated`. This is
+intentionally conservative until a future GraphQL enrichment can use exact totals
+for issue comments, PR conversation comments, and review comments.
 
 ## Snapshot Contract
 
@@ -113,12 +257,12 @@ Snapshots are plain JSON maps keyed by issue or PR number:
 
 Missing snapshots are treated as a first run. Corrupt snapshot JSON is an error:
 the command exits `1` and leaves the snapshot untouched. This prevents a corrupt
-file from silently erasing watcher memory.
+file from silently erasing monitor memory.
 
 Writes are atomic for a single writer: the snapshot is written to a unique
-temporary file beside the target, then renamed into place. Do not run overlapping
-ticks against the same state file; use scheduler-level locking if overlap is
-possible.
+temporary file beside the target, then renamed into place. Do not run
+overlapping ticks against the same state file; use scheduler-level locking if
+overlap is possible.
 
 Successful detections are at-most-once from the detector's perspective. The
 snapshot advances before an agent acts on deltas and before optional outpost
@@ -127,8 +271,8 @@ persist the detector output or add an external pending/ack queue.
 
 ## Outpost Contract
 
-`--outpost-url` is an optional edge on `gh-delta.mjs` and `gh-delta-tick.mjs`.
-It is not part of `lib/detect.mjs`; the detector still only returns facts.
+`--outpost-url` is an optional edge on `gh-delta.mjs`. It is not part of
+`lib/detect.mjs`; the detector still only returns facts.
 
 The URL must be `http:` or `https:` and is validated before GitHub fetches begin.
 When the detector exits `10`, one schema v1 payload is POSTed per delta. No POST
@@ -143,9 +287,9 @@ Outpost sends are deliberately minimal:
 - no HMAC or auth layer yet;
 - no logging of endpoint URLs, query strings, headers, or token material.
 
-Failures are warnings, not detector failures. A timeout, DNS failure, HTTP
-`4xx`, or HTTP `5xx` does not alter the detector or tick exit code and does not
-cause another snapshot write.
+Failures are warnings, not detector failures. A timeout, DNS failure, HTTP `4xx`,
+or HTTP `5xx` does not alter the detector exit code and does not cause another
+snapshot write.
 
 Schema v1 payloads use this envelope:
 
@@ -153,9 +297,9 @@ Schema v1 payloads use this envelope:
 {
   "type": "gh-delta.delta",
   "schemaVersion": 1,
-  "eventId": "gh-delta.delta.v1:owner/repo:watch:issue:17:relabeled:2026-07-01T12:00:00.000Z",
+  "eventId": "gh-delta.delta.v1:owner/repo:prs-5m:issue:17:relabeled:2026-07-01T12:00:00.000Z",
   "repo": "owner/repo",
-  "branch": "watch",
+  "monitorId": "prs-5m",
   "detectedAt": "2026-07-01T12:00:00.000Z",
   "entity": "issue",
   "number": 17,
@@ -174,15 +318,23 @@ Schema v1 payloads use this envelope:
 }
 ```
 
-`eventId` is deterministic from repo, branch, entity, number, class list, and the
-detector timestamp. The external endpoint owns filtering, deduplication, and
+`eventId` is deterministic from repo, monitor id, entity, number, class list, and
+the detector timestamp. The external endpoint owns filtering, deduplication, and
 actions.
 
 ## Error Contract
 
-If fetching or parsing fails, `gh-delta` exits `1` and does not write the snapshot.
-This keeps transient network or rate-limit failures from erasing the previous
-known-good baseline.
+If fetching or parsing fails, `gh-delta` exits `1` and does not write the
+snapshot. This keeps transient network or rate-limit failures from erasing the
+previous known-good baseline.
+
+## Future Entity And Selector Research
+
+The public contract currently supports only `pr`, `issue`, and `pr,issue`.
+Research notes under `docs/entities-research/` inventory future entities and
+selector applicability. A selector such as `branch` must be validated per entity
+before it becomes public; for example, branch selectors can apply to commits or
+workflow runs, but not to issues.
 
 ## Delta Classification
 
@@ -197,6 +349,9 @@ Each changed object can emit one or more classes:
 - `review-changed`
 - `became-mergeable`
 - `new-comments`
+- `unresolved-threads-added`
+- `unresolved-threads-resolved`
+- `review-threads-changed`
 - `relabeled`
 - `missing`
 - `still-missing`
@@ -206,8 +361,8 @@ Each changed object can emit one or more classes:
 changed but no more specific class matched.
 
 `missing` fires when a previously known object disappears from a fetched
-collection. The old fingerprint is retained so the watcher does not silently lose
-memory if GitHub output was truncated or scoped unexpectedly.
+collection. The old fingerprint is retained so the watcher does not silently
+lose memory if GitHub output was truncated or scoped unexpectedly.
 
 `still-missing` fires on later ticks when that same retained object remains
 absent. This lets agents distinguish first sighting from unresolved operational

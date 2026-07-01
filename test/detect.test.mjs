@@ -14,6 +14,8 @@ const pr = (over = {}) => ({
   latestReviews: [],
   mergeable: 'UNKNOWN',
   comments: [],
+  reviewThreads: 0,
+  unresolvedReviewThreads: 0,
   headRefOid: 'sha1',
   ...over,
 });
@@ -110,6 +112,42 @@ test('draft → ready emits draft-ready', () => {
     issue: [],
   });
   assert.ok(r.deltas[0].classes.includes('draft-ready'));
+});
+
+test('new unresolved review threads emit unresolved-threads-added', () => {
+  const base = detectDeltas(null, {
+    pr: [pr({ reviewThreads: 1, unresolvedReviewThreads: 0 })],
+    issue: [],
+  });
+  const r = detectDeltas(base.snapshot, {
+    pr: [pr({ reviewThreads: 2, unresolvedReviewThreads: 1, updatedAt: '2026-07-01T11:00:00Z' })],
+    issue: [],
+  });
+  assert.ok(r.deltas[0].classes.includes('unresolved-threads-added'));
+});
+
+test('resolved review threads emit unresolved-threads-resolved', () => {
+  const base = detectDeltas(null, {
+    pr: [pr({ reviewThreads: 2, unresolvedReviewThreads: 2 })],
+    issue: [],
+  });
+  const r = detectDeltas(base.snapshot, {
+    pr: [pr({ reviewThreads: 2, unresolvedReviewThreads: 0, updatedAt: '2026-07-01T11:00:00Z' })],
+    issue: [],
+  });
+  assert.ok(r.deltas[0].classes.includes('unresolved-threads-resolved'));
+});
+
+test('review thread total changes emit review-threads-changed when unresolved count is stable', () => {
+  const base = detectDeltas(null, {
+    pr: [pr({ reviewThreads: 1, unresolvedReviewThreads: 1 })],
+    issue: [],
+  });
+  const r = detectDeltas(base.snapshot, {
+    pr: [pr({ reviewThreads: 2, unresolvedReviewThreads: 1, updatedAt: '2026-07-01T11:00:00Z' })],
+    issue: [],
+  });
+  assert.deepEqual(r.deltas[0].classes, ['review-threads-changed']);
 });
 
 test('issue label removal emits relabeled', () => {

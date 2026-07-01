@@ -73,6 +73,8 @@ test('prFingerprint extracts the tracked fields', () => {
     latestReviews: [{ author: { login: 'alice' }, state: 'APPROVED' }],
     mergeable: 'MERGEABLE',
     comments: [{}, {}, {}],
+    reviewThreads: 5,
+    unresolvedReviewThreads: 2,
     headRefOid: 'abc123',
   };
   const fp = prFingerprint(pr);
@@ -82,6 +84,8 @@ test('prFingerprint extracts the tracked fields', () => {
   assert.equal(fp.mergeable, 'MERGEABLE');
   assert.equal(fp.comments, 3);
   assert.equal(fp.commentsOverflow, false);
+  assert.equal(fp.reviewThreads, 5);
+  assert.equal(fp.unresolvedReviewThreads, 2);
   assert.equal(fp.head, 'abc123');
   assert.equal(typeof fp.ci, 'string');
 });
