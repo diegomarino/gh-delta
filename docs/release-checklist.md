@@ -10,7 +10,9 @@ Run:
 npm ci --cache .npm-cache
 npm run release:check
 node ./gh-delta.mjs --help
+node ./gh-delta.mjs --help-json
 node ./gh-delta-tick.mjs --help
+node ./gh-delta-tick.mjs --help-json
 ```
 
 Expected:
@@ -20,7 +22,7 @@ Expected:
 - all Node tests pass;
 - the coverage report completes;
 - `npm pack --dry-run` lists only expected public package files;
-- both CLIs print help and exit `0`.
+- both CLIs print human help and JSON help, then exit `0`.
 
 ## Publish Safety
 

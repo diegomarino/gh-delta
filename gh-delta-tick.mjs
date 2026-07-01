@@ -4,13 +4,8 @@
 import { run as runDetector } from './gh-delta.mjs';
 import { sendOutposts, validateOutpostUrl } from './lib/outpost.mjs';
 import { parseOutpostArgs } from './lib/args.mjs';
-
-const usage = `Usage:
-  gh-delta-tick --repo <owner/name> --state-file <path> [--branch <name>] [--entities pr,issue] [--outpost-url <url>]
-
-Runs one scheduler-owned watcher tick. The script never creates timers, cron jobs,
-automations, or wake-ups.
-`;
+import { isDirectEntrypoint } from './lib/entrypoint.mjs';
+import { renderHelpJson, renderHelpText } from './lib/help.mjs';
 
 const SUGGESTIONS = [
   {
@@ -135,7 +130,8 @@ export async function runTick(argv, deps = {}) {
     outpostTimeoutMs,
   } = deps;
 
-  if (hasFlag(argv, '--help')) return { code: 0, output: usage };
+  if (hasFlag(argv, '--help')) return { code: 0, output: renderHelpText('gh-delta-tick') };
+  if (hasFlag(argv, '--help-json')) return { code: 0, output: renderHelpJson('gh-delta-tick') };
 
   const parsed = parseOutpostArgs(argv);
   if (parsed.error) {
@@ -184,7 +180,7 @@ export async function runTick(argv, deps = {}) {
 }
 
 // CLI entrypoint: keep process I/O here so tests can call runTick directly.
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isDirectEntrypoint(import.meta.url)) {
   const { code, output } = await runTick(process.argv.slice(2));
   process.stdout.write(output);
   process.exit(code);

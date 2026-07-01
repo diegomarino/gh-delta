@@ -142,6 +142,30 @@ test('--help returns usage text without fetching GitHub', () => {
   assert.ok(report.includes('Usage:'));
 });
 
+test('--help-json returns machine-readable help without fetching GitHub', () => {
+  const d = {
+    fetchPRs: () => {
+      throw new Error('should not fetch');
+    },
+    fetchIssues: () => {
+      throw new Error('should not fetch');
+    },
+    now: () => '2026-07-01T12:00:00Z',
+  };
+  const { code, report } = run(['--help-json'], d);
+  assert.equal(code, 0);
+  assert.equal(typeof report, 'string');
+
+  const help = JSON.parse(report);
+  assert.equal(help.helpSchemaVersion, 1);
+  assert.equal(help.command, 'gh-delta');
+  assert.match(help.usage, /^gh-delta --repo/);
+  assert.ok(help.options.some((option) => option.name === '--help-json'));
+  assert.equal(help.options.find((option) => option.name === '--repo')?.required, true);
+  assert.match(help.exitCodes.find((entry) => entry.code === 10)?.meaning ?? '', /Deltas found/);
+  assert.equal(help.output.format, 'json');
+});
+
 test('missing --repo returns code 1 before fetching', () => {
   const d = {
     fetchPRs: () => {

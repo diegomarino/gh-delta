@@ -34,6 +34,10 @@ The impure edges are isolated:
 - `snapshot.mjs` performs filesystem I/O.
 - `outpost.mjs` validates optional outpost URLs, builds schema v1 payloads, and
   sends short-timeout HTTP POSTs.
+- `help.mjs` keeps human `--help` and machine-readable `--help-json` output in
+  one versioned source of truth.
+- `entrypoint.mjs` detects direct CLI invocation through real paths so npm/npx
+  `.bin` symlinks start the package bins correctly.
 - `gh-delta.mjs` wires CLI flags, GitHub fetches, snapshot I/O, and exit codes.
 - `gh-delta-tick.mjs` formats one scheduler-owned tick for agents/operators.
 

@@ -7,24 +7,8 @@ import { detectDeltas } from './lib/detect.mjs';
 import { readSnapshot as fsRead, writeSnapshotAtomic as fsWrite } from './lib/snapshot.mjs';
 import { sendOutposts, validateOutpostUrl } from './lib/outpost.mjs';
 import { parseEntitySelection, parseOutpostArgs } from './lib/args.mjs';
-
-const usage = `Usage:
-  gh-delta --repo <owner/name> --state-file <path> [--branch <name>] [--entities pr,issue] [--detail] [--outpost-url <url>]
-
-Options:
-  --repo        GitHub repository in owner/name form. Required.
-  --state-file  Snapshot JSON path. Required.
-  --branch      Branch or watch-loop name to include in reports.
-  --entities    Comma-separated entity list: pr, issue, or pr,issue. Default: pr,issue.
-  --detail      Add one human-readable line per delta.
-  --outpost-url Send one fire-and-forget HTTP POST per delta when exit code is 10.
-  --help        Show this help.
-
-Exit codes:
-  0   Baseline established or no deltas.
-  10  Deltas found.
-  1   GitHub CLI, network, parse, or argument error. Snapshot is not updated on errors.
-`;
+import { isDirectEntrypoint } from './lib/entrypoint.mjs';
+import { renderHelpJson, renderHelpText } from './lib/help.mjs';
 
 function line(d) {
   return `${d.entity.toUpperCase()} #${d.number} "${d.title}": ${d.classes.join(', ')}`;
@@ -58,12 +42,14 @@ export function run(argv, deps = {}) {
         'state-file': { type: 'string' },
         detail: { type: 'boolean', default: false },
         help: { type: 'boolean', default: false },
+        'help-json': { type: 'boolean', default: false },
       },
     }));
   } catch (err) {
     return { code: 1, report: { error: String(err?.message ?? err), at } };
   }
-  if (values.help) return { code: 0, report: usage };
+  if (values.help) return { code: 0, report: renderHelpText('gh-delta') };
+  if (values['help-json']) return { code: 0, report: renderHelpJson('gh-delta') };
   if (!values.repo)
     return { code: 1, report: { error: 'missing required --repo <owner/name>', at } };
   if (!values['state-file'])
@@ -147,7 +133,7 @@ function formatOutpostWarnings(warnings = []) {
 }
 
 // CLI entrypoint: only runs when invoked directly, not when imported by tests.
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isDirectEntrypoint(import.meta.url)) {
   const { code, report, warnings } = await runWithOutpost(process.argv.slice(2));
   if (warnings?.length) process.stderr.write(`${formatOutpostWarnings(warnings)}\n`);
   process.stdout.write(

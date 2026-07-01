@@ -210,6 +210,27 @@ test('tick catches detector argument exceptions', async () => {
   assert.match(output, /Unknown option --bogus/);
 });
 
+test('--help-json returns machine-readable tick help without calling detector', async () => {
+  let detectorCalled = false;
+  const { code, output } = await runTick(['--help-json'], {
+    detector: () => {
+      detectorCalled = true;
+      throw new Error('should not call detector');
+    },
+  });
+
+  assert.equal(code, 0);
+  assert.equal(detectorCalled, false);
+
+  const help = JSON.parse(output);
+  assert.equal(help.helpSchemaVersion, 1);
+  assert.equal(help.command, 'gh-delta-tick');
+  assert.match(help.usage, /^gh-delta-tick --repo/);
+  assert.ok(help.options.some((option) => option.name === '--help-json'));
+  assert.equal(help.output.format, 'text');
+  assert.ok(help.safety.some((entry) => entry.includes('never creates timers')));
+});
+
 test('outpost URL sends one JSON POST per delta on code 10', async () => {
   const posts = [];
   let capturedArgs;

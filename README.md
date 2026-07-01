@@ -23,6 +23,7 @@ Install from npm once published:
 ```bash
 npm install --global gh-delta
 gh-delta --help
+gh-delta --help-json
 gh-delta-tick --help
 ```
 
@@ -81,11 +82,20 @@ Options:
 - `--outpost-url`: HTTP(S) endpoint that receives one JSON `POST` per delta when
   the detector exits `10`.
 - `--help`: print usage.
+- `--help-json`: print versioned, machine-readable help for LLMs, agents, and
+  other tooling. The top-level `helpSchemaVersion` field starts at `1`.
 
 `gh-delta` prints the structured JSON detector report. `gh-delta-tick` runs the
 same detector once, then prints a heartbeat and suggested next actions for an
 agent or operator. Neither command creates schedules, timers, automations, or
 wake-ups.
+
+Both commands keep human help and JSON help in sync:
+
+```bash
+gh-delta --help-json
+gh-delta-tick --help-json
+```
 
 Exit codes:
 
@@ -212,6 +222,8 @@ queue if you need at-least-once action delivery.
 - `lib/snapshot.mjs`: reads and atomically writes snapshot files.
 - `lib/outpost.mjs`: validates outpost URLs, builds schema v1 payloads, and sends
   short-timeout HTTP POSTs.
+- `lib/help.mjs`: shared human and machine-readable CLI help metadata.
+- `lib/entrypoint.mjs`: symlink-safe bin entrypoint detection for npm/npx.
 - `gh-delta.mjs`: CLI wiring and exit codes.
 - `gh-delta-tick.mjs`: one-tick wrapper with heartbeat text and suggested actions.
 
