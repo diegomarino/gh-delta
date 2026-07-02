@@ -2,6 +2,8 @@ state/*.json
 state/*.tmp
 node_modules/
 .npm-cache/
+.mypy_cache/
+.remember/
 .DS_Store
 coverage/
 *.tgz

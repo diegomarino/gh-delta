@@ -1,5 +1,7 @@
 coverage/
 node_modules/
 .npm-cache/
+.mypy_cache/
+.remember/
 state/
 *.tgz
