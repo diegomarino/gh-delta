@@ -5,3 +5,6 @@ node_modules/
 .remember/
 state/
 *.tgz
+.superpowers/
+docs/superpowers/
+.claude/

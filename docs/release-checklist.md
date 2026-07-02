@@ -9,9 +9,9 @@ Run:
 ```bash
 npm ci --cache .npm-cache
 npm run release:check
-node ./gh-delta.mjs --help
-node ./gh-delta.mjs --help-json
-node ./gh-delta.mjs --version
+gh-delta --help
+gh-delta --help-json
+gh-delta --version
 ```
 
 Expected:

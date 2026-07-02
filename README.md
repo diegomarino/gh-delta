@@ -1,4 +1,9 @@
-# gh-delta
+# gh-delta <!-- omit in toc -->
+
+[![npm version](https://img.shields.io/npm/v/gh-delta.svg)](https://www.npmjs.com/package/gh-delta)
+[![CI](https://github.com/diegomarino/gh-delta/actions/workflows/ci.yml/badge.svg)](https://github.com/diegomarino/gh-delta/actions/workflows/ci.yml)
+[![Node.js: >=18](https://img.shields.io/node/v/gh-delta.svg)](https://nodejs.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 `gh-delta` is a small deterministic GitHub watcher for agent or automation loops.
 It runs one detection pass, compares current GitHub issue and pull request state
@@ -11,6 +16,31 @@ merged PRs, CI status changes, review decision changes, unresolved review
 threads, new comments, relabeling, missing objects, and catch-all updates. Your
 orchestrator, script, or agent owns the action.
 
+<p align="center">
+  <img src="docs/img/text-output.png" alt="gh-delta reporting two GitHub deltas in text output" width="760">
+</p>
+
+## Table of Contents <!-- omit in toc -->
+
+- [Requirements](#requirements)
+- [Quick Start](#quick-start)
+- [CLI](#cli)
+- [Snapshot Identity](#snapshot-identity)
+- [Outpost Delivery](#outpost-delivery)
+- [Report Shape](#report-shape)
+- [Delta Classes](#delta-classes)
+- [Watch Loop Use](#watch-loop-use)
+- [Programmatic Use](#programmatic-use)
+- [Output Samples](#output-samples)
+  - [`--format text`](#--format-text)
+  - [`--format json`](#--format-json)
+  - [`--help-json`](#--help-json)
+- [Design Notes](#design-notes)
+- [Troubleshooting / FAQ](#troubleshooting--faq)
+- [Development](#development)
+- [Documentation](#documentation)
+- [License](#license)
+
 ## Requirements
 
 - Node.js 18 or newer.
@@ -18,6 +48,10 @@ orchestrator, script, or agent owns the action.
 - Read access to the repository being watched.
 
 ## Quick Start
+
+<p align="center">
+  <img src="docs/img/usage.png" alt="gh-delta command-line invocation" width="520">
+</p>
 
 Install from npm once published:
 
@@ -28,10 +62,21 @@ gh-delta --help-json
 gh-delta --version
 ```
 
+No install required — run directly with npx:
+
+```bash
+npx gh-delta \
+  --repo owner/repo \
+  --monitor-id prs \
+  --state-dir ./state \
+  --entities pr \
+  --format json
+```
+
 Or run from a source checkout:
 
 ```bash
-git clone https://github.com/<owner>/gh-delta.git
+git clone https://github.com/diegomarino/gh-delta.git
 cd gh-delta
 npm install
 npm run check
@@ -50,7 +95,7 @@ compare against that baseline.
 For scheduled watcher ticks, use text output:
 
 ```bash
-node ./gh-delta.mjs \
+gh-delta \
   --repo owner/repo \
   --monitor-id prs-5m \
   --state-dir ./state \
@@ -61,7 +106,7 @@ node ./gh-delta.mjs \
 To notify an external endpoint when deltas appear, add an HTTP(S) outpost:
 
 ```bash
-node ./gh-delta.mjs \
+gh-delta \
   --repo owner/repo \
   --monitor-id prs-5m \
   --state-dir ./state \
@@ -99,12 +144,7 @@ Options:
 
 `gh-delta` never creates schedules, timers, automations, or wake-ups.
 
-Exit codes:
-
-- `0`: baseline established or no deltas.
-- `10`: deltas found.
-- `1`: argument, GitHub CLI, network, or parse error. On errors, the snapshot is
-  not updated.
+Exit codes: see [Exit Codes](docs/contract.md#exit-codes).
 
 ## Snapshot Identity
 
@@ -149,83 +189,15 @@ The external endpoint is responsible for filtering events, deduplicating by
 `eventId`, and executing any downstream action. Outpost logs intentionally avoid
 printing endpoint URLs, query strings, headers, or future auth material.
 
-Payload schema v1:
-
-```json
-{
-  "type": "gh-delta.delta",
-  "schemaVersion": 1,
-  "eventId": "gh-delta.delta.v1:owner/repo:prs-5m:issue:17:relabeled:2026-07-01T12:00:00.000Z",
-  "repo": "owner/repo",
-  "monitorId": "prs-5m",
-  "detectedAt": "2026-07-01T12:00:00.000Z",
-  "entity": "issue",
-  "number": 17,
-  "title": "Backfill imports",
-  "classes": ["new", "relabeled"],
-  "state": "OPEN",
-  "labels": ["worker", "backend"],
-  "line": "ISSUE #17 \"Backfill imports\": new, relabeled",
-  "delta": {
-    "from": null,
-    "to": {}
-  },
-  "links": {
-    "html": "https://github.com/owner/repo/issues/17"
-  }
-}
-```
-
-`eventId` is deterministic for a given repo, monitor id, entity, number, class
-list, and detector timestamp. PR payloads currently use an empty `labels` array
-because the PR fetch does not collect labels.
+See [Outpost payload schema v1](docs/contract.md#outpost-payload-schema-v1) for the full envelope and `eventId` semantics.
 
 ## Report Shape
 
-```json
-{
-  "baseline": false,
-  "repo": "owner/repo",
-  "monitorId": "prs-5m",
-  "entities": ["pr"],
-  "at": "2026-07-01T12:00:00.000Z",
-  "deltas": [
-    {
-      "entity": "pr",
-      "number": 42,
-      "title": "Add widget",
-      "classes": ["ci-changed", "review-changed"],
-      "from": {},
-      "to": {},
-      "line": "PR #42 \"Add widget\": ci-changed, review-changed"
-    }
-  ],
-  "summary": "1 delta(s)"
-}
-```
+See [Report Shape](docs/contract.md#report-shape) for the full JSON structure.
 
 ## Delta Classes
 
-- `new`: new issue or PR after the baseline.
-- `closed`: issue or PR was closed.
-- `reopened`: issue or PR was reopened.
-- `merged`: PR was merged.
-- `draft-ready`: PR moved from draft to ready for review.
-- `ci-changed`: check run or status context changed.
-- `review-changed`: review decision or latest review states changed.
-- `became-mergeable`: PR moved from conflicting to mergeable.
-- `new-comments`: comment count increased.
-- `unresolved-threads-added`: unresolved PR review thread count increased.
-- `unresolved-threads-resolved`: unresolved PR review thread count decreased.
-- `review-threads-changed`: PR review thread total changed while unresolved
-  count stayed stable.
-- `relabeled`: issue labels changed.
-- `missing`: an object from the previous snapshot disappeared from a fetched
-  collection. Check pagination, permissions, or scope before trusting the tick.
-- `still-missing`: an object that was already missing is still absent from the
-  fetch. Treat this as unresolved operational state, not a fresh item.
-- `updated`: fingerprint changed without a more specific class. Inspect GitHub
-  before dismissing it; review-thread replies can still surface this way in v0.1.
+See [Delta Classes](docs/contract.md#delta-classes) for the full list.
 
 ## Watch Loop Use
 
@@ -240,6 +212,125 @@ for cron-owned watcher ticks.
 Delivery note: successful detections advance the snapshot before any agent
 action or outpost finishes. Keep scheduler logs for text output, or add an
 external queue if you need at-least-once action delivery.
+
+## Programmatic Use
+
+`gh-delta` also exposes a small ESM surface for embedding in orchestrators:
+
+```js
+import { detectDeltas } from 'gh-delta/detect';
+import {
+  canonicalizeCiRollup,
+  hashReviews,
+  issueFingerprint,
+  prFingerprint,
+} from 'gh-delta/fingerprint';
+import {
+  buildOutpostPayload,
+  postOutpost,
+  sendOutposts,
+  validateOutpostUrl,
+} from 'gh-delta/outpost';
+import { readSnapshot, snapshotPath, writeSnapshotAtomic } from 'gh-delta/snapshot';
+import { parseEntitySelection, parseOutpostArgs } from 'gh-delta/args';
+import { getPackageMetadata, renderVersionText } from 'gh-delta/version';
+```
+
+| Import                 | Exported names                                                             | Purpose                            |
+| ---------------------- | -------------------------------------------------------------------------- | ---------------------------------- |
+| `gh-delta/detect`      | `detectDeltas`                                                             | Pure delta classification          |
+| `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint` | GitHub object fingerprint helpers  |
+| `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl` | Outpost payload + delivery helpers |
+| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`                      | Snapshot path/read/write helpers   |
+| `gh-delta/args`        | `parseEntitySelection`, `parseOutpostArgs`                                 | Shared argument parsing helpers    |
+| `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                  | Package metadata + version text    |
+
+All subpaths are pure ESM (`"type": "module"`). The package has no runtime dependencies.
+
+One confirmed call shape: `buildOutpostPayload({ report, delta })`.
+
+## Output Samples
+
+### `--format text`
+
+Text output consists of an ISO timestamp heartbeat line followed by one block
+per delta. Each block has the entity label, the delta classes, and a suggested
+action derived from those classes:
+
+```text
+2026-07-01T12:00:00.000Z | 2 delta(s)
+
+PR #42 "Add widget": ci-changed, review-changed
+classes: ci-changed, review-changed
+suggested action: CI/review changed. Read checks and review threads before merge.
+
+ISSUE #17 "Backfill imports": new, relabeled
+classes: new, relabeled
+suggested action: new item. Read it and queue or recommend review.
+```
+
+When no deltas are found the output is:
+
+```text
+2026-07-01T12:00:00.000Z | 0 delta(s)
+
+No GitHub deltas since the last snapshot.
+```
+
+On error (exit `1`):
+
+```text
+2026-07-01T12:00:00.000Z | error | 0 delta(s)
+
+gh-delta error: <error message>
+Snapshot was not updated. No action taken. The next scheduled tick should retry.
+```
+
+### `--format json`
+
+The same detection tick, machine-readable. Each delta carries its previous and
+current fingerprints as `from`/`to`; see
+[Report Shape](docs/contract.md#report-shape) for the full envelope.
+
+<p align="center">
+  <img src="docs/img/json-output.png" alt="gh-delta --format json report for a relabeled issue" width="480">
+</p>
+
+### `--help-json`
+
+`gh-delta --help-json` prints a versioned machine-readable help document to
+stdout. The top-level `helpSchemaVersion` field is `1`. The full document
+includes all options, exit codes, output metadata, safety guarantees, and
+examples. Excerpt:
+
+```json
+{
+  "helpSchemaVersion": 1,
+  "command": "gh-delta",
+  "version": "0.1.0",
+  "summary": "Deterministic GitHub issue and pull request delta detector.",
+  "usage": "gh-delta --repo <owner/name> --monitor-id <id> (--state-dir <dir> | --state-file <path>) [--entities pr,issue] [--format json|text] [--outpost-url <url>]",
+  "purpose": "Run one deterministic detection pass, update the snapshot after a successful fetch, print JSON or operator text, and exit. Scheduling belongs to the caller.",
+  "options": [
+    {
+      "name": "--repo",
+      "valueName": "owner/name",
+      "type": "string",
+      "required": true,
+      "description": "GitHub repository in owner/name form."
+    },
+    {
+      "name": "--monitor-id",
+      "valueName": "id",
+      "type": "string",
+      "required": true,
+      "description": "Stable monitor identity used in reports, event IDs, and derived snapshot paths."
+    }
+  ]
+}
+```
+
+Run `gh-delta --help-json` to emit the complete document.
 
 ## Design Notes
 
@@ -270,6 +361,33 @@ Research for future entity types and selectors lives under
 [docs/entities-research](docs/entities-research/README.md). Those notes are not
 public CLI contract.
 
+## Troubleshooting / FAQ
+
+**`gh` is not authenticated — exit `1` on first run.**
+Run `gh auth status` to verify authentication. `gh-delta` delegates all GitHub
+fetches to the `gh` CLI. If `gh` is not authenticated or lacks read access to
+the repository, the detector exits `1` and does not touch the snapshot. Fix
+authentication first, then retry.
+
+**"GitHub returned 500 PRs/issues" / incomplete review-thread pages.**
+The tool fails closed (exit `1`) rather than silently truncating results when
+either the PR or issue list hits the hard 500-item limit, or when an open PR
+has more than 100 review threads and nested pagination would be required. Narrow
+the monitor scope (use a tighter `--entities` selection, watch a fork, or split
+into multiple monitors) before continuing.
+
+**The same delta refires every tick.**
+If `gh-delta` repeatedly reports the same delta on every scheduled run, stop
+and investigate the underlying GitHub state before taking any action. Do not
+act repeatedly on the same delta — this is a signal that something unexpected
+is happening on the GitHub side or in your monitor configuration.
+
+**Corrupt snapshot / invalid JSON — exit `1`, snapshot not updated.**
+If the snapshot file is invalid JSON or unreadable, `gh-delta` exits `1` and
+leaves the file untouched to preserve monitor memory. Do not hand-edit snapshot
+files. If recovery is needed, delete the snapshot and re-seed the baseline with
+a fresh first run.
+
 ## Development
 
 ```bash
@@ -285,8 +403,29 @@ npm run release:check
 test suite. `npm run release:check` adds the coverage report and `npm pack
 --dry-run` package-content verification.
 
+`npm run e2e:playground` runs a live acceptance test that creates and deletes a
+real private GitHub repository via `gh`. It requires an authenticated `gh` and
+network access; do not run it in CI or sandboxes. See
+[test/e2e/README.md](test/e2e/README.md).
+
 The project intentionally has no runtime dependencies. Development tooling is
 limited to ESLint and Prettier.
 
 See [docs/release-checklist.md](docs/release-checklist.md) before publishing a
 new npm release.
+
+## Documentation
+
+| Doc                                                                  | Read it when                                               |
+| -------------------------------------------------------------------- | ---------------------------------------------------------- |
+| [RUNBOOK.md](RUNBOOK.md)                                             | Setting up a scheduled watch loop                          |
+| [docs/contract.md](docs/contract.md)                                 | You need the exact classes, exit codes, and payload schema |
+| [docs/architecture.md](docs/architecture.md)                         | Understanding internals and boundaries                     |
+| [docs/watch-loop-prompt.md](docs/watch-loop-prompt.md)               | You want a cron-tick prompt template                       |
+| [docs/entities-research/README.md](docs/entities-research/README.md) | Researching future watch entities                          |
+| [CONTRIBUTING.md](CONTRIBUTING.md)                                   | Contributing changes                                       |
+| [CHANGELOG.md](CHANGELOG.md)                                         | Checking what changed between versions                     |
+
+## License
+
+[MIT](LICENSE) © diegomarino

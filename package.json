@@ -44,7 +44,11 @@
   "files": [
     "gh-delta.mjs",
     "lib",
-    "docs",
+    "docs/architecture.md",
+    "docs/contract.md",
+    "docs/watch-loop-prompt.md",
+    "docs/release-checklist.md",
+    "docs/entities-research",
     "README.md",
     "RUNBOOK.md",
     "CHANGELOG.md",

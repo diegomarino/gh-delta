@@ -27,7 +27,7 @@ such as `ScheduleWakeup`.
 Run the detector once before creating the recurring job:
 
 ```bash
-node ./gh-delta.mjs \
+gh-delta \
   --repo <owner/name> \
   --monitor-id <stable-monitor-id> \
   --state-dir ./state \
@@ -65,7 +65,7 @@ Use this order inside each tick:
 Tick command:
 
 ```bash
-node ./gh-delta.mjs \
+gh-delta \
   --repo <owner/name> \
   --monitor-id <stable-monitor-id> \
   --state-dir ./state \
@@ -76,7 +76,7 @@ node ./gh-delta.mjs \
 Optional outpost command:
 
 ```bash
-node ./gh-delta.mjs \
+gh-delta \
   --repo <owner/name> \
   --monitor-id <stable-monitor-id> \
   --state-dir ./state \
@@ -85,13 +85,7 @@ node ./gh-delta.mjs \
   --outpost-url https://example.com/gh-delta
 ```
 
-Exit codes:
-
-- `0`: baseline established or no change since the last check. Report the
-  printed heartbeat and stop.
-- `10`: deltas found. Read the printed delta list, act on each delta, and stop.
-- `1`: argument, `gh`, network, or parse error. The snapshot was not updated.
-  Log the error and stop; the next scheduled fire retries.
+Exit codes: see [Exit Codes](docs/contract.md#exit-codes). On `10`, act on each listed delta; on `1`, log the error and let the next scheduled fire retry.
 
 Heartbeat format:
 
@@ -111,32 +105,7 @@ When the detector exits `10`, `gh-delta` sends one JSON `POST` per delta with
 failure, timeout, DNS failure, `4xx`, or `5xx` prints an `outpost warning` but
 does not change the detector result.
 
-Payloads use schema v1:
-
-```json
-{
-  "type": "gh-delta.delta",
-  "schemaVersion": 1,
-  "eventId": "gh-delta.delta.v1:owner/repo:prs-5m:issue:17:relabeled:2026-07-01T12:00:00.000Z",
-  "repo": "owner/repo",
-  "monitorId": "prs-5m",
-  "detectedAt": "2026-07-01T12:00:00.000Z",
-  "entity": "issue",
-  "number": 17,
-  "title": "Backfill imports",
-  "classes": ["relabeled"],
-  "state": "OPEN",
-  "labels": ["worker", "backend"],
-  "line": "ISSUE #17 \"Backfill imports\": relabeled",
-  "delta": {
-    "from": {},
-    "to": {}
-  },
-  "links": {
-    "html": "https://github.com/owner/repo/issues/17"
-  }
-}
-```
+Payloads use schema v1: see [Outpost payload schema v1](docs/contract.md#outpost-payload-schema-v1) for the full envelope.
 
 The endpoint owns filtering, deduplication by `eventId`, and any downstream
 action. Do not put secrets in the outpost URL. If authentication is added later,

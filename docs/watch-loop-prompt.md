@@ -11,7 +11,7 @@ Replace the placeholders before scheduling it.
 Run the GitHub delta detector for `<owner/name>` and act on what it reports.
 
 1. Run exactly this:
-   node ./gh-delta.mjs \
+   gh-delta \
      --repo <owner/name> \
      --monitor-id <stable-monitor-id> \
      --state-dir ./state \
@@ -81,7 +81,7 @@ Rules:
 1. Seed the baseline once:
 
    ```bash
-   node ./gh-delta.mjs \
+   gh-delta \
      --repo <owner/name> \
      --monitor-id <stable-monitor-id> \
      --state-dir ./state \

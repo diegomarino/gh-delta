@@ -1,0 +1,42 @@
+name: publish
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write # required for npm OIDC trusted publishing
+
+concurrency:
+  group: publish-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # Dormant switch — remains a no-op until the go-public runbook sets this.
+    if: ${{ vars.RELEASE_AUTOMATION_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the released tag
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 'lts/*'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Upgrade npm to an OIDC-capable version
+        # Node 22.x bundles npm 10.x; trusted publishing needs npm >= 11.5.1.
+        run: npm install --global npm@^11.5.1
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Publish to npm with provenance
+        # OIDC trusted publishing: no NODE_AUTH_TOKEN. --provenance is required
+        # explicitly; id-token:write alone does not generate provenance.
+        run: npm publish --provenance --access public

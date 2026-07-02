@@ -291,36 +291,7 @@ Failures are warnings, not detector failures. A timeout, DNS failure, HTTP `4xx`
 or HTTP `5xx` does not alter the detector exit code and does not cause another
 snapshot write.
 
-Schema v1 payloads use this envelope:
-
-```json
-{
-  "type": "gh-delta.delta",
-  "schemaVersion": 1,
-  "eventId": "gh-delta.delta.v1:owner/repo:prs-5m:issue:17:relabeled:2026-07-01T12:00:00.000Z",
-  "repo": "owner/repo",
-  "monitorId": "prs-5m",
-  "detectedAt": "2026-07-01T12:00:00.000Z",
-  "entity": "issue",
-  "number": 17,
-  "title": "Backfill imports",
-  "classes": ["relabeled"],
-  "state": "OPEN",
-  "labels": ["worker", "backend"],
-  "line": "ISSUE #17 \"Backfill imports\": relabeled",
-  "delta": {
-    "from": {},
-    "to": {}
-  },
-  "links": {
-    "html": "https://github.com/owner/repo/issues/17"
-  }
-}
-```
-
-`eventId` is deterministic from repo, monitor id, entity, number, class list, and
-the detector timestamp. The external endpoint owns filtering, deduplication, and
-actions.
+See [Outpost payload schema v1](contract.md#outpost-payload-schema-v1) for the full schema v1 envelope. `eventId` is deterministic from repo, monitor id, entity, number, class list, and the detector timestamp. The external endpoint owns filtering, deduplication, and actions.
 
 ## Error Contract
 
@@ -338,24 +309,7 @@ workflow runs, but not to issues.
 
 ## Delta Classification
 
-Each changed object can emit one or more classes:
-
-- `new`
-- `closed`
-- `reopened`
-- `merged`
-- `draft-ready`
-- `ci-changed`
-- `review-changed`
-- `became-mergeable`
-- `new-comments`
-- `unresolved-threads-added`
-- `unresolved-threads-resolved`
-- `review-threads-changed`
-- `relabeled`
-- `missing`
-- `still-missing`
-- `updated`
+Each changed object can emit one or more classes: see [Delta Classes](contract.md#delta-classes) for the full list.
 
 `updated` is the recall-over-precision fallback. It fires when the fingerprint
 changed but no more specific class matched.
