@@ -15,3 +15,10 @@ This project follows semantic versioning once published to npm.
 - Added research-only docs for future entity and selector design.
 - Added Node test suite, linting, formatting, coverage reporting, and package
   dry-run checks.
+- Added `schemaVersion: 1` to every JSON report (success and error) so consumers
+  can pin the report shape at runtime.
+- Made the outpost `eventId` order-independent by sorting `classes` before
+  joining.
+- Hardened `docs/contract.md`: class applicability table, closed-set /
+  non-empty / forward-compat guarantees, `from`/`to` opacity policy and
+  nullability, error-report shape, and snapshot semantics.

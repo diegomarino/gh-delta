@@ -16,8 +16,21 @@ import { renderHelpJson, renderHelpText } from './lib/help.mjs';
 import { formatOutpostWarnings, formatTextOutput } from './lib/text-output.mjs';
 import { renderVersionText } from './lib/version.mjs';
 
+// Version of the machine-readable detector report shape. Bumped only on a
+// breaking change (a field removed or renamed). Additive fields — new optional
+// keys on the report, a delta, or a fingerprint — do not bump it. Consumers can
+// assert `report.schemaVersion === 1` on every JSON response, success or error.
+export const REPORT_SCHEMA_VERSION = 1;
+
 function line(d) {
   return `${d.entity.toUpperCase()} #${d.number} "${d.title}": ${d.classes.join(', ')}`;
+}
+
+// Stamp the schema version on error reports so they stay self-describing. Error
+// reports are `{schemaVersion, error, at, repo?, monitorId?}` — they never carry
+// `deltas`, so consumers must branch on exit code (1) before reading `deltas`.
+function errorReport(fields) {
+  return { schemaVersion: REPORT_SCHEMA_VERSION, ...fields };
 }
 
 function hasFlag(argv, flag) {
@@ -72,59 +85,59 @@ export function run(argv, deps = {}) {
       },
     }));
   } catch (err) {
-    return { code: 1, report: { error: String(err?.message ?? err), at } };
+    return { code: 1, report: errorReport({ error: String(err?.message ?? err), at }) };
   }
   if (values.help) return { code: 0, report: renderHelpText('gh-delta') };
   if (values['help-json']) return { code: 0, report: renderHelpJson('gh-delta') };
   if (values.version) return { code: 0, report: renderVersionText() };
   if (!values.repo)
-    return { code: 1, report: { error: 'missing required --repo <owner/name>', at } };
+    return { code: 1, report: errorReport({ error: 'missing required --repo <owner/name>', at }) };
   if (!values['monitor-id'])
     return {
       code: 1,
-      report: { error: 'missing required --monitor-id <id>', repo: values.repo, at },
+      report: errorReport({ error: 'missing required --monitor-id <id>', repo: values.repo, at }),
     };
   if (values['state-file'] && values['state-dir'])
     return {
       code: 1,
-      report: {
+      report: errorReport({
         error: '--state-file and --state-dir are mutually exclusive',
         repo: values.repo,
         monitorId: values['monitor-id'],
         at,
-      },
+      }),
     };
   if (!values['state-file'] && !values['state-dir'])
     return {
       code: 1,
-      report: {
+      report: errorReport({
         error: 'provide either --state-file <path> or --state-dir <dir>',
         repo: values.repo,
         monitorId: values['monitor-id'],
         at,
-      },
+      }),
     };
   const entitySelection = parseEntitySelection(values.entities);
   if (!entitySelection.ok) {
     return {
       code: 1,
-      report: {
+      report: errorReport({
         error: `--entities must include pr, issue, or both; got "${values.entities}"`,
         repo: values.repo,
         monitorId: values['monitor-id'],
         at,
-      },
+      }),
     };
   }
   if (values.format !== 'json' && values.format !== 'text') {
     return {
       code: 1,
-      report: {
+      report: errorReport({
         error: '--format must be json or text',
         repo: values.repo,
         monitorId: values['monitor-id'],
         at,
-      },
+      }),
     };
   }
   try {
@@ -144,6 +157,7 @@ export function run(argv, deps = {}) {
       ? `baseline established: ${Object.keys(snapshot.pr).length} PRs, ${Object.keys(snapshot.issue).length} issues`
       : `${deltas.length} delta(s)`;
     const report = {
+      schemaVersion: REPORT_SCHEMA_VERSION,
       baseline,
       repo: values.repo,
       monitorId: values['monitor-id'],
@@ -154,12 +168,12 @@ export function run(argv, deps = {}) {
     };
     return { code: baseline || deltas.length === 0 ? 0 : 10, report };
   } catch (err) {
-    const report = {
+    const report = errorReport({
       error: String(err?.message ?? err),
       repo: values.repo,
       monitorId: values['monitor-id'],
       at,
-    };
+    });
     return { code: 1, report };
   }
 }
@@ -177,13 +191,14 @@ export async function runWithOutpost(argv, deps = {}) {
     now = () => new Date().toISOString(),
   } = deps;
   const parsed = parseOutpostArgs(argv);
-  if (parsed.error) return { code: 1, report: { error: parsed.error, at: now() }, warnings: [] };
+  if (parsed.error)
+    return { code: 1, report: errorReport({ error: parsed.error, at: now() }), warnings: [] };
 
   let outpostUrl;
   if (parsed.outpostUrl !== undefined) {
     const validation = validateOutpostUrl(parsed.outpostUrl);
     if (!validation.ok)
-      return { code: 1, report: { error: validation.error, at: now() }, warnings: [] };
+      return { code: 1, report: errorReport({ error: validation.error, at: now() }), warnings: [] };
     outpostUrl = validation.url;
   }
 

@@ -60,10 +60,21 @@ test('first run returns code 0 (baseline) and writes the snapshot', () => {
     d,
   );
   assert.equal(code, 0);
+  assert.equal(report.schemaVersion, 1);
   assert.equal(report.baseline, true);
   assert.equal(report.monitorId, 'main');
   assert.deepEqual(report.entities, ['pr', 'issue']);
   assert.equal(d.writes, 1);
+});
+
+test('error reports carry schemaVersion and omit deltas', () => {
+  const d = deps([[basePr]]);
+  const { code, report } = run(['--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
+  assert.equal(code, 1);
+  assert.equal(report.schemaVersion, 1);
+  assert.match(report.error, /--repo/);
+  assert.equal(report.deltas, undefined);
+  assert.equal(d.writes, 0);
 });
 
 test('--state-dir derives a monitor-scoped snapshot path', () => {
@@ -500,4 +511,22 @@ test('gh-delta rejects invalid --outpost-url before fetching GitHub', async () =
   assert.equal(code, 1);
   assert.equal(fetches, 0);
   assert.match(report.error, /--outpost-url must use http: or https:/);
+});
+
+test('outpost eventId is order-independent across class permutations', async () => {
+  const { buildOutpostPayload } = await import('../lib/outpost.mjs');
+  const report = { repo: 'o/r', monitorId: 'main', at: '2026-07-01T12:00:00Z' };
+  const a = buildOutpostPayload({
+    report,
+    delta: { entity: 'pr', number: 42, title: 'x', classes: ['review-changed', 'ci-changed'] },
+  });
+  const b = buildOutpostPayload({
+    report,
+    delta: { entity: 'pr', number: 42, title: 'x', classes: ['ci-changed', 'review-changed'] },
+  });
+  assert.equal(a.eventId, b.eventId);
+  assert.equal(
+    a.eventId,
+    'gh-delta.delta.v1:o/r:main:pr:42:ci-changed+review-changed:2026-07-01T12:00:00Z',
+  );
 });
