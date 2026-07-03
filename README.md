@@ -125,7 +125,8 @@ Options:
 
 - `--repo`: repository in `owner/name` form. Required.
 - `--monitor-id`: stable monitor identity used in reports, event IDs, and
-  derived snapshot paths. Required.
+  derived snapshot paths. Must start with a letter or number and contain only
+  letters, numbers, dot, underscore, or dash. Required.
 - `--state-dir`: directory for a derived snapshot path scoped by repo, monitor
   id, and selected entities. Mutually exclusive with `--state-file`.
 - `--state-file`: explicit snapshot JSON path. Mutually exclusive with
@@ -163,7 +164,7 @@ gh-delta --repo org/app --monitor-id prs-5m --state-dir ./state --entities pr
 uses:
 
 ```text
-./state/org-app__prs-5m__pr.json
+./state/repo-org%2Fapp__monitor-prs-5m__pr.json
 ```
 
 Use different `--monitor-id` values for monitors that should keep independent
@@ -185,9 +186,12 @@ Outpost delivery is fire-and-forget and at-most-once:
   detector exit code;
 - the snapshot has already advanced before outpost delivery is attempted.
 
+Outpost is best-effort notification. `eventId` is the semantic dedupe key and
+`deliveryId` identifies one delivery attempt. `gh-delta` does not provide
+reliable delivery, retries, an outbox, acknowledgement, or replay in `0.1`.
 The external endpoint is responsible for filtering events, deduplicating by
-`eventId`, and executing any downstream action. Outpost logs intentionally avoid
-printing endpoint URLs, query strings, headers, or future auth material.
+`eventId`, and executing any downstream action. Outpost logs intentionally
+avoid printing endpoint URLs, query strings, headers, or future auth material.
 
 See [Outpost payload schema v1](docs/contract.md#outpost-payload-schema-v1) for the full envelope and `eventId` semantics.
 
@@ -215,7 +219,7 @@ external queue if you need at-least-once action delivery.
 
 ## Programmatic Use
 
-`gh-delta` also exposes a small ESM surface for embedding in orchestrators:
+`gh-delta` exposes a small subpath-only ESM surface for embedding in orchestrators:
 
 ```js
 import { detectDeltas } from 'gh-delta/detect';
@@ -235,6 +239,12 @@ import { readSnapshot, snapshotPath, writeSnapshotAtomic } from 'gh-delta/snapsh
 import { parseEntitySelection, parseOutpostArgs } from 'gh-delta/args';
 import { getPackageMetadata, renderVersionText } from 'gh-delta/version';
 ```
+
+The package root is intentionally not exported. Use the `gh-delta` binary for
+CLI execution, and import explicit subpaths such as `gh-delta/detect` or
+`gh-delta/outpost` for programmatic use. The source file `lib/cli.mjs` is the
+internal CLI runner used by the package bin and tests; it is not part of the
+published import contract.
 
 | Import                 | Exported names                                                             | Purpose                            |
 | ---------------------- | -------------------------------------------------------------------------- | ---------------------------------- |
@@ -309,7 +319,7 @@ examples. Excerpt:
   "command": "gh-delta",
   "version": "0.1.0",
   "summary": "Deterministic GitHub issue and pull request delta detector.",
-  "usage": "gh-delta --repo <owner/name> --monitor-id <id> (--state-dir <dir> | --state-file <path>) [--entities pr,issue] [--format json|text] [--outpost-url <url>]",
+  "usage": "gh-delta --repo <owner/name> --monitor-id <id> (--state-dir <dir> | --state-file <path>) [--entities pr,issue] [--format json|text] [--detail] [--outpost-url <url>]",
   "purpose": "Run one deterministic detection pass, update the snapshot after a successful fetch, print JSON or operator text, and exit. Scheduling belongs to the caller.",
   "options": [
     {
@@ -403,10 +413,11 @@ npm run release:check
 test suite. `npm run release:check` adds the coverage report and `npm pack
 --dry-run` package-content verification.
 
-`npm run e2e:playground` runs a live acceptance test that creates and deletes a
-real private GitHub repository via `gh`. It requires an authenticated `gh` and
-network access; do not run it in CI or sandboxes. See
-[test/e2e/README.md](test/e2e/README.md).
+`npm test` imports helper files only; it does not run the live GitHub mutation
+cycle. `npm run e2e:playground` is the explicit live acceptance test. It
+creates and deletes a real private GitHub repository via `gh`, requires an
+authenticated `gh` and network access, and should not run in CI or sandboxes.
+See [test/e2e/README.md](test/e2e/README.md).
 
 The project intentionally has no runtime dependencies. Development tooling is
 limited to ESLint and Prettier.

@@ -7,9 +7,6 @@
   "packageManager": "npm@10.9.8",
   "main": "./gh-delta.mjs",
   "exports": {
-    ".": {
-      "import": "./gh-delta.mjs"
-    },
     "./detect": {
       "import": "./lib/detect.mjs"
     },
@@ -48,6 +45,7 @@
     "docs/contract.md",
     "docs/watch-loop-prompt.md",
     "docs/release-checklist.md",
+    "docs/img",
     "docs/entities-research",
     "README.md",
     "RUNBOOK.md",
@@ -64,7 +62,7 @@
     "format": "prettier . --write",
     "format:check": "prettier . --check",
     "check": "npm run lint && npm run format:check && npm test",
-    "e2e:playground": "node --input-type=module --eval 'import(\"./test/e2e/playground-e2e.mjs\").then(({ main }) => main()).catch((error) => { console.error(\"[playground-e2e] failed: \" + error.message); process.exit(1); })'",
+    "e2e:playground": "GH_DELTA_E2E_RUN=1 node ./test/e2e/playground-e2e.mjs",
     "pack:dry-run": "npm pack --dry-run --cache .npm-cache",
     "release:check": "npm run check && npm run test:coverage && npm run pack:dry-run",
     "prepublishOnly": "npm run release:check"

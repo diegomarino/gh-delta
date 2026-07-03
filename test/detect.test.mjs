@@ -218,6 +218,34 @@ test('objects still missing emit still-missing after the first missing tick', ()
   assert.deepEqual(still.deltas[0].classes, ['still-missing']);
 });
 
+test('a missing object that reappears unchanged emits reappeared', () => {
+  const base = detectDeltas(null, { pr: [pr()], issue: [] });
+  const missing = detectDeltas(base.snapshot, { pr: [], issue: [] });
+  const back = detectDeltas(missing.snapshot, { pr: [pr()], issue: [] });
+
+  assert.deepEqual(back.deltas[0].classes, ['reappeared']);
+  assert.equal(back.deltas[0].from.missing, true);
+  assert.equal(back.deltas[0].to.missing, undefined);
+  assert.equal(back.snapshot.pr['42'].missing, undefined);
+});
+
+test('a missing object that reappears changed emits reappeared plus specific classes', () => {
+  const base = detectDeltas(null, { pr: [pr()], issue: [] });
+  const missing = detectDeltas(base.snapshot, { pr: [], issue: [] });
+  const back = detectDeltas(missing.snapshot, {
+    pr: [
+      pr({
+        updatedAt: '2026-07-01T11:00:00Z',
+        comments: [{}],
+      }),
+    ],
+    issue: [],
+  });
+
+  assert.ok(back.deltas[0].classes.includes('reappeared'));
+  assert.ok(back.deltas[0].classes.includes('new-comments'));
+});
+
 test('capped comments plus updatedAt bump emits new-comments instead of updated', () => {
   const issue = {
     number: 7,

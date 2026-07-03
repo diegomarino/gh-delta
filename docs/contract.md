@@ -18,6 +18,9 @@ gh-delta --repo <owner/name> --monitor-id <id>
 ```
 
 - `--repo` and `--monitor-id` are required.
+- `--repo` must be `owner/name`.
+- `--monitor-id` must start with a letter or number and contain only letters,
+  numbers, dot, underscore, or dash.
 - `--state-file` and `--state-dir` are mutually exclusive, and exactly one is
   required. `--state-file` is an explicit snapshot path; `--state-dir` derives a
   path scoped by repo, monitor id, and selected entities (see
@@ -56,6 +59,7 @@ the array is not significant and not guaranteed stable.
 | `updated`                     | pr, issue  | Fingerprint changed with no more specific class. A PR-branch push alone (head SHA change) surfaces here.                               |
 | `missing`                     | pr, issue  | An object from the prior snapshot vanished from the fetch. Check pagination, permissions, or scope before trusting it. `to` is `null`. |
 | `still-missing`               | pr, issue  | An already-missing object is still absent. Unresolved operational state, not a fresh item. `to` is `null`.                             |
+| `reappeared`                  | pr, issue  | An object previously marked `missing` returned to the fetch. It may co-occur with other classes if the fingerprint also changed.       |
 | `merged`                      | pr only    | PR was merged.                                                                                                                         |
 | `draft-ready`                 | pr only    | PR moved from draft to ready for review.                                                                                               |
 | `ci-changed`                  | pr only    | Check run or status context changed.                                                                                                   |
@@ -190,6 +194,9 @@ collections from GitHub and diffs them against the snapshot at the
   gh-delta reads it, diffs, and atomically rewrites it after a successful fetch.
 - The **first run** (no snapshot file) seeds a baseline: exit `0`,
   `baseline: true`, `deltas: []`. Persist the state directory between runs.
+- Snapshot JSON is strict. A missing file seeds a baseline, but any present file
+  that is not exactly `{ "pr": object, "issue": object }` with numeric object
+  keys is an error and is not migrated.
 - A derived `--state-dir` path is scoped by repo, monitor id, **and** selected
   entities. A `--entities pr` run and a `--entities pr,issue` run use **different**
   files; keep `--entities` fixed per monitor so state is not split.
@@ -211,7 +218,8 @@ prior/next state (`from` is `null` for a `new` object; `to` is `null` for a
 {
   "type": "gh-delta.delta",
   "schemaVersion": 1,
-  "eventId": "gh-delta.delta.v1:owner/repo:prs-5m:pr:42:new:2026-07-01T12:00:00.000Z",
+  "eventId": "gh-delta.delta.v1:owner/repo:prs-5m:pr:42:new",
+  "deliveryId": "gh-delta.delivery.v1:owner/repo:prs-5m:pr:42:new:2026-07-01T12:00:00.000Z",
   "repo": "owner/repo",
   "monitorId": "prs-5m",
   "detectedAt": "2026-07-01T12:00:00.000Z",
@@ -227,8 +235,10 @@ prior/next state (`from` is `null` for a `new` object; `to` is `null` for a
 }
 ```
 
-`eventId` is deterministic for a given repo, monitor id, entity, number, class
-set, and detector timestamp. Classes are sorted before they are joined into the
-id, so it is independent of the order the classifier emitted them. PR payloads
-currently use an empty `labels` array because the PR fetch does not collect
-labels.
+Outpost is best-effort notification. `eventId` is stable for the semantic delta
+and is the receiver's dedupe key. `deliveryId` includes the detector timestamp
+and identifies one delivery attempt. `gh-delta` does not provide reliable
+delivery, retries, an outbox, acknowledgement, or replay in `0.1`. Classes are
+sorted before they are joined into the ids, so semantic identity is independent
+of the order the classifier emitted them. PR payloads currently use an empty
+`labels` array because the PR fetch does not collect labels.

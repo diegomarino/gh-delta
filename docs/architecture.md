@@ -9,6 +9,7 @@ browser sessions, merge pull requests, or send messages to workers.
 ```text
 watch loop / timer
   -> gh-delta.mjs
+      -> lib/cli.mjs          internal CLI runner used by bin/tests only
       -> lib/args.mjs         parse shared CLI option policy
       -> lib/gh.mjs           fetch current GitHub state with gh
       -> lib/snapshot.mjs     read previous snapshot
@@ -85,23 +86,29 @@ validated args
   -> --state-file present
      -> use that exact path
   -> --state-dir present
-     -> derive <state-dir>/<repo>__<monitor-id>__<entities>.json
+     -> derive <state-dir>/repo-<encoded repo>__monitor-<encoded monitor-id>__<entities>.json
 ```
 
 Detection flow:
 
 ```text
 resolved snapshot path
-  -> fetch requested GitHub entities
-     -> GitHub CLI, network, parse, or hard-limit error
-        -> exit 1
-        -> snapshot is not read or written
-     -> open PR review thread GraphQL count is incomplete
-        -> exit 1
-        -> snapshot is not read or written
   -> read snapshot file
      -> file does not exist
         -> old snapshot is null
+     -> snapshot JSON parses but has invalid shape
+        -> exit 1
+        -> GitHub is not fetched
+     -> invalid JSON
+        -> exit 1
+        -> GitHub is not fetched
+  -> fetch requested GitHub entities
+     -> GitHub CLI, network, parse, or hard-limit error
+        -> exit 1
+        -> snapshot is not written
+     -> open PR review thread GraphQL count is incomplete
+        -> exit 1
+        -> snapshot is not written
         -> current GitHub state becomes the baseline
         -> write new snapshot
         -> exit 0
@@ -148,8 +155,10 @@ The impure edges are isolated:
   one versioned source of truth.
 - `entrypoint.mjs` detects direct CLI invocation through real paths so npm/npx
   `.bin` symlinks start the package bin correctly.
-- `gh-delta.mjs` wires CLI flags, GitHub fetches, snapshot I/O, output formats,
+- `lib/cli.mjs` wires CLI flags, GitHub fetches, snapshot I/O, output formats,
   outposts, and exit codes.
+- `gh-delta.mjs` is the executable bin entrypoint only. It delegates to
+  `lib/cli.mjs` and does not define a public import surface.
 
 ## Package Surface
 
@@ -162,6 +171,11 @@ The npm package exposes one CLI and a small ESM import surface:
 - `gh-delta/snapshot`: snapshot path/read/write helpers.
 - `gh-delta/args`: shared argument parsing helpers.
 - `gh-delta/version`: package metadata and version text helpers.
+
+The package root is intentionally not exported. `package.json#main` still points
+at `gh-delta.mjs` for metadata compatibility, but supported programmatic imports
+must use explicit subpaths. `lib/cli.mjs` remains an internal source module for
+the package bin and local tests, not a published package export.
 
 Everything under `lib/` should stay dependency-free unless the added dependency
 materially improves correctness. The package currently has no runtime
@@ -182,7 +196,7 @@ repo + monitor-id + entities
 Example:
 
 ```text
-./state/org-app__prs-5m__pr.json
+./state/repo-org%2Fapp__monitor-prs-5m__pr.json
 ```
 
 `--state-file` bypasses path derivation for operators that need a fully explicit
@@ -291,7 +305,7 @@ Failures are warnings, not detector failures. A timeout, DNS failure, HTTP `4xx`
 or HTTP `5xx` does not alter the detector exit code and does not cause another
 snapshot write.
 
-See [Outpost payload schema v1](contract.md#outpost-payload-schema-v1) for the full schema v1 envelope. `eventId` is deterministic from repo, monitor id, entity, number, class list, and the detector timestamp. The external endpoint owns filtering, deduplication, and actions.
+See [Outpost payload schema v1](contract.md#outpost-payload-schema-v1) for the full schema v1 envelope. `eventId` is deterministic from repo, monitor id, entity, number, and class list; `deliveryId` adds the detector timestamp for one delivery attempt. The external endpoint owns filtering, deduplication, and actions.
 
 ## Error Contract
 

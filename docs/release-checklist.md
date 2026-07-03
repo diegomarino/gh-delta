@@ -55,6 +55,7 @@ The package should contain:
 - `gh-delta.mjs`;
 - `lib/*.mjs`;
 - `docs/*.md`;
+- `docs/img/*.png` referenced by `README.md`;
 - `README.md`;
 - `RUNBOOK.md`;
 - `CHANGELOG.md`;

@@ -23,10 +23,20 @@ test('gh-delta starts when invoked through an npm-style bin symlink', () => {
   assert.doesNotMatch(output, /gh-delta-tick/);
 });
 
+test('package root import is intentionally not exported', async () => {
+  await assert.rejects(() => import('gh-delta'), /ERR_PACKAGE_PATH_NOT_EXPORTED/);
+});
+
 test('package publishes only the gh-delta bin', () => {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
   assert.deepEqual(pkg.bin, { 'gh-delta': 'gh-delta.mjs' });
+  assert.equal(pkg.exports['.'], undefined);
   assert.equal(pkg.exports['./tick'], undefined);
   assert.ok(!pkg.files.includes('gh-delta-tick.mjs'));
+});
+
+test('package includes README image assets referenced by docs', () => {
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.ok(pkg.files.includes('docs/img'));
 });

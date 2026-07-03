@@ -107,6 +107,9 @@ does not change the detector result.
 
 Payloads use schema v1: see [Outpost payload schema v1](docs/contract.md#outpost-payload-schema-v1) for the full envelope.
 
+Outpost is best-effort notification. `eventId` is the semantic dedupe key and
+`deliveryId` identifies one delivery attempt. `gh-delta` does not provide
+reliable delivery, retries, an outbox, acknowledgement, or replay in `0.1`.
 The endpoint owns filtering, deduplication by `eventId`, and any downstream
 action. Do not put secrets in the outpost URL. If authentication is added later,
 headers or tokens must not be printed in logs.
@@ -172,6 +175,7 @@ developer polling loops or webhook-driven automation.
 | `missing`                     | previous object disappeared from fetch; check pagination, permissions, or scope |
 | `still-missing`               | object remains absent; unresolved operational issue, not a fresh delta          |
 | `updated`                     | catch-all (`updatedAt` or head-only); inspect GitHub before dismissing          |
+| `reappeared`                  | object returned after prior `missing`; check why it vanished before acting      |
 
 ## Operating Rules
 

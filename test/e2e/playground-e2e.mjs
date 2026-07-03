@@ -304,3 +304,7 @@ export async function main() {
     }
   }
 }
+
+if (process.env.GH_DELTA_E2E_RUN === '1') {
+  await main();
+}

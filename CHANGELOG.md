@@ -22,3 +22,9 @@ This project follows semantic versioning once published to npm.
 - Hardened `docs/contract.md`: class applicability table, closed-set /
   non-empty / forward-compat guarantees, `from`/`to` opacity policy and
   nullability, error-report shape, and snapshot semantics.
+- Hardened snapshot validation so malformed state files fail before GitHub fetches.
+- Changed derived snapshot filenames to collision-free encoded identity segments.
+- Added `reappeared` delta classification for objects returning after missing fetches.
+- Closed the accidental package root import surface; documented subpaths remain public.
+- Clarified outpost as best-effort delivery and separated semantic `eventId` from delivery attempts.
+- Fixed CLI help drift, duplicate `--format` handling, package README image contents, and live e2e documentation.

@@ -2,7 +2,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseEntitySelection, parseOutpostArgs } from '../lib/args.mjs';
+import {
+  parseEntitySelection,
+  parseOutpostArgs,
+  validateMonitorId,
+  validateRepo,
+} from '../lib/args.mjs';
 
 test('parseOutpostArgs strips a separate outpost URL flag and preserves detector args', () => {
   assert.deepEqual(
@@ -54,4 +59,21 @@ test('parseEntitySelection accepts pr, issue, or both and rejects empty selectio
     invalid: [],
     ok: false,
   });
+});
+
+test('validateRepo accepts owner/name and rejects malformed repo specs', () => {
+  assert.deepEqual(validateRepo('owner/repo'), { ok: true, repo: 'owner/repo' });
+  assert.deepEqual(validateRepo('owner/repo/extra').ok, false);
+  assert.deepEqual(validateRepo('/repo').ok, false);
+  assert.deepEqual(validateRepo('owner/').ok, false);
+  assert.deepEqual(validateRepo('owner repo/name').ok, false);
+});
+
+test('validateMonitorId accepts stable safe ids and rejects path-like ids', () => {
+  assert.deepEqual(validateMonitorId('prs-5m'), { ok: true, monitorId: 'prs-5m' });
+  assert.deepEqual(validateMonitorId('team.prs_fast'), { ok: true, monitorId: 'team.prs_fast' });
+  assert.deepEqual(validateMonitorId('').ok, false);
+  assert.deepEqual(validateMonitorId('../state').ok, false);
+  assert.deepEqual(validateMonitorId('with space').ok, false);
+  assert.deepEqual(validateMonitorId('..').ok, false);
 });

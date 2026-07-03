@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { run, runCommand } from '../gh-delta.mjs';
+import { run, runCommand } from '../lib/cli.mjs';
 
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -84,8 +84,8 @@ test('--state-dir derives a monitor-scoped snapshot path', () => {
     d,
   );
   assert.equal(code, 0);
-  assert.equal(d.readPath, '/tmp/state/o-r__prs-fast__pr.json');
-  assert.equal(d.writePath, '/tmp/state/o-r__prs-fast__pr.json');
+  assert.equal(d.readPath, '/tmp/state/repo-o%2Fr__monitor-prs-fast__pr.json');
+  assert.equal(d.writePath, '/tmp/state/repo-o%2Fr__monitor-prs-fast__pr.json');
 });
 
 test('a delta returns code 10 and rewrites the snapshot', () => {
@@ -379,8 +379,60 @@ test('corrupt snapshot read failure returns code 1 and does NOT write', () => {
   assert.match(report.error, /invalid snapshot JSON/);
 });
 
+test('invalid repo and monitor id fail before fetching', () => {
+  const d = {
+    fetchPRs: () => {
+      throw new Error('should not fetch');
+    },
+    fetchIssues: () => {
+      throw new Error('should not fetch');
+    },
+    now: () => '2026-07-01T12:00:00Z',
+  };
+
+  assert.equal(
+    run(['--repo', 'owner/repo/extra', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d)
+      .code,
+    1,
+  );
+  assert.equal(
+    run(['--repo', 'owner/repo', '--monitor-id', '../bad', '--state-file', '/tmp/x.json'], d).code,
+    1,
+  );
+});
+
+test('existing snapshot is read before GitHub fetches', () => {
+  let read = false;
+  let fetched = false;
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--entities', 'pr'],
+    {
+      fetchPRs: () => {
+        fetched = true;
+        throw new Error('should not fetch');
+      },
+      fetchIssues: () => {
+        throw new Error('should not fetch');
+      },
+      readSnapshot: () => {
+        read = true;
+        throw new Error('invalid snapshot JSON at /tmp/x.json');
+      },
+      writeSnapshotAtomic: () => {
+        throw new Error('should not write');
+      },
+      now: () => '2026-07-01T12:00:00Z',
+    },
+  );
+
+  assert.equal(code, 1);
+  assert.equal(read, true);
+  assert.equal(fetched, false);
+  assert.match(report.error, /invalid snapshot/);
+});
+
 test('gh-delta sends outpost payloads with monitor id after the snapshot write', async () => {
-  const { runWithOutpost } = await import('../gh-delta.mjs');
+  const { runWithOutpost } = await import('../lib/cli.mjs');
   const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: {
       pr: {
@@ -427,9 +479,10 @@ test('gh-delta sends outpost payloads with monitor id after the snapshot write',
   assert.equal(posts[0].body.type, 'gh-delta.delta');
   assert.equal(posts[0].body.monitorId, 'main');
   assert.equal(posts[0].body.branch, undefined);
+  assert.equal(posts[0].body.eventId, 'gh-delta.delta.v1:o/r:main:pr:42:merged');
   assert.equal(
-    posts[0].body.eventId,
-    'gh-delta.delta.v1:o/r:main:pr:42:merged:2026-07-01T12:00:00Z',
+    posts[0].body.deliveryId,
+    'gh-delta.delivery.v1:o/r:main:pr:42:merged:2026-07-01T12:00:00Z',
   );
 });
 
@@ -480,8 +533,57 @@ test('--format json prints the detector report JSON from the main gh-delta binar
   assert.equal(report.baseline, true);
 });
 
+test('duplicate --format flags use the same last-value rule for parsing and rendering', async () => {
+  const d = deps([[]]);
+  const textThenJson = await runCommand(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/x.json',
+      '--format',
+      'text',
+      '--format',
+      'json',
+    ],
+    d,
+  );
+  assert.equal(JSON.parse(textThenJson.output).baseline, true);
+
+  const d2 = deps([[]]);
+  const jsonThenText = await runCommand(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/x.json',
+      '--format',
+      'json',
+      '--format',
+      'text',
+    ],
+    d2,
+  );
+  assert.match(jsonThenText.output, /Baseline seeded/);
+});
+
+test('--help-json usage includes --detail and documents entities grammar', () => {
+  const { report } = run(['--help-json'], { now: () => '2026-07-01T12:00:00Z' });
+  const help = JSON.parse(report);
+  assert.match(help.usage, /\[--detail\]/);
+  const entities = help.options.find((option) => option.name === '--entities');
+  assert.equal(
+    entities.grammar,
+    'comma-separated unique values from: pr, issue; input order is canonicalized',
+  );
+});
+
 test('gh-delta rejects invalid --outpost-url before fetching GitHub', async () => {
-  const { runWithOutpost } = await import('../gh-delta.mjs');
+  const { runWithOutpost } = await import('../lib/cli.mjs');
   let fetches = 0;
   const { code, report } = await runWithOutpost(
     [
@@ -525,8 +627,54 @@ test('outpost eventId is order-independent across class permutations', async () 
     delta: { entity: 'pr', number: 42, title: 'x', classes: ['ci-changed', 'review-changed'] },
   });
   assert.equal(a.eventId, b.eventId);
+  assert.equal(a.deliveryId, b.deliveryId);
+  assert.equal(a.eventId, 'gh-delta.delta.v1:o/r:main:pr:42:ci-changed+review-changed');
   assert.equal(
-    a.eventId,
-    'gh-delta.delta.v1:o/r:main:pr:42:ci-changed+review-changed:2026-07-01T12:00:00Z',
+    a.deliveryId,
+    'gh-delta.delivery.v1:o/r:main:pr:42:ci-changed+review-changed:2026-07-01T12:00:00Z',
   );
+});
+
+test('outpost eventId is stable across detector timestamps while deliveryId changes', async () => {
+  const { buildOutpostPayload } = await import('../lib/outpost.mjs');
+  const delta = { entity: 'pr', number: 42, title: 'x', classes: ['merged'] };
+  const first = buildOutpostPayload({
+    report: { repo: 'o/r', monitorId: 'main', at: '2026-07-01T12:00:00Z' },
+    delta,
+  });
+  const second = buildOutpostPayload({
+    report: { repo: 'o/r', monitorId: 'main', at: '2026-07-01T12:00:01Z' },
+    delta,
+  });
+
+  assert.equal(first.eventId, second.eventId);
+  assert.notEqual(first.deliveryId, second.deliveryId);
+});
+
+test('sendOutposts stops after the configured max payload count', async () => {
+  const { sendOutposts } = await import('../lib/outpost.mjs');
+  const report = {
+    repo: 'o/r',
+    monitorId: 'main',
+    at: '2026-07-01T12:00:00Z',
+    deltas: [
+      { entity: 'pr', number: 1, title: 'one', classes: ['new'] },
+      { entity: 'pr', number: 2, title: 'two', classes: ['new'] },
+    ],
+  };
+  const posts = [];
+  const { warnings } = await sendOutposts({
+    outpostUrl: 'https://example.com',
+    report,
+    maxPosts: 1,
+    fetchImpl: async (_url, options) => {
+      posts.push(JSON.parse(options.body));
+      return { ok: true, status: 202 };
+    },
+  });
+
+  assert.equal(posts.length, 1);
+  assert.deepEqual(warnings, [
+    { label: 'outpost', reason: 'skipped 1 delta(s) after max outpost post count 1' },
+  ]);
 });

@@ -54,6 +54,8 @@ Run the GitHub delta detector for `<owner/name>` and act on what it reports.
      pagination, permissions, or scope before trusting the snapshot.
    - still-missing: the same object is still absent. Treat it as unresolved
      operational state, not a fresh item.
+   - reappeared: a previously missing object returned. Check why it vanished
+     before acting on the return.
    - updated: catch-all timestamp or commit-only bump. Inspect GitHub before
      dismissing it, including comments and review threads.
 

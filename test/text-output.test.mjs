@@ -62,13 +62,20 @@ test('delta text output prints each delta with suggested action', () => {
           classes: ['unresolved-threads-added'],
           line: 'PR #9 "Refactor queue worker": unresolved-threads-added',
         },
+        {
+          entity: 'issue',
+          number: 21,
+          title: 'Webhook retries',
+          classes: ['reappeared'],
+          line: 'ISSUE #21 "Webhook retries": reappeared',
+        },
       ],
-      summary: '4 delta(s)',
+      summary: '5 delta(s)',
     },
     now: () => '2026-07-01T10:05:00.000Z',
   });
 
-  assert.match(output, /2026-07-01T10:05:00.000Z \| 4 delta\(s\)/);
+  assert.match(output, /2026-07-01T10:05:00.000Z \| 5 delta\(s\)/);
   assert.match(output, /PR #42 "Add billing webhook"/);
   assert.match(output, /suggested action: CI\/review changed/);
   assert.match(output, /ISSUE #17 "Backfill customer imports"/);
@@ -77,6 +84,8 @@ test('delta text output prints each delta with suggested action', () => {
   assert.match(output, /suggested action: object is still absent/);
   assert.match(output, /PR #9 "Refactor queue worker"/);
   assert.match(output, /suggested action: unresolved review threads/);
+  assert.match(output, /ISSUE #21 "Webhook retries"/);
+  assert.match(output, /suggested action: object returned to the fetch/);
 });
 
 test('error text output reports snapshot-preserving failure', () => {
