@@ -72,7 +72,7 @@ test('prFingerprint extracts the tracked fields', () => {
     reviewDecision: 'APPROVED',
     latestReviews: [{ author: { login: 'alice' }, state: 'APPROVED' }],
     mergeable: 'MERGEABLE',
-    comments: [{}, {}, {}],
+    totalCommentsCount: 3,
     reviewThreads: 5,
     unresolvedReviewThreads: 2,
     headRefOid: 'abc123',
@@ -83,20 +83,20 @@ test('prFingerprint extracts the tracked fields', () => {
   assert.equal(fp.review, 'APPROVED');
   assert.equal(fp.mergeable, 'MERGEABLE');
   assert.equal(fp.comments, 3);
-  assert.equal(fp.commentsOverflow, false);
+  assert.equal('commentsOverflow' in fp, false);
   assert.equal(fp.reviewThreads, 5);
   assert.equal(fp.unresolvedReviewThreads, 2);
   assert.equal(fp.head, 'abc123');
   assert.equal(typeof fp.ci, 'string');
 });
 
-test('prFingerprint marks capped comment arrays as overflow', () => {
-  const pr = {
+test('prFingerprint reads exact totals beyond the old 100 cap', () => {
+  const fp = prFingerprint({
     state: 'OPEN',
     updatedAt: '2026-07-01T10:00:00Z',
-    comments: Array.from({ length: 100 }, () => ({})),
-  };
-  assert.equal(prFingerprint(pr).commentsOverflow, true);
+    totalCommentsCount: 347,
+  });
+  assert.equal(fp.comments, 347);
 });
 
 test('issueFingerprint sorts labels and counts comments', () => {
@@ -105,20 +105,10 @@ test('issueFingerprint sorts labels and counts comments', () => {
     state: 'OPEN',
     updatedAt: '2026-07-01T10:00:00Z',
     labels: [{ name: 'worker' }, { name: 'backend' }],
-    comments: [{}, {}],
+    comments: 2,
   };
   const fp = issueFingerprint(issue);
   assert.deepEqual(fp.labels, ['backend', 'worker']);
   assert.equal(fp.comments, 2);
-  assert.equal(fp.commentsOverflow, false);
-});
-
-test('issueFingerprint marks capped comment arrays as overflow', () => {
-  const issue = {
-    state: 'OPEN',
-    updatedAt: '2026-07-01T10:00:00Z',
-    labels: [],
-    comments: Array.from({ length: 100 }, () => ({})),
-  };
-  assert.equal(issueFingerprint(issue).commentsOverflow, true);
+  assert.equal('commentsOverflow' in fp, false);
 });

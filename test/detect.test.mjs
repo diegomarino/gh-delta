@@ -13,7 +13,7 @@ const pr = (over = {}) => ({
   reviewDecision: 'REVIEW_REQUIRED',
   latestReviews: [],
   mergeable: 'UNKNOWN',
-  comments: [],
+  totalCommentsCount: 0,
   reviewThreads: 0,
   unresolvedReviewThreads: 0,
   headRefOid: 'sha1',
@@ -157,7 +157,7 @@ test('issue label removal emits relabeled', () => {
     state: 'OPEN',
     updatedAt: '2026-07-01T10:00:00Z',
     labels: [{ name: 'worker' }, { name: 'backend' }],
-    comments: [],
+    comments: 0,
   };
   const base = detectDeltas(null, { pr: [], issue: [issue] });
   const r = detectDeltas(base.snapshot, {
@@ -176,12 +176,10 @@ test('a bare updatedAt bump with no specific signal emits `updated`', () => {
   assert.deepEqual(r.deltas[0].classes, ['updated']);
 });
 
-test('legacy fingerprints without commentsOverflow do not emit an upgrade-only delta', () => {
-  const oldSnapshot = detectDeltas(null, { pr: [pr()], issue: [] }).snapshot;
-  delete oldSnapshot.pr['42'].commentsOverflow;
-
-  const r = detectDeltas(oldSnapshot, { pr: [pr()], issue: [] });
-
+test('legacy commentsOverflow fingerprints do not emit an upgrade-only delta', () => {
+  const base = detectDeltas(null, { pr: [pr()], issue: [] });
+  base.snapshot.pr['42'].commentsOverflow = false;
+  const r = detectDeltas(base.snapshot, { pr: [pr()], issue: [] });
   assert.deepEqual(r.deltas, []);
 });
 
@@ -192,7 +190,7 @@ test('omitted entity collection preserves that side of the snapshot', () => {
     state: 'OPEN',
     updatedAt: '2026-07-01T10:00:00Z',
     labels: [],
-    comments: [],
+    comments: 0,
   };
   const base = detectDeltas(null, { pr: [pr()], issue: [issue] });
   const r = detectDeltas(base.snapshot, { pr: [pr({ updatedAt: '2026-07-01T11:00:00Z' })] });
@@ -236,7 +234,7 @@ test('a missing object that reappears changed emits reappeared plus specific cla
     pr: [
       pr({
         updatedAt: '2026-07-01T11:00:00Z',
-        comments: [{}],
+        totalCommentsCount: 1,
       }),
     ],
     issue: [],
@@ -246,20 +244,19 @@ test('a missing object that reappears changed emits reappeared plus specific cla
   assert.ok(back.deltas[0].classes.includes('new-comments'));
 });
 
-test('capped comments plus updatedAt bump emits new-comments instead of updated', () => {
+test('an exact comment total increase emits new-comments', () => {
   const issue = {
     number: 7,
     title: 'bug',
     state: 'OPEN',
     updatedAt: '2026-07-01T10:00:00Z',
     labels: [],
-    comments: Array.from({ length: 100 }, () => ({})),
+    comments: 130,
   };
   const base = detectDeltas(null, { pr: [], issue: [issue] });
   const r = detectDeltas(base.snapshot, {
     pr: [],
-    issue: [{ ...issue, updatedAt: '2026-07-01T11:00:00Z' }],
+    issue: [{ ...issue, updatedAt: '2026-07-01T11:00:00Z', comments: 131 }],
   });
-  assert.ok(r.deltas[0].classes.includes('new-comments'));
-  assert.ok(!r.deltas[0].classes.includes('updated'));
+  assert.deepEqual(r.deltas[0].classes, ['new-comments']);
 });
