@@ -793,3 +793,51 @@ test('outpost warnings land inside the JSON report, not on stderr', async () => 
   assert.equal(report.warnings.length, 1);
   assert.match(report.warnings[0].reason, /HTTP 500/);
 });
+
+test('--outpost-max-posts caps delivery from the CLI', async () => {
+  const { runWithOutpost } = await import('../lib/cli.mjs');
+  const existing = { pr: {}, issue: {} };
+  const d = deps([[basePr, { ...basePr, number: 43, title: 'second' }]], { existing });
+  const posts = [];
+  d.outpostFetch = async (url, options) => {
+    posts.push(JSON.parse(options.body));
+    return { ok: true, status: 202 };
+  };
+  const { code, warnings } = await runWithOutpost(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/x.json',
+      '--outpost-url',
+      'https://example.com/hook',
+      '--outpost-max-posts',
+      '1',
+    ],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.equal(posts.length, 1);
+  assert.match(warnings[0].reason, /skipped 1 delta/);
+});
+
+test('non-numeric outpost flags are config errors (exit 2)', () => {
+  const { code, report } = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/x.json',
+      '--outpost-timeout-ms',
+      'soon',
+    ],
+    { now: () => '2026-07-01T12:00:00Z' },
+  );
+  assert.equal(code, 2);
+  assert.equal(report.kind, 'config');
+  assert.match(report.error, /--outpost-timeout-ms/);
+});
