@@ -40,3 +40,12 @@ test('package includes README image assets referenced by docs', () => {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   assert.ok(pkg.files.includes('docs/img'));
 });
+
+test('gh-delta/contract exposes the runtime contract constants', async () => {
+  const contract = await import('gh-delta/contract');
+  assert.equal(contract.REPORT_SCHEMA_VERSION, 1);
+  assert.equal(contract.OUTPOST_SCHEMA_VERSION, 1);
+  assert.ok(Object.isFrozen(contract.DELTA_CLASSES));
+  assert.ok(contract.DELTA_CLASSES.includes('presumed-deleted'));
+  assert.deepEqual(contract.ERROR_KINDS, ['config', 'snapshot', 'github', 'io']);
+});

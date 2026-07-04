@@ -7,6 +7,9 @@
   "packageManager": "npm@10.9.8",
   "main": "./gh-delta.mjs",
   "exports": {
+    "./contract": {
+      "import": "./lib/contract.mjs"
+    },
     "./detect": {
       "import": "./lib/detect.mjs"
     },
