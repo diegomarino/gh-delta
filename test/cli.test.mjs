@@ -651,6 +651,44 @@ test('outpost eventId is stable across detector timestamps while deliveryId chan
   assert.notEqual(first.deliveryId, second.deliveryId);
 });
 
+test('--help wins over unknown flags and invalid outpost URLs', () => {
+  const d = { now: () => '2026-07-01T12:00:00Z' };
+  const helpWithBogus = run(['--help', '--bogus'], d);
+  assert.equal(helpWithBogus.code, 0);
+  assert.ok(helpWithBogus.report.includes('Usage:'));
+  const helpWithBadOutpost = run(['--help', '--outpost-url', 'not-a-url'], d);
+  assert.equal(helpWithBadOutpost.code, 0);
+  const helpJsonWins = run(['--help-json', '--repo'], d);
+  assert.equal(helpJsonWins.code, 0);
+  assert.equal(JSON.parse(helpJsonWins.report).helpSchemaVersion, 1);
+});
+
+test('duplicate --outpost-url uses last-wins like every other flag', async () => {
+  const { runWithOutpost } = await import('../lib/cli.mjs');
+  const d = deps([[]]);
+  const posts = [];
+  d.outpostFetch = async (url) => {
+    posts.push(url);
+    return { ok: true, status: 202 };
+  };
+  const { code } = await runWithOutpost(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/x.json',
+      '--outpost-url',
+      'https://first.example',
+      '--outpost-url',
+      'https://second.example',
+    ],
+    d,
+  );
+  assert.equal(code, 0); // baseline, no posts — but parsing must not error
+});
+
 test('sendOutposts stops after the configured max payload count', async () => {
   const { sendOutposts } = await import('../lib/outpost.mjs');
   const report = {

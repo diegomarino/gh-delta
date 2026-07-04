@@ -2,29 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import {
-  parseEntitySelection,
-  parseOutpostArgs,
-  validateMonitorId,
-  validateRepo,
-} from '../lib/args.mjs';
-
-test('parseOutpostArgs strips a separate outpost URL flag and preserves detector args', () => {
-  assert.deepEqual(
-    parseOutpostArgs([
-      '--repo',
-      'owner/repo',
-      '--outpost-url',
-      'https://example.com/hook',
-      '--state-file',
-      'state.json',
-    ]),
-    {
-      detectorArgs: ['--repo', 'owner/repo', '--state-file', 'state.json'],
-      outpostUrl: 'https://example.com/hook',
-    },
-  );
-});
+import { parseEntitySelection, validateMonitorId, validateRepo } from '../lib/args.mjs';
 
 test('parseEntitySelection accepts pr, issue, or both and rejects empty selections', () => {
   assert.deepEqual(parseEntitySelection('pr,issue'), {
