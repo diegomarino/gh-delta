@@ -753,3 +753,43 @@ test('sendOutposts stops after the configured max payload count', async () => {
     { label: 'outpost', reason: 'skipped 1 delta(s) after max outpost post count 1' },
   ]);
 });
+
+test('outpost warnings land inside the JSON report, not on stderr', async () => {
+  const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
+    existing: {
+      pr: {
+        42: {
+          state: 'OPEN',
+          updatedAt: '2026-07-01T10:00:00Z',
+          isDraft: false,
+          ci: 'da39a3ee5e6b',
+          review: 'REVIEW_REQUIRED',
+          reviews: 'da39a3ee5e6b',
+          mergeable: 'UNKNOWN',
+          comments: 0,
+          head: 'sha1',
+        },
+      },
+      issue: {},
+    },
+  });
+  d.outpostFetch = async () => ({ ok: false, status: 500 });
+  const { code, output, stderr } = await runCommand(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/x.json',
+      '--outpost-url',
+      'https://example.com/hook',
+    ],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.equal(stderr, '');
+  const report = JSON.parse(output);
+  assert.equal(report.warnings.length, 1);
+  assert.match(report.warnings[0].reason, /HTTP 500/);
+});
