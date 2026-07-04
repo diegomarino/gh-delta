@@ -4,6 +4,16 @@
 state)` into a categorized delta report. It does not schedule itself, open
 browser sessions, merge pull requests, or send messages to workers.
 
+## Product boundaries (explicit)
+
+`gh-delta` separates detection, delivery, and action:
+
+- Detection is authoritative for local comparison and exit-code signals.
+- Delivery is optional and best-effort (`--outpost-url`), warning-only on failure.
+- Action planning and execution are always outside this package.
+
+Given identical input snapshot and fetch results, detection output is deterministic.
+
 ## Boundaries
 
 ```text
@@ -24,6 +34,15 @@ The public CLI is one one-shot command. `--format json` prints the structured
 report for programs. `--format text` prints an operator heartbeat and suggested
 actions for scheduled logs. Neither format creates schedules, timers,
 automations, or wake-ups.
+
+## Failure safety guarantees
+
+- Argument, authentication, and parse/network errors do not update snapshots.
+- Snapshot writes are atomic and only occur after a successful fetch+diff cycle.
+- If GitHub list/results are truncated (exactly 500) or review-thread paging is
+  incomplete, the command exits `1` and does not write the snapshot.
+- Outpost transport errors are collected as warnings and never alter the detector
+  exit code.
 
 ## Runtime Flow
 

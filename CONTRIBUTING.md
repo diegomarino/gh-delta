@@ -14,10 +14,24 @@ Run the gate before every PR:
 ```bash
 npm run check        # eslint + prettier check + node --test
 npm run release:check # + coverage + npm pack --dry-run
+npm test            # when docs or APIs changed, include this explicitly as a minimum
 ```
 
 Zero runtime dependencies is a hard rule. Do not add a runtime dependency
 unless it materially improves correctness.
+
+## Scope and review checklist for docs/API edits
+
+- If a CLI flag, schema, or delta class changes, update at minimum:
+  - [README.md](README.md)
+  - [docs/contract.md](docs/contract.md)
+  - [docs/architecture.md](docs/architecture.md)
+- If public imports or programmatic behavior changes, update:
+  - [package.json](package.json#exports) export surface
+  - [docs/contract.md](docs/contract.md)
+- If release logic changes, update:
+  - [docs/release-checklist.md](docs/release-checklist.md)
+  - [docs/go-public-runbook.md](docs/go-public-runbook.md)
 
 ## Commit Convention
 

@@ -40,6 +40,30 @@ gh-delta --repo <owner/name> --monitor-id <id>
 - `1`: argument, GitHub CLI, network, or parse error. On errors, the snapshot is
   not updated.
 
+## Programmatic API Surface
+
+The package publishes a small, explicit ESM surface. Imports must use explicit
+subpaths; the package root is intentionally not exported.
+
+| Export path            | Symbols                                                                    | Purpose                               |
+| ---------------------- | -------------------------------------------------------------------------- | ------------------------------------- |
+| `gh-delta/detect`      | `detectDeltas`                                                             | Pure delta classification engine      |
+| `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint` | Stable object fingerprint builders    |
+| `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl` | Outpost payload and transport helpers |
+| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`                      | Snapshot path and persistence helpers |
+| `gh-delta/args`        | `parseEntitySelection`, `parseOutpostArgs`                                 | Shared argument parsing policies      |
+| `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                  | Package metadata and version output   |
+
+Behavioral notes for consumers:
+
+- `detectDeltas` is pure: pass old and current collections and consume
+  `baseline`, `deltas`, and replacement `snapshot`.
+- `buildOutpostPayload` already includes deterministic `eventId` and `deliveryId`.
+- `postOutpost` throws on HTTP failures so callers can classify transport errors.
+- `readSnapshot` throws on malformed JSON; callers should treat this as
+  recoverable only via explicit snapshot reset.
+- `snapshotPath` is deterministic and scoped by repo, monitor-id, and entity set.
+
 The exit code is the primary machine signal. Branch on it before reading stdout:
 code `1` produces an [error report](#error-report-shape) with no `deltas` field.
 
