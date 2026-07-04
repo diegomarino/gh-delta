@@ -84,6 +84,12 @@ test('incremental fetch adds updated items and cuts at the horizon', () => {
   const rows = fetchPRs('o/r', { exec, horizonCutoff: '2026-07-01T00:00:00Z' });
   assert.deepEqual(rows.map((r) => r.number).sort(), [1, 9]);
   assert.equal(calls.length, 2);
+  const updatedCall = calls.find((args) => !args.some((a) => a === 'states[]=OPEN'));
+  assert.ok(updatedCall, 'expected an updated-phase call without states[]=OPEN');
+  assert.ok(
+    !updatedCall.some((a) => a.startsWith('states')),
+    'updated phase must omit states so GitHub applies no state filter',
+  );
 });
 
 test('cutoff stops pagination early', () => {
