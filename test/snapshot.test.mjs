@@ -4,7 +4,12 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { snapshotPath, readSnapshot, writeSnapshotAtomic } from '../lib/snapshot.mjs';
+import {
+  snapshotPath,
+  readSnapshot,
+  writeSnapshotAtomic,
+  horizonCutoff,
+} from '../lib/snapshot.mjs';
 
 test('snapshotPath is collision-free for repo and monitor ids that slug the same', () => {
   const a = snapshotPath('a/b-c', 'm', 'pr', '/tmp/state');
@@ -73,8 +78,61 @@ test('writeSnapshotAtomic uses a unique temporary path per write', () => {
       calls.push(['rename', from, to]);
     },
   };
-  writeSnapshotAtomic('/tmp/snap.json', { n: 1 }, { fs, uniqueSuffix: () => 'a' });
-  writeSnapshotAtomic('/tmp/snap.json', { n: 2 }, { fs, uniqueSuffix: () => 'b' });
+  writeSnapshotAtomic('/tmp/snap.json', { pr: {}, issue: {} }, { fs, uniqueSuffix: () => 'a' });
+  writeSnapshotAtomic('/tmp/snap.json', { pr: {}, issue: {} }, { fs, uniqueSuffix: () => 'b' });
   const writePaths = calls.filter(([kind]) => kind === 'write').map(([, path]) => path);
   assert.deepEqual(writePaths, ['/tmp/snap.json.a.tmp', '/tmp/snap.json.b.tmp']);
+});
+
+test('snapshots round-trip an optional meta.horizon', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-'));
+  const p = join(dir, 'meta.json');
+  const data = { pr: {}, issue: {}, meta: { horizon: '2026-07-01T12:00:00.000Z' } };
+  writeSnapshotAtomic(p, data);
+  assert.deepEqual(readSnapshot(p), data);
+});
+
+test('horizonCutoff derives from meta, falls back to fingerprints, honors overlap', () => {
+  assert.equal(horizonCutoff(null), null);
+  assert.equal(
+    horizonCutoff({ pr: {}, issue: {}, meta: { horizon: '2026-07-01T12:05:00.000Z' } }),
+    '2026-07-01T12:00:00.000Z', // default 5-minute overlap
+  );
+  assert.equal(
+    horizonCutoff({
+      pr: { 42: { state: 'OPEN', updatedAt: '2026-07-01T10:05:00.000Z' } },
+      issue: {},
+    }),
+    '2026-07-01T10:00:00.000Z', // legacy: max fingerprint updatedAt
+  );
+  assert.equal(horizonCutoff({ pr: {}, issue: {} }), null); // empty legacy: open-only tick
+});
+
+test('writeSnapshotAtomic validates shape before writing', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-'));
+  assert.throws(
+    () => writeSnapshotAtomic(join(dir, 'bad.json'), { pr: [], issue: {} }),
+    /invalid snapshot shape/,
+  );
+});
+
+test('writeSnapshotAtomic removes the temp file when rename fails', () => {
+  const calls = [];
+  const fs = {
+    mkdirSync: () => {},
+    writeFileSync: (path) => calls.push(['write', path]),
+    renameSync: () => {
+      throw new Error('EXDEV');
+    },
+    unlinkSync: (path) => calls.push(['unlink', path]),
+  };
+  assert.throws(
+    () =>
+      writeSnapshotAtomic('/tmp/snap.json', { pr: {}, issue: {} }, { fs, uniqueSuffix: () => 'a' }),
+    /EXDEV/,
+  );
+  assert.deepEqual(calls, [
+    ['write', '/tmp/snap.json.a.tmp'],
+    ['unlink', '/tmp/snap.json.a.tmp'],
+  ]);
 });

@@ -842,6 +842,26 @@ test('non-numeric outpost flags are config errors (exit 2)', () => {
   assert.match(report.error, /--outpost-timeout-ms/);
 });
 
+test('the CLI threads the snapshot horizon into fetchers and stamps a new one', () => {
+  let receivedCutoff = 'unset';
+  const d = {
+    fetchPRs: (_repo, opts) => {
+      receivedCutoff = opts.horizonCutoff;
+      return [];
+    },
+    fetchIssues: () => [],
+    readSnapshot: () => ({ pr: {}, issue: {}, meta: { horizon: '2026-07-01T11:00:00.000Z' } }),
+    writeSnapshotAtomic: (_p, data) => {
+      d.written = data;
+    },
+    now: () => '2026-07-01T12:00:00.000Z',
+  };
+  const { code } = run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
+  assert.equal(code, 0);
+  assert.equal(receivedCutoff, '2026-07-01T10:55:00.000Z');
+  assert.equal(d.written.meta.horizon, '2026-07-01T12:00:00.000Z');
+});
+
 test('mixed-case --repo shares one snapshot and one eventId space', async () => {
   const { runWithOutpost } = await import('../lib/cli.mjs');
   const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
