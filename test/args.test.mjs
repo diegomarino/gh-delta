@@ -55,3 +55,10 @@ test('validateMonitorId accepts stable safe ids and rejects path-like ids', () =
   assert.deepEqual(validateMonitorId('with space').ok, false);
   assert.deepEqual(validateMonitorId('..').ok, false);
 });
+
+test('validateRepo canonicalizes to lowercase and rejects dot-only segments', () => {
+  assert.deepEqual(validateRepo('Acme/App'), { ok: true, repo: 'acme/app' });
+  assert.equal(validateRepo('../..').ok, false);
+  assert.equal(validateRepo('./repo').ok, false);
+  assert.equal(validateRepo('owner/..').ok, false);
+});

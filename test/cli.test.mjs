@@ -841,3 +841,48 @@ test('non-numeric outpost flags are config errors (exit 2)', () => {
   assert.equal(report.kind, 'config');
   assert.match(report.error, /--outpost-timeout-ms/);
 });
+
+test('mixed-case --repo shares one snapshot and one eventId space', async () => {
+  const { runWithOutpost } = await import('../lib/cli.mjs');
+  const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
+    existing: {
+      pr: {
+        42: {
+          state: 'OPEN',
+          updatedAt: '2026-07-01T10:00:00Z',
+          isDraft: false,
+          ci: 'da39a3ee5e6b',
+          review: 'REVIEW_REQUIRED',
+          reviews: 'da39a3ee5e6b',
+          mergeable: 'UNKNOWN',
+          comments: 0,
+          head: 'sha1',
+        },
+      },
+      issue: {},
+    },
+  });
+  const posts = [];
+  d.outpostFetch = async (url, options) => {
+    posts.push(JSON.parse(options.body));
+    return { ok: true, status: 202 };
+  };
+  const { code, report } = await runWithOutpost(
+    [
+      '--repo',
+      'O/R',
+      '--monitor-id',
+      'main',
+      '--state-dir',
+      '/tmp/state',
+      '--outpost-url',
+      'https://example.com/hook',
+    ],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.equal(report.repo, 'o/r');
+  assert.equal(d.readPath, '/tmp/state/repo-o%2Fr__monitor-main__pr-issue.json');
+  assert.equal(posts[0].eventId, 'gh-delta.delta.v1:o/r:main:pr:42:merged');
+  assert.match(posts[0].links.html, /^https:\/\/github\.com\/o\/r\/pull\/42$/);
+});
