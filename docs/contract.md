@@ -162,7 +162,7 @@ Field guarantees:
   parse it (it varies between "baseline established: N PRs, M issues" and
   "N delta(s)").
 - `deltas` (array): see below. Empty on baseline and on no-change runs.
-- `warnings` (string[]): **optional; present only in JSON format when outpost
+- `warnings` (`{ label: string, reason: string }[]`): **optional; present only in JSON format when outpost
   delivery produced warnings** (e.g. a POST timed out or returned an error).
   Omitted entirely when there are no warnings. Does not appear in text output
   (warnings are printed inline there). Does not affect the exit code.
@@ -173,7 +173,7 @@ Each delta:
   a PR. GitHub numbers are shared across issues and PRs, so `number` alone is
   ambiguous — always key on `(entity, number)`.
 - `number` (number), `title` (string): GitHub identity. For `missing` /
-  `still-missing` deltas `title` is the sentinel string
+  `still-missing` / `presumed-deleted` deltas `title` is the sentinel string
   `"(missing from current fetch)"`, not the real title.
 - `classes` (string[]): non-empty set of [classes](#delta-classes).
 - `from`, `to`: entity [fingerprints](#fingerprint-fields), or `null`. `from` is

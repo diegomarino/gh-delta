@@ -200,7 +200,9 @@ developer polling loops or webhook-driven automation.
 - If the command exits `1` with "exceeded N pages — narrow the monitor scope or
   re-seed the baseline", do exactly that before continuing. The tool fails closed
   rather than silently truncating. Open items are capped at 1 000 per family;
-  updated items per tick are capped at 3 000.
+  updated items per tick are capped at 3 000. Repeated occurrences of this exit
+  on consecutive ticks are an operator-action signal — narrow the scope or
+  re-seed; this is not a transient error to retry indefinitely.
 - Do not merge a PR blind on green CI alone. Read review comments first.
 - If the same delta refires every tick, stop and investigate instead of acting
   repeatedly.

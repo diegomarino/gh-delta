@@ -64,16 +64,7 @@ Argument and configuration flow:
 
 ```text
 start
-  -> strip and validate optional --outpost-url
-     -> invalid URL or non-HTTP(S) URL
-        -> exit 2 (config: permanent)
-        -> no GitHub fetch
-        -> no snapshot read or write
-  -> parse detector arguments
-     -> unknown option or parse error
-        -> exit 2 (config: permanent)
-        -> no GitHub fetch
-        -> no snapshot read or write
+  -> pre-scan for --help, --help-json, --version (wins over all other flags)
      -> --help or --help-json
         -> exit 0
         -> no GitHub fetch
@@ -83,10 +74,22 @@ start
         -> exit 0
         -> no GitHub fetch
         -> no snapshot read or write
-     -> missing --repo or --monitor-id
+  -> strict argument parse
+     -> unknown option or parse error
         -> exit 2 (config: permanent)
         -> no GitHub fetch
         -> no snapshot read or write
+  -> validate --repo
+     -> missing or invalid owner/name form
+        -> exit 2 (config: permanent)
+        -> no GitHub fetch
+        -> no snapshot read or write
+  -> validate --monitor-id
+     -> missing or invalid characters
+        -> exit 2 (config: permanent)
+        -> no GitHub fetch
+        -> no snapshot read or write
+  -> validate state flags
      -> both --state-file and --state-dir
         -> exit 2 (config: permanent)
         -> no GitHub fetch
@@ -95,7 +98,23 @@ start
         -> exit 2 (config: permanent)
         -> no GitHub fetch
         -> no snapshot read or write
-     -> invalid --entities or --format
+  -> validate --entities
+     -> invalid value
+        -> exit 2 (config: permanent)
+        -> no GitHub fetch
+        -> no snapshot read or write
+  -> validate --format
+     -> invalid value
+        -> exit 2 (config: permanent)
+        -> no GitHub fetch
+        -> no snapshot read or write
+  -> validate --outpost-url (if present)
+     -> invalid URL or non-HTTP(S) URL
+        -> exit 2 (config: permanent)
+        -> no GitHub fetch
+        -> no snapshot read or write
+  -> validate numeric flags (--outpost-timeout-ms, --outpost-max-posts, --gh-timeout-ms)
+     -> non-positive-integer value
         -> exit 2 (config: permanent)
         -> no GitHub fetch
         -> no snapshot read or write

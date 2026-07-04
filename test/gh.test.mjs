@@ -136,3 +136,50 @@ test('fetchIssues normalizes labels and exact comment totals', () => {
   assert.deepEqual(rows[0].labels, [{ name: 'worker' }]);
   assert.equal(rows[0].comments, 130);
 });
+
+test('normalizeIssue filters null elements from labels nodes', () => {
+  const exec = () =>
+    page([
+      {
+        number: 11,
+        title: 'nulls',
+        state: 'OPEN',
+        updatedAt: '2026-07-01T10:00:00Z',
+        labels: { nodes: [null, { name: 'worker' }], pageInfo: { hasNextPage: false } },
+        comments: { totalCount: 0 },
+      },
+    ]);
+  const rows = fetchIssues('o/r', { exec, horizonCutoff: null });
+  assert.deepEqual(rows[0].labels, [{ name: 'worker' }]);
+});
+
+test('normalizePr filters null elements from statusCheckRollup contexts nodes', () => {
+  const nodeWithNullContext = prNode({
+    commits: {
+      nodes: [
+        {
+          commit: {
+            statusCheckRollup: {
+              contexts: {
+                nodes: [
+                  null,
+                  {
+                    __typename: 'CheckRun',
+                    name: 'build',
+                    status: 'COMPLETED',
+                    conclusion: 'SUCCESS',
+                  },
+                ],
+                pageInfo: { hasNextPage: false },
+              },
+            },
+          },
+        },
+      ],
+    },
+  });
+  const rows = fetchPRs('o/r', { exec: () => page([nodeWithNullContext]), horizonCutoff: null });
+  assert.deepEqual(rows[0].statusCheckRollup, [
+    { __typename: 'CheckRun', name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' },
+  ]);
+});

@@ -823,6 +823,57 @@ test('--outpost-max-posts caps delivery from the CLI', async () => {
   assert.match(warnings[0].reason, /skipped 1 delta/);
 });
 
+test('--gh-timeout-ms abc is a config error (exit 2, kind config)', () => {
+  const { code, report } = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/x.json',
+      '--gh-timeout-ms',
+      'abc',
+    ],
+    { now: () => '2026-07-01T12:00:00Z' },
+  );
+  assert.equal(code, 2);
+  assert.equal(report.kind, 'config');
+  assert.match(report.error, /--gh-timeout-ms/);
+});
+
+test('--gh-timeout-ms threads into fetchers and defaults to 60000', () => {
+  let receivedTimeoutMs;
+  const makeDeps = () => ({
+    fetchPRs: (_repo, opts) => {
+      receivedTimeoutMs = opts.timeoutMs;
+      return [];
+    },
+    fetchIssues: () => [],
+    readSnapshot: () => null,
+    writeSnapshotAtomic: () => {},
+    now: () => '2026-07-01T12:00:00Z',
+  });
+
+  run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], makeDeps());
+  assert.equal(receivedTimeoutMs, 60000);
+
+  run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/x.json',
+      '--gh-timeout-ms',
+      '5000',
+    ],
+    makeDeps(),
+  );
+  assert.equal(receivedTimeoutMs, 5000);
+});
+
 test('non-numeric outpost flags are config errors (exit 2)', () => {
   const { code, report } = run(
     [

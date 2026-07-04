@@ -488,6 +488,14 @@ exits `2` (permanent error) and leaves the file untouched to preserve monitor
 memory. Do not hand-edit snapshot files. If recovery is needed, delete the
 snapshot and re-seed the baseline with a fresh first run.
 
+**Snapshot file grows over time on a long-lived monitor.**
+Snapshot files retain dormant closed items and archived `presumed-deleted`
+fingerprints indefinitely by design — this is what preserves monitor memory
+and prevents reappearing items from being treated as new. On very long-lived
+active monitors the file grows slowly as new items accumulate. Deleting the
+snapshot and re-seeding the baseline is the reset; the next run will treat all
+current open items as new.
+
 ## Development
 
 ```bash
