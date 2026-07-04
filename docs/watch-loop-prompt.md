@@ -24,9 +24,12 @@ Run the GitHub delta detector for `<owner/name>` and act on what it reports.
    - 10 = deltas present. The output lists each delta and a suggested action.
           For EACH delta, decide the real action, note what you did, and STOP
           this tick.
-   - 1  = argument, GitHub CLI, network, or parse error. The report has an
-          error section and the snapshot was NOT touched. Log it and STOP this
-          tick. The next cron fire retries.
+   - 1  = transient error (GitHub CLI, network, timeout, or write failure). The
+          report has an error section and the snapshot was NOT touched. Log it
+          and STOP this tick. The next cron fire retries automatically.
+   - 2  = permanent error (invalid configuration or unreadable snapshot). STOP
+          the loop immediately and alert the operator. Retrying will not help;
+          a human must fix the issue first.
 
    A baseline message means the snapshot was just seeded with no deltas. That is
    normal, not an error.
@@ -50,10 +53,12 @@ Run the GitHub delta detector for `<owner/name>` and act on what it reports.
      threads before acting.
    - relabeled: an issue's scope/state changed. Reassess whether or what to
      dispatch.
-   - missing: a previously known object disappeared from the fetch. Check
-     pagination, permissions, or scope before trusting the snapshot.
-   - still-missing: the same object is still absent. Treat it as unresolved
-     operational state, not a fresh item.
+   - missing: an open item disappeared from the fetch. Check pagination,
+     permissions, or scope before trusting the snapshot.
+   - still-missing: the same open item is still absent (tick 2). Treat it as
+     unresolved operational state, not a fresh item.
+   - presumed-deleted: absent for 3 consecutive ticks; treat as gone. Verify on
+     GitHub if unexpected. No further ticks will mention it unless it reappears.
    - reappeared: a previously missing object returned. Check why it vanished
      before acting on the return.
    - updated: catch-all timestamp or commit-only bump. Inspect GitHub before
@@ -74,8 +79,11 @@ Rules:
   in anything with merit before merging.
 - If the same delta keeps refiring every tick, stop and report it instead of
   acting on it repeatedly.
-- If the command reports that GitHub returned 500 PRs/issues or incomplete
-  paginated review threads, narrow the monitor scope before continuing.
+- If exit code is 2, stop the loop and alert a human. The configuration or
+  snapshot must be fixed; retrying will not help.
+- If the command exits 1 with "exceeded N pages", narrow the monitor scope or
+  re-seed the baseline before continuing. The tool fails closed rather than
+  silently truncating.
 ```
 
 ## Setup Sequence

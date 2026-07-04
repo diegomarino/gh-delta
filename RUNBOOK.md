@@ -60,7 +60,10 @@ Use this order inside each tick:
 2. Run `gh-delta --format text`.
 3. Branch on its exit code.
 4. Act on each listed delta when exit code is `10`.
-5. Stop this tick.
+5. On exit `1` (transient), log the error; the next scheduled fire will retry.
+6. On exit `2` (permanent), stop the loop and alert the operator — the
+   configuration or snapshot must be fixed by a human.
+7. Stop this tick.
 
 Tick command:
 
@@ -85,7 +88,10 @@ gh-delta \
   --outpost-url https://example.com/gh-delta
 ```
 
-Exit codes: see [Exit Codes](docs/contract.md#exit-codes). On `10`, act on each listed delta; on `1`, log the error and let the next scheduled fire retry.
+Exit codes: see [Exit Codes](docs/contract.md#exit-codes). On `10`, act on each
+listed delta; on `1` (transient), log the error and let the next scheduled fire
+retry automatically; on `2` (permanent), stop the loop and alert the operator —
+the configuration or snapshot must be fixed by a human before retrying.
 
 Heartbeat format:
 
@@ -98,12 +104,12 @@ Use `--format json` when another program needs the raw structured report.
 ## Outpost Mode
 
 `--outpost-url` must be an `http:` or `https:` URL. Invalid configuration exits
-`1` before GitHub is fetched.
+`2` (permanent) before GitHub is fetched.
 
 When the detector exits `10`, `gh-delta` sends one JSON `POST` per delta with
-`Content-Type: application/json`. It does not POST on exit `0` or `1`. POST
-failure, timeout, DNS failure, `4xx`, or `5xx` prints an `outpost warning` but
-does not change the detector result.
+`Content-Type: application/json`. It does not POST on exit `0`, `1`, or `2`.
+POST failure, timeout, DNS failure, `4xx`, or `5xx` prints an `outpost warning`
+but does not change the detector result.
 
 Payloads use schema v1: see [Outpost payload schema v1](docs/contract.md#outpost-payload-schema-v1) for the full envelope.
 
@@ -160,22 +166,23 @@ developer polling loops or webhook-driven automation.
 
 ## Delta Classes
 
-| class                         | typical orchestrator action                                                     |
-| ----------------------------- | ------------------------------------------------------------------------------- |
-| `new` (PR)                    | a worker opened a PR; read it and queue review                                  |
-| `ci-changed`                  | CI green: consider merge path; CI red: nudge worker with the failure            |
-| `review-changed`              | approved: merge candidate; changes requested: relay to worker                   |
-| `became-mergeable`            | conflicts resolved; merge candidate                                             |
-| `merged` / `closed`           | slice done; advance build order or sync spawn base                              |
-| `new-comments`                | read PR threads; fold review comments before merge                              |
-| `unresolved-threads-added`    | unresolved review threads appeared; resolve before merge                        |
-| `unresolved-threads-resolved` | review threads resolved; re-check CI and review state                           |
-| `review-threads-changed`      | review thread activity changed; inspect before acting                           |
-| `relabeled`                   | scope or state change on an issue; reassess dispatch                            |
-| `missing`                     | previous object disappeared from fetch; check pagination, permissions, or scope |
-| `still-missing`               | object remains absent; unresolved operational issue, not a fresh delta          |
-| `updated`                     | catch-all (`updatedAt` or head-only); inspect GitHub before dismissing          |
-| `reappeared`                  | object returned after prior `missing`; check why it vanished before acting      |
+| class                         | typical orchestrator action                                                                                                         |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `new` (PR)                    | a worker opened a PR; read it and queue review                                                                                      |
+| `ci-changed`                  | CI green: consider merge path; CI red: nudge worker with the failure                                                                |
+| `review-changed`              | approved: merge candidate; changes requested: relay to worker                                                                       |
+| `became-mergeable`            | conflicts resolved; merge candidate                                                                                                 |
+| `merged` / `closed`           | slice done; advance build order or sync spawn base                                                                                  |
+| `new-comments`                | read PR threads; fold review comments before merge                                                                                  |
+| `unresolved-threads-added`    | unresolved review threads appeared; resolve before merge                                                                            |
+| `unresolved-threads-resolved` | review threads resolved; re-check CI and review state                                                                               |
+| `review-threads-changed`      | review thread activity changed; inspect before acting                                                                               |
+| `relabeled`                   | scope or state change on an issue; reassess dispatch                                                                                |
+| `missing`                     | open item disappeared from fetch; check pagination, permissions, or scope                                                           |
+| `still-missing`               | open item remains absent (tick 2); unresolved operational issue, not a fresh delta                                                  |
+| `presumed-deleted`            | absent for 3 consecutive ticks; treat as gone; verify on GitHub if unexpected; no further ticks will mention it unless it reappears |
+| `updated`                     | catch-all (`updatedAt` or head-only); inspect GitHub before dismissing                                                              |
+| `reappeared`                  | object returned after prior `missing`; check why it vanished before acting                                                          |
 
 ## Operating Rules
 
@@ -190,9 +197,10 @@ developer polling loops or webhook-driven automation.
 - Do not create another cron from inside a cron-owned tick.
 - Do not run overlapping ticks against the same state file. If your scheduler
   can overlap jobs, add external locking or increase the interval.
-- If the command reports that GitHub returned 500 PRs/issues or incomplete
-  paginated review threads, narrow the monitor scope before continuing. The tool
-  fails closed rather than silently truncating.
+- If the command exits `1` with "exceeded N pages — narrow the monitor scope or
+  re-seed the baseline", do exactly that before continuing. The tool fails closed
+  rather than silently truncating. Open items are capped at 1 000 per family;
+  updated items per tick are capped at 3 000.
 - Do not merge a PR blind on green CI alone. Read review comments first.
 - If the same delta refires every tick, stop and investigate instead of acting
   repeatedly.

@@ -21,10 +21,11 @@ watch loop / timer
   -> gh-delta.mjs
       -> lib/cli.mjs          internal CLI runner used by bin/tests only
       -> lib/args.mjs         parse shared CLI option policy
-      -> lib/gh.mjs           fetch current GitHub state with gh
-      -> lib/snapshot.mjs     read previous snapshot
+      -> lib/contract.mjs     runtime contract constants
+      -> lib/gh.mjs           incremental GraphQL fetch of GitHub state
+      -> lib/snapshot.mjs     read previous snapshot; derive horizon cutoff
       -> lib/detect.mjs       compare old and current fingerprints
-      -> lib/snapshot.mjs     atomically write new snapshot
+      -> lib/snapshot.mjs     atomically write new snapshot (with meta.horizon)
       -> lib/outpost.mjs      optional HTTP POST per delta
       -> lib/text-output.mjs  optional operator text formatting
   -> caller decides what to do with deltas
@@ -37,10 +38,12 @@ automations, or wake-ups.
 
 ## Failure safety guarantees
 
-- Argument, authentication, and parse/network errors do not update snapshots.
+- Config and snapshot errors exit `2` (permanent); GitHub and I/O errors exit
+  `1` (transient). Snapshots are never updated on any error path.
 - Snapshot writes are atomic and only occur after a successful fetch+diff cycle.
-- If GitHub list/results are truncated (exactly 500) or review-thread paging is
-  incomplete, the command exits `1` and does not write the snapshot.
+- Open-items fetch fails closed beyond 1 000 items (10 pages × 100) per family;
+  updated-items fetch fails closed beyond 3 000 items (30 pages × 100) per tick.
+  Per-item nested-pagination overflow is also a hard error.
 - Outpost transport errors are collected as warnings and never alter the detector
   exit code.
 
@@ -63,12 +66,12 @@ Argument and configuration flow:
 start
   -> strip and validate optional --outpost-url
      -> invalid URL or non-HTTP(S) URL
-        -> exit 1
+        -> exit 2 (config: permanent)
         -> no GitHub fetch
         -> no snapshot read or write
   -> parse detector arguments
      -> unknown option or parse error
-        -> exit 1
+        -> exit 2 (config: permanent)
         -> no GitHub fetch
         -> no snapshot read or write
      -> --help or --help-json
@@ -81,19 +84,19 @@ start
         -> no GitHub fetch
         -> no snapshot read or write
      -> missing --repo or --monitor-id
-        -> exit 1
+        -> exit 2 (config: permanent)
         -> no GitHub fetch
         -> no snapshot read or write
      -> both --state-file and --state-dir
-        -> exit 1
+        -> exit 2 (config: permanent)
         -> no GitHub fetch
         -> no snapshot read or write
      -> neither --state-file nor --state-dir
-        -> exit 1
+        -> exit 2 (config: permanent)
         -> no GitHub fetch
         -> no snapshot read or write
      -> invalid --entities or --format
-        -> exit 1
+        -> exit 2 (config: permanent)
         -> no GitHub fetch
         -> no snapshot read or write
 ```
@@ -114,39 +117,36 @@ Detection flow:
 resolved snapshot path
   -> read snapshot file
      -> file does not exist
-        -> old snapshot is null
-     -> snapshot JSON parses but has invalid shape
-        -> exit 1
+        -> old snapshot is null (will seed baseline)
+     -> file exists, parses as valid JSON with correct shape
+        -> proceed to fetch
+     -> file exists, invalid JSON
+        -> exit 2 (snapshot: permanent)
         -> GitHub is not fetched
-     -> invalid JSON
-        -> exit 1
+     -> file exists, valid JSON but invalid shape
+        -> exit 2 (snapshot: permanent)
         -> GitHub is not fetched
   -> fetch requested GitHub entities
-     -> GitHub CLI, network, parse, or hard-limit error
-        -> exit 1
+     -> error (GitHub CLI, network, timeout, or page cap exceeded)
+        -> exit 1 (github: transient)
         -> snapshot is not written
-     -> open PR review thread GraphQL count is incomplete
-        -> exit 1
+     -> per-item nested-page overflow (statusCheckRollup, latestReviews,
+        reviewThreads, labels)
+        -> exit 1 (github: transient)
         -> snapshot is not written
-        -> current GitHub state becomes the baseline
-        -> write new snapshot
-        -> exit 0
-     -> file is valid JSON
-        -> compare old snapshot with current GitHub state
+     -> success
+        -> compare old snapshot with current fetch
         -> preserve unrequested entity families
-        -> write refreshed snapshot
-        -> exit 0 when there are no deltas
-        -> exit 10 when there are deltas
-     -> file is invalid JSON
-        -> exit 1
-        -> target snapshot is not replaced
+        -> write snapshot (with meta.horizon = run timestamp)
+        -> exit 0 when baseline or no deltas
+        -> exit 10 when deltas
 ```
 
 Outpost flow:
 
 ```text
 detector result
-  -> exit 0 or exit 1
+  -> exit 0, 1, or 2
      -> do not POST
   -> exit 10 with --outpost-url
      -> snapshot has already advanced
@@ -163,9 +163,9 @@ The core correctness logic is pure:
 
 The impure edges are isolated:
 
-- `gh.mjs` shells out to `gh` for list fetches and GraphQL enrichment.
-- `snapshot.mjs` performs filesystem I/O and derives monitor-scoped snapshot
-  paths.
+- `gh.mjs` shells out to `gh api graphql` for incremental GraphQL fetches.
+- `snapshot.mjs` performs filesystem I/O, derives monitor-scoped snapshot paths,
+  and computes the incremental-fetch horizon cutoff.
 - `outpost.mjs` validates optional outpost URLs, builds schema v1 payloads, and
   sends short-timeout HTTP POSTs.
 - `text-output.mjs` formats heartbeat text and outpost warnings.
@@ -190,6 +190,8 @@ The npm package exposes one CLI and a small ESM import surface:
 - `gh-delta/snapshot`: snapshot path/read/write helpers.
 - `gh-delta/args`: shared argument parsing helpers.
 - `gh-delta/version`: package metadata and version text helpers.
+- `gh-delta/contract`: runtime contract constants (`REPORT_SCHEMA_VERSION`,
+  `OUTPOST_SCHEMA_VERSION`, `DELTA_CLASSES`, `ERROR_KINDS`).
 
 The package root is intentionally not exported. `package.json#main` still points
 at `gh-delta.mjs` for metadata compatibility, but supported programmatic imports
@@ -224,24 +226,30 @@ use it.
 
 ## GitHub Fetch Contract
 
-PRs are fetched with `--state all --limit 500`. Both flags matter:
+All fetches use `gh api graphql` with UPDATED_AT DESC pagination. There are no
+`gh pr list` or `gh issue list` subprocess calls.
 
-- `--state all` keeps merged and closed PRs observable. Without it, a merged PR
-  can disappear from the result set and become indistinguishable from scope loss.
-- `--limit 500` avoids the default low limit hiding older PRs or issues. It is
-  not full pagination. If GitHub returns exactly 500 PRs or issues, `gh-delta`
-  exits `1` without writing the snapshot because the monitor scope may be
-  truncated.
+**Incremental fetch strategy (per family: PR and issue):**
 
-Open PRs are then enriched with `gh api graphql --paginate --slurp` to count PR
-review threads:
+1. **Open-items phase** — fetch all OPEN items, walking pages until exhausted or
+   the page cap is reached (10 pages × 100 = 1 000 items max). Fails closed with
+   exit `1` if the cap is exceeded.
+2. **Updated-items phase** (incremental only; skipped on baseline) — fetch
+   ALL-states items ordered by UPDATED_AT DESC, stopping at the snapshot horizon
+   minus a 5-minute overlap. Walking more than 30 pages × 100 = 3 000 items
+   fails closed with exit `1` and the message "narrow the monitor scope or
+   re-seed the baseline".
 
-- `reviewThreads.totalCount` becomes the tracked review-thread total.
-- `reviewThreads.nodes[].isResolved` is counted into unresolved review threads.
-- top-level PR pagination is handled by `gh api graphql --paginate`.
-- nested `reviewThreads(first: 100)` pagination is not followed yet. If any open
-  PR reports more review-thread pages, `gh-delta` exits `1` without writing the
-  snapshot because unresolved-thread counts would be incomplete.
+Open-items results and updated-items results are merged: the open-items phase
+wins on duplicates (an open item appearing in both is only counted once from the
+open-items pass).
+
+**Fail-closed per-item nested pagination:** each PR node is checked for page
+overflow on `statusCheckRollup.contexts`, `latestReviews`, and `reviewThreads`.
+Each issue node is checked on `labels`. Any overflow is a hard error (exit `1`).
+
+**Comment counts** come from GraphQL `totalCommentsCount` (PRs) and
+`comments { totalCount }` (issues) — exact integers with no cap or overflow flag.
 
 The PR fingerprint tracks:
 
@@ -252,8 +260,7 @@ The PR fingerprint tracks:
 - review decision
 - latest review state hash
 - mergeability
-- comment count
-- comment-array overflow flag
+- exact comment total
 - review thread count
 - unresolved review thread count
 - head SHA
@@ -263,18 +270,11 @@ The issue fingerprint tracks:
 - state
 - updated timestamp
 - sorted labels
-- comment count
-- comment-array overflow flag
-
-GitHub CLI list commands expose comment arrays, not GraphQL `totalCount` fields.
-When those arrays reach the observed cap, `gh-delta` treats an `updatedAt` bump
-as `new-comments` instead of degrading it to plain `updated`. This is
-intentionally conservative until a future GraphQL enrichment can use exact totals
-for issue comments, PR conversation comments, and review comments.
+- exact comment total
 
 ## Snapshot Contract
 
-Snapshots are plain JSON maps keyed by issue or PR number:
+Snapshots are plain JSON with shape `{ "pr": object, "issue": object, "meta"?: object }`:
 
 ```json
 {
@@ -284,13 +284,26 @@ Snapshots are plain JSON maps keyed by issue or PR number:
       "updatedAt": "2026-07-01T10:00:00Z"
     }
   },
-  "issue": {}
+  "issue": {},
+  "meta": {
+    "horizon": "2026-07-01T12:00:00.000Z"
+  }
 }
 ```
 
-Missing snapshots are treated as a first run. Corrupt snapshot JSON is an error:
-the command exits `1` and leaves the snapshot untouched. This prevents a corrupt
-file from silently erasing monitor memory.
+`meta.horizon` is stamped with the run timestamp on every successful write and
+used as the starting point for the incremental-fetch horizon (minus 5 minutes of
+overlap). Legacy snapshots without `meta` fall back to the newest `updatedAt`
+across stored fingerprints.
+
+Missing snapshots are treated as a first run (baseline). Corrupt snapshot JSON
+or an invalid shape is a permanent error: the command exits `2` and leaves the
+snapshot untouched. This prevents a corrupt file from silently erasing monitor
+memory.
+
+Write-side validation runs before the rename — a snapshot the reader would
+reject is never persisted. The temporary file is removed on rename failure to
+avoid leaving stray `.tmp` files.
 
 Writes are atomic for a single writer: the snapshot is written to a unique
 temporary file beside the target, then renamed into place. Do not run
@@ -309,7 +322,7 @@ persist the detector output or add an external pending/ack queue.
 
 The URL must be `http:` or `https:` and is validated before GitHub fetches begin.
 When the detector exits `10`, one schema v1 payload is POSTed per delta. No POST
-is attempted for exit `0` or `1`.
+is attempted for exit `0`, `1`, or `2`.
 
 Outpost sends are deliberately minimal:
 
@@ -328,9 +341,11 @@ See [Outpost payload schema v1](contract.md#outpost-payload-schema-v1) for the f
 
 ## Error Contract
 
-If fetching or parsing fails, `gh-delta` exits `1` and does not write the
-snapshot. This keeps transient network or rate-limit failures from erasing the
-previous known-good baseline.
+Transient errors (kind `github` or `io`) exit `1`; permanent errors (kind
+`config` or `snapshot`) exit `2`. In both cases the snapshot is not written.
+This prevents transient network or rate-limit failures from erasing the previous
+known-good baseline, and permanent errors signal that human intervention is
+required before retrying.
 
 ## Future Entity And Selector Research
 
@@ -347,10 +362,13 @@ Each changed object can emit one or more classes: see [Delta Classes](contract.m
 `updated` is the recall-over-precision fallback. It fires when the fingerprint
 changed but no more specific class matched.
 
-`missing` fires when a previously known object disappears from a fetched
-collection. The old fingerprint is retained so the watcher does not silently
-lose memory if GitHub output was truncated or scoped unexpectedly.
+`missing` fires when an item the snapshot believes OPEN disappears from the
+fetch. Absent closed items are dormant memory, not a missing delta. The old
+fingerprint is retained so the watcher does not silently lose memory.
 
-`still-missing` fires on later ticks when that same retained object remains
-absent. This lets agents distinguish first sighting from unresolved operational
-state.
+`still-missing` fires on the second tick that the item remains absent. This lets
+agents distinguish first sighting from unresolved operational state.
+
+`presumed-deleted` fires on the third consecutive tick (terminal, emitted once).
+After that the item goes silent with memory intact: `missingTicks` increments but
+no delta is emitted. `reappeared` still fires if the item returns.

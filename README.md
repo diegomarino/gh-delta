@@ -154,12 +154,14 @@ gh-delta \
 ## CLI
 
 ```bash
-gh-delta --repo <owner/name> --monitor-id <id> (--state-dir <dir> | --state-file <path>) [--entities pr,issue] [--format json|text] [--detail] [--outpost-url <url>]
+gh-delta --repo <owner/name> --monitor-id <id> (--state-dir <dir> | --state-file <path>) [--entities pr,issue] [--format json|text] [--detail] [--outpost-url <url>] [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>] [--gh-timeout-ms <ms>]
 ```
 
 Options:
 
-- `--repo`: repository in `owner/name` form. Required.
+- `--repo`: repository in `owner/name` form. Required. **Canonicalized to
+  lowercase** — snapshot paths, report echoes, and outpost event IDs always use
+  the lowercased form.
 - `--monitor-id`: stable monitor identity used in reports, event IDs, and
   derived snapshot paths. Must start with a letter or number and contain only
   letters, numbers, dot, underscore, or dash. Required.
@@ -174,14 +176,24 @@ Options:
   Text output adds detail automatically.
 - `--outpost-url`: HTTP(S) endpoint that receives one JSON `POST` per delta when
   the detector exits `10`.
+- `--outpost-timeout-ms`: timeout in milliseconds for each outpost POST (default
+  `4000`).
+- `--outpost-max-posts`: maximum number of outpost POSTs per run (default:
+  unlimited).
+- `--gh-timeout-ms`: timeout in milliseconds for each `gh` subprocess call
+  (default `60000`).
 - `--help`: print usage.
 - `--help-json`: print versioned, machine-readable help for LLMs, agents, and
   other tooling. The top-level `helpSchemaVersion` field starts at `1`.
 - `--version`: print the package version from `package.json`.
 
+**Repeated flags:** the last value wins. **`--help`, `--help-json`, and
+`--version` take precedence over all validation.**
+
 `gh-delta` never creates schedules, timers, automations, or wake-ups.
 
-Exit codes: see [Exit Codes](docs/contract.md#exit-codes).
+Exit codes: `0` baseline/no deltas, `10` deltas, `1` transient error, `2`
+permanent error. See [Exit Codes](docs/contract.md#exit-codes) for full detail.
 
 For scheduled runs, use the cron-native loop guidance in [RUNBOOK.md](RUNBOOK.md) and the [watch-loop prompt](docs/watch-loop-prompt.md).
 
@@ -274,8 +286,14 @@ import {
   validateOutpostUrl,
 } from 'gh-delta/outpost';
 import { readSnapshot, snapshotPath, writeSnapshotAtomic } from 'gh-delta/snapshot';
-import { parseEntitySelection, parseOutpostArgs } from 'gh-delta/args';
+import { parseEntitySelection, validateRepo, validateMonitorId } from 'gh-delta/args';
 import { getPackageMetadata, renderVersionText } from 'gh-delta/version';
+import {
+  REPORT_SCHEMA_VERSION,
+  OUTPOST_SCHEMA_VERSION,
+  DELTA_CLASSES,
+  ERROR_KINDS,
+} from 'gh-delta/contract';
 ```
 
 The package root is intentionally not exported. Use the `gh-delta` binary for
@@ -289,14 +307,15 @@ source files are shipped). There are no bundled declaration files yet, so TypeSc
 consumers should pin to a known `gh-delta` version and add local types if they need
 compile-time checking.
 
-| Import                 | Exported names                                                             | Purpose                            |
-| ---------------------- | -------------------------------------------------------------------------- | ---------------------------------- |
-| `gh-delta/detect`      | `detectDeltas`                                                             | Pure delta classification          |
-| `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint` | GitHub object fingerprint helpers  |
-| `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl` | Outpost payload + delivery helpers |
-| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`                      | Snapshot path/read/write helpers   |
-| `gh-delta/args`        | `parseEntitySelection`, `parseOutpostArgs`                                 | Shared argument parsing helpers    |
-| `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                  | Package metadata + version text    |
+| Import                 | Exported names                                                                    | Purpose                            |
+| ---------------------- | --------------------------------------------------------------------------------- | ---------------------------------- |
+| `gh-delta/detect`      | `detectDeltas`                                                                    | Pure delta classification          |
+| `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint`        | GitHub object fingerprint helpers  |
+| `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`        | Outpost payload + delivery helpers |
+| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`                             | Snapshot path/read/write helpers   |
+| `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`                       | Shared argument parsing helpers    |
+| `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                         | Package metadata + version text    |
+| `gh-delta/contract`    | `REPORT_SCHEMA_VERSION`, `OUTPOST_SCHEMA_VERSION`, `DELTA_CLASSES`, `ERROR_KINDS` | Runtime contract constants         |
 
 All subpaths are pure ESM (`"type": "module"`). The package has no runtime dependencies.
 
@@ -317,9 +336,9 @@ PR #42 "Add widget": ci-changed, review-changed
 classes: ci-changed, review-changed
 suggested action: CI/review changed. Read checks and review threads before merge.
 
-ISSUE #17 "Backfill imports": new, relabeled
-classes: new, relabeled
-suggested action: new item. Read it and queue or recommend review.
+ISSUE #17 "Backfill imports": relabeled
+classes: relabeled
+suggested action: scope/state changed. Reassess dispatch.
 ```
 
 When no deltas are found the output is:
@@ -330,13 +349,22 @@ When no deltas are found the output is:
 No GitHub deltas since the last snapshot.
 ```
 
-On error (exit `1`):
+On error (exit `1` transient):
 
 ```text
 2026-07-01T12:00:00.000Z | error | 0 delta(s)
 
 gh-delta error: <error message>
 Snapshot was not updated. No action taken. The next scheduled tick should retry.
+```
+
+On permanent error (exit `2`):
+
+```text
+2026-07-01T12:00:00.000Z | error | 0 delta(s)
+
+gh-delta error: <error message>
+Snapshot was not updated. Fix the configuration or snapshot; retrying will not help.
 ```
 
 ### `--format json`
@@ -389,26 +417,34 @@ Run `gh-delta --help-json` to emit the complete document.
 
 `gh-delta` is split into pure logic and impure edges:
 
-- `lib/args.mjs`: shared CLI argument helpers for entity selection and outposts.
+- `lib/args.mjs`: shared CLI argument helpers for entity selection, repo
+  validation, and monitor-id validation.
 - `lib/fingerprint.mjs`: stable fingerprints for PRs and issues.
 - `lib/detect.mjs`: compares snapshots and classifies deltas.
-- `lib/gh.mjs`: calls `gh pr list`, `gh issue list`, and `gh api graphql` for
-  PR review thread counts.
-- `lib/snapshot.mjs`: reads and atomically writes snapshot files.
+- `lib/gh.mjs`: GraphQL incremental fetcher — open items in full, plus
+  all-states items updated since the snapshot horizon.
+- `lib/snapshot.mjs`: reads and atomically writes snapshot files; derives
+  the incremental-fetch horizon cutoff.
 - `lib/outpost.mjs`: validates outpost URLs, builds schema v1 payloads, and
   sends short-timeout HTTP POSTs.
 - `lib/text-output.mjs`: formats operator text and outpost warnings.
 - `lib/version.mjs`: reads package metadata for `--version` and help JSON.
 - `lib/help.mjs`: shared human and machine-readable CLI help metadata.
+- `lib/contract.mjs`: runtime contract constants (`REPORT_SCHEMA_VERSION`,
+  `OUTPOST_SCHEMA_VERSION`, `DELTA_CLASSES`, `ERROR_KINDS`).
 - `lib/entrypoint.mjs`: symlink-safe bin entrypoint detection for npm/npx.
-- `gh-delta.mjs`: CLI wiring, output formats, outposts, and exit codes.
+- `lib/cli.mjs`: internal CLI runner used by the package bin and tests.
+- `gh-delta.mjs`: the executable bin entrypoint; delegates to `lib/cli.mjs`.
 
 More detail is in [docs/architecture.md](docs/architecture.md).
 
-Current v0.1 scope: the GitHub CLI fetch fails closed if either PR or issue
-results hit the hard `500` item limit, or if an open PR has more than 100 review
-threads and nested review-thread pagination would be required. Use a narrower
-monitor scope or wait for a broader paginated fetcher for larger repositories.
+The fetch uses a GraphQL incremental strategy. Open items are fetched in full
+(up to 10 pages × 100 = 1 000 per family; exits `1` beyond that). When a prior
+snapshot exists, all-states items updated since the snapshot horizon are also
+fetched to observe closed, merged, and relabeled transitions (up to 30 pages ×
+100 = 3 000 per tick; exits `1` with guidance to narrow the monitor scope or
+re-seed the baseline). Per-item nested pagination (CI contexts, reviews,
+review threads, labels) fails closed if a sub-page overflows.
 
 Research for future entity types and selectors lives under
 [docs/entities-research](docs/entities-research/README.md). Those notes are not
@@ -422,24 +458,35 @@ fetches to the `gh` CLI. If `gh` is not authenticated or lacks read access to
 the repository, the detector exits `1` and does not touch the snapshot. Fix
 authentication first, then retry.
 
-**"GitHub returned 500 PRs/issues" / incomplete review-thread pages.**
-The tool fails closed (exit `1`) rather than silently truncating results when
-either the PR or issue list hits the hard 500-item limit, or when an open PR
-has more than 100 review threads and nested pagination would be required. Narrow
-the monitor scope (use a tighter `--entities` selection, watch a fork, or split
-into multiple monitors) before continuing.
+**"exceeded N pages — narrow the monitor scope or re-seed the baseline".**
+The tool fails closed (exit `1`) rather than silently truncating results.
+Open items are limited to 1 000 per family (10 pages × 100). Updated items per
+tick are limited to 3 000 (30 pages × 100); the guidance is to narrow the
+monitor scope or re-seed the baseline. Per-item nested pagination (CI contexts,
+reviews, review threads, labels) also fails closed if a sub-page overflows.
+Narrow the monitor scope (a tighter `--entities` selection, watch a fork, or
+split into multiple monitors) before continuing.
 
 **The same delta refires every tick.**
 If `gh-delta` repeatedly reports the same delta on every scheduled run, stop
-and investigate the underlying GitHub state before taking any action. Do not
-act repeatedly on the same delta — this is a signal that something unexpected
-is happening on the GitHub side or in your monitor configuration.
+and investigate the underlying GitHub state before taking any action. If an item
+has been absent for 3 consecutive ticks, it is demoted to `presumed-deleted` and
+goes silent — no further ticks will mention it unless it reappears. Repeated
+firing before that demotion is a signal that something unexpected is happening on
+the GitHub side or in your monitor configuration.
 
-**Corrupt snapshot / invalid JSON — exit `1`, snapshot not updated.**
-If the snapshot file is invalid JSON or unreadable, `gh-delta` exits `1` and
-leaves the file untouched to preserve monitor memory. Do not hand-edit snapshot
-files. If recovery is needed, delete the snapshot and re-seed the baseline with
-a fresh first run.
+**An issue I deleted showed `missing` → `still-missing` → `presumed-deleted` — is that a bug?**
+No, that is expected behavior. `missing` (tick 1) and `still-missing` (tick 2)
+are warnings that an open item vanished from the fetch. `presumed-deleted` (tick 3) is the terminal class — it fires once and then the object goes silent with
+memory intact. If the item reappears, `reappeared` fires. If it is truly gone,
+silence is correct. You can verify on GitHub; no further action is required from
+the monitor.
+
+**Corrupt snapshot / invalid JSON — exit `2`, snapshot not updated.**
+If the snapshot file is invalid JSON or has an unrecognized shape, `gh-delta`
+exits `2` (permanent error) and leaves the file untouched to preserve monitor
+memory. Do not hand-edit snapshot files. If recovery is needed, delete the
+snapshot and re-seed the baseline with a fresh first run.
 
 ## Development
 

@@ -15,10 +15,13 @@ gh-delta --repo <owner/name> --monitor-id <id>
          (--state-file <path> | --state-dir <dir>)
          [--entities pr,issue] [--format json|text] [--detail]
          [--outpost-url <url>]
+         [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>]
+         [--gh-timeout-ms <ms>]
 ```
 
 - `--repo` and `--monitor-id` are required.
-- `--repo` must be `owner/name`.
+- `--repo` must be `owner/name`. **Canonicalized to lowercase** — snapshot paths,
+  report echoes, and outpost event IDs always use the lowercased form.
 - `--monitor-id` must start with a letter or number and contain only letters,
   numbers, dot, underscore, or dash.
 - `--state-file` and `--state-dir` are mutually exclusive, and exactly one is
@@ -32,27 +35,43 @@ gh-delta --repo <owner/name> --monitor-id <id>
 - `--outpost-url` is optional at-most-once HTTP delivery; see
   [Outpost Payload](#outpost-payload-schema-v1). It does not affect the JSON
   report, exit code, or snapshot.
+- `--outpost-timeout-ms` timeout in milliseconds for each outpost HTTP POST
+  (default `4000`).
+- `--outpost-max-posts` maximum number of outpost POSTs per run (default:
+  unlimited). Excess deltas are skipped with an outpost warning.
+- `--gh-timeout-ms` timeout in milliseconds for each `gh` subprocess call
+  (default `60000`).
+
+**Repeated flags:** the last value wins. **`--help`, `--help-json`, and
+`--version` take precedence over all validation** — an agent probing with
+`--help-json` receives the help document even when the rest of the command line
+is invalid.
 
 ## Exit Codes
 
 - `0`: baseline established or no deltas.
 - `10`: deltas found.
-- `1`: argument, GitHub CLI, network, or parse error. On errors, the snapshot is
-  not updated.
+- `1`: **transient error** — GitHub CLI, network, timeout, or snapshot write
+  failure. The snapshot is not updated; the next scheduled tick should retry
+  automatically.
+- `2`: **permanent error** — invalid configuration or unreadable / invalid-shape
+  snapshot. Retrying will not help; a human must fix the issue before the next
+  tick.
 
 ## Programmatic API Surface
 
 The package publishes a small, explicit ESM surface. Imports must use explicit
 subpaths; the package root is intentionally not exported.
 
-| Export path            | Symbols                                                                    | Purpose                               |
-| ---------------------- | -------------------------------------------------------------------------- | ------------------------------------- |
-| `gh-delta/detect`      | `detectDeltas`                                                             | Pure delta classification engine      |
-| `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint` | Stable object fingerprint builders    |
-| `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl` | Outpost payload and transport helpers |
-| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`                      | Snapshot path and persistence helpers |
-| `gh-delta/args`        | `parseEntitySelection`, `parseOutpostArgs`                                 | Shared argument parsing policies      |
-| `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                  | Package metadata and version output   |
+| Export path            | Symbols                                                                           | Purpose                               |
+| ---------------------- | --------------------------------------------------------------------------------- | ------------------------------------- |
+| `gh-delta/detect`      | `detectDeltas`                                                                    | Pure delta classification engine      |
+| `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint`        | Stable object fingerprint builders    |
+| `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`        | Outpost payload and transport helpers |
+| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`                             | Snapshot path and persistence helpers |
+| `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`                       | Shared argument parsing policies      |
+| `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                         | Package metadata and version output   |
+| `gh-delta/contract`    | `REPORT_SCHEMA_VERSION`, `OUTPOST_SCHEMA_VERSION`, `DELTA_CLASSES`, `ERROR_KINDS` | Runtime contract constants            |
 
 Behavioral notes for consumers:
 
@@ -65,7 +84,8 @@ Behavioral notes for consumers:
 - `snapshotPath` is deterministic and scoped by repo, monitor-id, and entity set.
 
 The exit code is the primary machine signal. Branch on it before reading stdout:
-code `1` produces an [error report](#error-report-shape) with no `deltas` field.
+codes `1` and `2` produce an [error report](#error-report-shape) with no
+`deltas` field.
 
 ## Delta Classes
 
@@ -74,29 +94,30 @@ is **never empty** (`updated` is the catch-all). `classes` is a **set** — seve
 can co-occur on one delta (e.g. `ci-changed` + `review-changed`). Order within
 the array is not significant and not guaranteed stable.
 
-| Class                         | Applies to | Meaning                                                                                                                                |
-| ----------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `new`                         | pr, issue  | New issue or PR after the baseline. `from` is `null`.                                                                                  |
-| `closed`                      | pr, issue  | Issue or PR was closed.                                                                                                                |
-| `reopened`                    | pr, issue  | Issue or PR was reopened (state returned to `OPEN`).                                                                                   |
-| `new-comments`                | pr, issue  | Comment count increased (or, at the 100-comment cap, `updatedAt` advanced).                                                            |
-| `updated`                     | pr, issue  | Fingerprint changed with no more specific class. A PR-branch push alone (head SHA change) surfaces here.                               |
-| `missing`                     | pr, issue  | An object from the prior snapshot vanished from the fetch. Check pagination, permissions, or scope before trusting it. `to` is `null`. |
-| `still-missing`               | pr, issue  | An already-missing object is still absent. Unresolved operational state, not a fresh item. `to` is `null`.                             |
-| `reappeared`                  | pr, issue  | An object previously marked `missing` returned to the fetch. It may co-occur with other classes if the fingerprint also changed.       |
-| `merged`                      | pr only    | PR was merged.                                                                                                                         |
-| `draft-ready`                 | pr only    | PR moved from draft to ready for review.                                                                                               |
-| `ci-changed`                  | pr only    | Check run or status context changed.                                                                                                   |
-| `review-changed`              | pr only    | Review decision or latest review states changed.                                                                                       |
-| `became-mergeable`            | pr only    | PR moved from `CONFLICTING` to `MERGEABLE` (an `UNKNOWN` mid-recompute placeholder does not count).                                    |
-| `unresolved-threads-added`    | pr only    | Unresolved PR review thread count increased.                                                                                           |
-| `unresolved-threads-resolved` | pr only    | Unresolved PR review thread count decreased.                                                                                           |
-| `review-threads-changed`      | pr only    | PR review thread total changed while the unresolved count held steady.                                                                 |
-| `relabeled`                   | issue only | Issue labels changed. (The PR fetch does not collect labels, so PRs never emit this.)                                                  |
+| Class                         | Applies to | Meaning                                                                                                                                                                                                                                                          |
+| ----------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `new`                         | pr, issue  | New issue or PR after the baseline. `from` is `null`.                                                                                                                                                                                                            |
+| `closed`                      | pr, issue  | Issue or PR was closed.                                                                                                                                                                                                                                          |
+| `reopened`                    | pr, issue  | Issue or PR was reopened (state returned to `OPEN`).                                                                                                                                                                                                             |
+| `new-comments`                | pr, issue  | Comment count increased.                                                                                                                                                                                                                                         |
+| `updated`                     | pr, issue  | Fingerprint changed with no more specific class. A PR-branch push alone (head SHA change) surfaces here.                                                                                                                                                         |
+| `missing`                     | pr, issue  | An item the snapshot believes OPEN vanished from the fetch. Check pagination, permissions, or scope before trusting it. Absent closed items are dormant memory, not a missing delta. `to` is `null`.                                                             |
+| `still-missing`               | pr, issue  | An already-missing open item is still absent (tick 2). Unresolved operational state, not a fresh delta. `to` is `null`.                                                                                                                                          |
+| `presumed-deleted`            | pr, issue  | Absent for 3 consecutive ticks; treated as deleted, transferred, or converted. Emitted once; the object then goes silent but stays in memory (`missingTicks` counter in the stored fingerprint). `reappeared` still fires if the object returns. `to` is `null`. |
+| `reappeared`                  | pr, issue  | An object previously marked `missing` returned to the fetch. It may co-occur with other classes if the fingerprint also changed.                                                                                                                                 |
+| `merged`                      | pr only    | PR was merged.                                                                                                                                                                                                                                                   |
+| `draft-ready`                 | pr only    | PR moved from draft to ready for review.                                                                                                                                                                                                                         |
+| `ci-changed`                  | pr only    | Check run or status context changed.                                                                                                                                                                                                                             |
+| `review-changed`              | pr only    | Review decision or latest review states changed.                                                                                                                                                                                                                 |
+| `became-mergeable`            | pr only    | PR moved from `CONFLICTING` to `MERGEABLE` (an `UNKNOWN` mid-recompute placeholder does not count).                                                                                                                                                              |
+| `unresolved-threads-added`    | pr only    | Unresolved PR review thread count increased.                                                                                                                                                                                                                     |
+| `unresolved-threads-resolved` | pr only    | Unresolved PR review thread count decreased.                                                                                                                                                                                                                     |
+| `review-threads-changed`      | pr only    | PR review thread total changed while the unresolved count held steady.                                                                                                                                                                                           |
+| `relabeled`                   | issue only | Issue labels changed. (The PR fetch does not collect labels, so PRs never emit this.)                                                                                                                                                                            |
 
 **Forward compatibility:** new classes may be added in a later minor version.
 Consumers must treat an unrecognized class as "something changed, inspect,"
-never as an error.
+never as an error. See also [schemaVersion policy](#schemaversion-policy).
 
 ## Report Shape
 
@@ -141,6 +162,10 @@ Field guarantees:
   parse it (it varies between "baseline established: N PRs, M issues" and
   "N delta(s)").
 - `deltas` (array): see below. Empty on baseline and on no-change runs.
+- `warnings` (string[]): **optional; present only in JSON format when outpost
+  delivery produced warnings** (e.g. a POST timed out or returned an error).
+  Omitted entirely when there are no warnings. Does not appear in text output
+  (warnings are printed inline there). Does not affect the exit code.
 
 Each delta:
 
@@ -169,33 +194,41 @@ consumers must tolerate new keys and must not assume a closed shape.
 
 PR fingerprint:
 
-| Field                     | Readable?  | Notes                                                                                                                                 |
-| ------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `state`                   | yes        | `OPEN` \| `CLOSED` \| `MERGED`.                                                                                                       |
-| `updatedAt`               | yes        | ISO-8601.                                                                                                                             |
-| `isDraft`                 | yes        | boolean.                                                                                                                              |
-| `mergeable`               | yes        | `MERGEABLE` \| `CONFLICTING` \| `UNKNOWN`.                                                                                            |
-| `review`                  | yes        | GitHub `reviewDecision` (e.g. `APPROVED`, `REVIEW_REQUIRED`, `""`).                                                                   |
-| `comments`                | yes        | integer count, **saturates at 100**. At the cap, use `commentsOverflow` and `updatedAt`, not the raw count, to reason about activity. |
-| `commentsOverflow`        | yes        | boolean; `true` once `comments` hit the 100 cap.                                                                                      |
-| `reviewThreads`           | yes        | integer count of PR review threads.                                                                                                   |
-| `unresolvedReviewThreads` | yes        | integer count of unresolved PR review threads.                                                                                        |
-| `ci`                      | **opaque** | sha1 digest of the CI rollup. Observe inequality only; never parse.                                                                   |
-| `reviews`                 | **opaque** | sha1 digest of latest reviews. Observe inequality only; never parse.                                                                  |
-| `head`                    | opaque-ish | head ref OID (git SHA). Treat as a change indicator; every push changes it.                                                           |
+| Field                     | Readable?   | Notes                                                                                         |
+| ------------------------- | ----------- | --------------------------------------------------------------------------------------------- |
+| `state`                   | yes         | `OPEN` \| `CLOSED` \| `MERGED`.                                                               |
+| `updatedAt`               | yes         | ISO-8601.                                                                                     |
+| `isDraft`                 | yes         | boolean.                                                                                      |
+| `mergeable`               | yes         | `MERGEABLE` \| `CONFLICTING` \| `UNKNOWN`.                                                    |
+| `review`                  | yes         | GitHub `reviewDecision` (e.g. `APPROVED`, `REVIEW_REQUIRED`, `""`).                           |
+| `comments`                | yes         | exact integer total from GraphQL `totalCommentsCount`.                                        |
+| `reviewThreads`           | yes         | integer count of PR review threads.                                                           |
+| `unresolvedReviewThreads` | yes         | integer count of unresolved PR review threads.                                                |
+| `ci`                      | **opaque**  | sha1 digest of the CI rollup. Observe inequality only; never parse.                           |
+| `reviews`                 | **opaque**  | sha1 digest of latest reviews. Observe inequality only; never parse.                          |
+| `head`                    | opaque-ish  | head ref OID (git SHA). Treat as a change indicator; every push changes it.                   |
+| `missing`                 | bookkeeping | boolean; present on fingerprints stored for missing items. Not part of the change comparison. |
+| `missingTicks`            | bookkeeping | number; consecutive ticks an item has been absent. Present alongside `missing: true`.         |
 
 Issue fingerprint: `state`, `updatedAt`, `labels` (string[], sorted),
-`comments` (same 100 cap), `commentsOverflow`.
+`comments` (exact integer total from GraphQL `totalCount`).
+
+When an item is missing, `missing: true` and `missingTicks` are written into the
+stored fingerprint so the lifecycle (`missing` → `still-missing` →
+`presumed-deleted`) can advance across ticks. These bookkeeping fields are
+present in the `from` fingerprint of `missing`, `still-missing`, and
+`presumed-deleted` deltas and are stripped before change comparison.
 
 ### Error Report Shape
 
-Emitted with exit code `1`. It **does not** carry `deltas`, `baseline`,
-`entities`, or `summary`. The snapshot is not written.
+Emitted with exit code `1` (transient) or `2` (permanent). It **does not** carry
+`deltas`, `baseline`, `entities`, or `summary`. The snapshot is not written.
 
 ```json
 {
   "schemaVersion": 1,
   "error": "missing required --repo <owner/name>",
+  "kind": "config",
   "repo": "owner/repo",
   "monitorId": "prs-5m",
   "at": "2026-07-01T12:00:00.000Z"
@@ -203,24 +236,39 @@ Emitted with exit code `1`. It **does not** carry `deltas`, `baseline`,
 ```
 
 - `schemaVersion` (number), `error` (string), `at` (string): always present.
+- `kind` (string): one of `config`, `snapshot`, `github`, `io`. This is a closed
+  set for `0.1` but forward-compatible like classes — treat unknown values as
+  "something changed, inspect". `config` and `snapshot` kinds map to exit `2`;
+  `github` and `io` kinds map to exit `1`.
 - `repo`, `monitorId` (string): present once the corresponding flag has been
   parsed (absent for errors raised before that, e.g. an unknown option). `error`
   strings are human-readable and not a stable enum.
 
 ## Snapshot Semantics
 
-The detector is stateless between runs except for the snapshot it owns. There is
-**no `--since` and no incremental mode**: every run fetches the full requested
-collections from GitHub and diffs them against the snapshot at the
-`--state-file` / `--state-dir` location.
+The detector is stateless between runs except for the snapshot it owns.
+
+**Incremental fetch contract:** open items are always fetched in full (the scope
+for missing detection). When a prior snapshot exists, `meta.horizon` (the
+timestamp of the previous run) minus a 5-minute overlap is used as a cutoff:
+all-states items updated since that cutoff are also fetched to observe closed,
+merged, and relabeled transitions. Absent closed items are dormant memory, not a
+missing delta — only items the snapshot believes OPEN can vanish.
+
+Snapshot shape: `{ "pr": object, "issue": object, "meta"?: object }`.
+`meta.horizon` is stamped with the run timestamp on every successful write.
+Legacy snapshots without `meta` fall back to the newest `updatedAt` across all
+stored fingerprints as the horizon.
 
 - The consumer supplies the snapshot **location**, never snapshot **data**.
   gh-delta reads it, diffs, and atomically rewrites it after a successful fetch.
 - The **first run** (no snapshot file) seeds a baseline: exit `0`,
   `baseline: true`, `deltas: []`. Persist the state directory between runs.
 - Snapshot JSON is strict. A missing file seeds a baseline, but any present file
-  that is not exactly `{ "pr": object, "issue": object }` with numeric object
-  keys is an error and is not migrated.
+  that is not `{ "pr": object, "issue": object }` with numeric object keys is an
+  error (exit `2`) and is not migrated. Write-side validation runs before the
+  rename so a bad snapshot is never persisted. The temp file is removed on rename
+  failure to avoid leaving stray files.
 - A derived `--state-dir` path is scoped by repo, monitor id, **and** selected
   entities. A `--entities pr` run and a `--entities pr,issue` run use **different**
   files; keep `--entities` fixed per monitor so state is not split.
@@ -230,6 +278,14 @@ collections from GitHub and diffs them against the snapshot at the
   (temp file + rename), which prevents corruption, but overlapping runs still
   race and one will clobber the other's result. Serialize ticks per
   `(repo, monitor-id, entities)`.
+
+### schemaVersion policy
+
+`schemaVersion` is bumped **only** on a breaking change — a field renamed or
+removed. **Additive changes** (new optional fields on the report, a delta, or a
+fingerprint; new classes; new error kinds) **never bump `schemaVersion`.**
+Unknown classes or kinds mean "something changed, inspect", never an error.
+Assert `schemaVersion === 1` and handle unknown classes/kinds gracefully.
 
 ## Outpost Payload (schema v1)
 

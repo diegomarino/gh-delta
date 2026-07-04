@@ -9,9 +9,9 @@ Run:
 ```bash
 npm ci --cache .npm-cache
 npm run release:check
-gh-delta --help
-gh-delta --help-json
-gh-delta --version
+node ./gh-delta.mjs --help
+node ./gh-delta.mjs --help-json
+node ./gh-delta.mjs --version
 ```
 
 Expected:
@@ -45,7 +45,7 @@ Before the first public publish:
 
 - confirm the npm package name is available or choose a scoped package name;
 - confirm `repository`, `bugs`, and `homepage` point at the real GitHub repo;
-- update `CHANGELOG.md` with the final release date;
+- verify the release-please PR's generated CHANGELOG section — never hand-edit `CHANGELOG.md`;
 - tag the release after the publish commit.
 
 ## Package Contents
