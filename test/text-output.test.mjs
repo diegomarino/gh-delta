@@ -69,13 +69,27 @@ test('delta text output prints each delta with suggested action', () => {
           classes: ['reappeared'],
           line: 'ISSUE #21 "Webhook retries": reappeared',
         },
+        {
+          entity: 'pr',
+          number: 10,
+          title: '(missing from current fetch)',
+          classes: ['presumed-deleted'],
+          line: 'PR #10 "(missing from current fetch)": presumed-deleted',
+        },
+        {
+          entity: 'pr',
+          number: 11,
+          title: 'Deploy backend v2',
+          classes: ['merged', 'ci-changed'],
+          line: 'PR #11 "Deploy backend v2": merged, ci-changed',
+        },
       ],
-      summary: '5 delta(s)',
+      summary: '7 delta(s)',
     },
     now: () => '2026-07-01T10:05:00.000Z',
   });
 
-  assert.match(output, /2026-07-01T10:05:00.000Z \| 5 delta\(s\)/);
+  assert.match(output, /2026-07-01T10:05:00.000Z \| 7 delta\(s\)/);
   assert.match(output, /PR #42 "Add billing webhook"/);
   assert.match(output, /suggested action: CI\/review changed/);
   assert.match(output, /ISSUE #17 "Backfill customer imports"/);
@@ -86,6 +100,10 @@ test('delta text output prints each delta with suggested action', () => {
   assert.match(output, /suggested action: unresolved review threads/);
   assert.match(output, /ISSUE #21 "Webhook retries"/);
   assert.match(output, /suggested action: object returned to the fetch/);
+  assert.match(output, /PR #10 "\(missing from current fetch\)"/);
+  assert.match(output, /suggested action: absent for several consecutive ticks/);
+  assert.match(output, /PR #11 "Deploy backend v2"/);
+  assert.match(output, /suggested action: item completed or closed/);
 });
 
 test('error text output reports snapshot-preserving failure', () => {

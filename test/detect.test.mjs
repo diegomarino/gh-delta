@@ -260,3 +260,42 @@ test('an exact comment total increase emits new-comments', () => {
   });
   assert.deepEqual(r.deltas[0].classes, ['new-comments']);
 });
+
+test('missing demotes to presumed-deleted on the third absent tick, then goes silent', () => {
+  const base = detectDeltas(null, { pr: [pr()], issue: [] });
+  const t1 = detectDeltas(base.snapshot, { pr: [], issue: [] });
+  assert.deepEqual(t1.deltas[0].classes, ['missing']);
+  assert.equal(t1.snapshot.pr['42'].missingTicks, 1);
+  const t2 = detectDeltas(t1.snapshot, { pr: [], issue: [] });
+  assert.deepEqual(t2.deltas[0].classes, ['still-missing']);
+  const t3 = detectDeltas(t2.snapshot, { pr: [], issue: [] });
+  assert.deepEqual(t3.deltas[0].classes, ['presumed-deleted']);
+  const t4 = detectDeltas(t3.snapshot, { pr: [], issue: [] });
+  assert.deepEqual(t4.deltas, []);
+  assert.equal(t4.snapshot.pr['42'].missing, true); // memory intact
+});
+
+test('an archived (presumed-deleted) object that reappears emits reappeared', () => {
+  const base = detectDeltas(null, { pr: [pr()], issue: [] });
+  let s = base.snapshot;
+  for (let i = 0; i < 4; i++) s = detectDeltas(s, { pr: [], issue: [] }).snapshot;
+  const back = detectDeltas(s, { pr: [pr()], issue: [] });
+  assert.deepEqual(back.deltas[0].classes, ['reappeared']);
+  assert.equal(back.snapshot.pr['42'].missingTicks, undefined);
+});
+
+test('absent closed items are dormant memory, not missing (incremental scope)', () => {
+  const base = detectDeltas(null, { pr: [pr({ state: 'MERGED' })], issue: [] });
+  const r = detectDeltas(base.snapshot, { pr: [], issue: [] });
+  assert.deepEqual(r.deltas, []);
+  assert.ok(r.snapshot.pr['42']);
+  assert.equal(r.snapshot.pr['42'].missing, undefined);
+});
+
+test('legacy missing fingerprints without missingTicks continue the lifecycle', () => {
+  const base = detectDeltas(null, { pr: [pr()], issue: [] });
+  const legacy = detectDeltas(base.snapshot, { pr: [], issue: [] }).snapshot;
+  delete legacy.pr['42'].missingTicks;
+  const r = detectDeltas(legacy, { pr: [], issue: [] });
+  assert.deepEqual(r.deltas[0].classes, ['still-missing']);
+});
