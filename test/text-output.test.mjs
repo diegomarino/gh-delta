@@ -103,4 +103,22 @@ test('error text output reports snapshot-preserving failure', () => {
   assert.match(output, /error \| 0 delta\(s\)/);
   assert.match(output, /gh: API rate limit exceeded/);
   assert.match(output, /Snapshot was not updated/);
+  assert.match(output, /The next scheduled tick should retry/);
+});
+
+test('permanent error text output tells operator to fix before retrying', () => {
+  const output = formatTextOutput({
+    code: 2,
+    report: {
+      error: 'invalid snapshot JSON at /tmp/x.json',
+      repo: 'owner/repo',
+      monitorId: 'watch',
+      at: '2026-07-01T10:10:00.000Z',
+    },
+    now: () => '2026-07-01T10:10:00.000Z',
+  });
+
+  assert.match(output, /error \| 0 delta\(s\)/);
+  assert.match(output, /invalid snapshot JSON/);
+  assert.match(output, /Fix the configuration or snapshot; retrying will not help/);
 });

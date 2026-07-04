@@ -70,7 +70,7 @@ test('first run returns code 0 (baseline) and writes the snapshot', () => {
 test('error reports carry schemaVersion and omit deltas', () => {
   const d = deps([[basePr]]);
   const { code, report } = run(['--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
-  assert.equal(code, 1);
+  assert.equal(code, 2);
   assert.equal(report.schemaVersion, 1);
   assert.match(report.error, /--repo/);
   assert.equal(report.deltas, undefined);
@@ -225,7 +225,7 @@ test('--version returns package version without fetching GitHub', () => {
   assert.equal(report, `gh-delta ${packageJson.version}\n`);
 });
 
-test('missing --repo returns code 1 before fetching', () => {
+test('missing --repo returns code 2 before fetching', () => {
   const d = {
     fetchPRs: () => {
       throw new Error('should not fetch');
@@ -236,11 +236,11 @@ test('missing --repo returns code 1 before fetching', () => {
     now: () => '2026-07-01T12:00:00Z',
   };
   const { code, report } = run(['--state-file', '/tmp/x.json'], d);
-  assert.equal(code, 1);
+  assert.equal(code, 2);
   assert.match(report.error, /--repo/);
 });
 
-test('missing --monitor-id returns code 1 before fetching', () => {
+test('missing --monitor-id returns code 2 before fetching', () => {
   const d = {
     fetchPRs: () => {
       throw new Error('should not fetch');
@@ -251,11 +251,11 @@ test('missing --monitor-id returns code 1 before fetching', () => {
     now: () => '2026-07-01T12:00:00Z',
   };
   const { code, report } = run(['--repo', 'o/r', '--state-file', '/tmp/x.json'], d);
-  assert.equal(code, 1);
+  assert.equal(code, 2);
   assert.match(report.error, /--monitor-id/);
 });
 
-test('missing state path returns code 1 before fetching', () => {
+test('missing state path returns code 2 before fetching', () => {
   const d = {
     fetchPRs: () => {
       throw new Error('should not fetch');
@@ -266,7 +266,7 @@ test('missing state path returns code 1 before fetching', () => {
     now: () => '2026-07-01T12:00:00Z',
   };
   const { code, report } = run(['--repo', 'o/r', '--monitor-id', 'main'], d);
-  assert.equal(code, 1);
+  assert.equal(code, 2);
   assert.match(report.error, /--state-file.*--state-dir/);
 });
 
@@ -284,11 +284,11 @@ test('--state-file and --state-dir are mutually exclusive', () => {
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--state-dir', '/tmp'],
     d,
   );
-  assert.equal(code, 1);
+  assert.equal(code, 2);
   assert.match(report.error, /mutually exclusive/);
 });
 
-test('invalid --entities returns code 1 before fetching', () => {
+test('invalid --entities returns code 2 before fetching', () => {
   const d = {
     fetchPRs: () => {
       throw new Error('should not fetch');
@@ -311,11 +311,11 @@ test('invalid --entities returns code 1 before fetching', () => {
     ],
     d,
   );
-  assert.equal(code, 1);
+  assert.equal(code, 2);
   assert.match(report.error, /--entities/);
 });
 
-test('unknown arguments return structured code 1 error', () => {
+test('unknown arguments return structured code 2 error', () => {
   const { code, report } = run(
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--bogus'],
     {
@@ -328,7 +328,7 @@ test('unknown arguments return structured code 1 error', () => {
       now: () => '2026-07-01T12:00:00Z',
     },
   );
-  assert.equal(code, 1);
+  assert.equal(code, 2);
   assert.match(report.error, /Unknown option|--bogus/);
 });
 
@@ -358,7 +358,7 @@ test('--entities pr preserves existing issue snapshot entries', () => {
   assert.ok(d.stored.issue['7']);
 });
 
-test('corrupt snapshot read failure returns code 1 and does NOT write', () => {
+test('corrupt snapshot read failure returns code 2 and does NOT write', () => {
   let writes = 0;
   const { code, report } = run(
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'],
@@ -374,7 +374,7 @@ test('corrupt snapshot read failure returns code 1 and does NOT write', () => {
       now: () => '2026-07-01T12:00:00Z',
     },
   );
-  assert.equal(code, 1);
+  assert.equal(code, 2);
   assert.equal(writes, 0);
   assert.match(report.error, /invalid snapshot JSON/);
 });
@@ -393,11 +393,11 @@ test('invalid repo and monitor id fail before fetching', () => {
   assert.equal(
     run(['--repo', 'owner/repo/extra', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d)
       .code,
-    1,
+    2,
   );
   assert.equal(
     run(['--repo', 'owner/repo', '--monitor-id', '../bad', '--state-file', '/tmp/x.json'], d).code,
-    1,
+    2,
   );
 });
 
@@ -425,7 +425,7 @@ test('existing snapshot is read before GitHub fetches', () => {
     },
   );
 
-  assert.equal(code, 1);
+  assert.equal(code, 2);
   assert.equal(read, true);
   assert.equal(fetched, false);
   assert.match(report.error, /invalid snapshot/);
@@ -610,7 +610,7 @@ test('gh-delta rejects invalid --outpost-url before fetching GitHub', async () =
     },
   );
 
-  assert.equal(code, 1);
+  assert.equal(code, 2);
   assert.equal(fetches, 0);
   assert.match(report.error, /--outpost-url must use http: or https:/);
 });
@@ -687,6 +687,43 @@ test('duplicate --outpost-url uses last-wins like every other flag', async () =>
     d,
   );
   assert.equal(code, 0); // baseline, no posts — but parsing must not error
+});
+
+test('error kinds map to exit codes: config/snapshot=2, github/io=1', () => {
+  const base = ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'];
+  const noFetch = { now: () => '2026-07-01T12:00:00Z' };
+  const config = run(['--repo', 'o/r'], noFetch);
+  assert.equal(config.code, 2);
+  assert.equal(config.report.kind, 'config');
+  const snapshot = run(base, {
+    ...noFetch,
+    readSnapshot: () => {
+      throw new Error('invalid snapshot JSON at /tmp/x.json');
+    },
+  });
+  assert.equal(snapshot.code, 2);
+  assert.equal(snapshot.report.kind, 'snapshot');
+  const github = run(base, {
+    ...noFetch,
+    readSnapshot: () => null,
+    fetchPRs: () => {
+      throw new Error('gh: rate limited');
+    },
+    fetchIssues: () => [],
+  });
+  assert.equal(github.code, 1);
+  assert.equal(github.report.kind, 'github');
+  const io = run(base, {
+    ...noFetch,
+    readSnapshot: () => null,
+    fetchPRs: () => [],
+    fetchIssues: () => [],
+    writeSnapshotAtomic: () => {
+      throw new Error('ENOSPC');
+    },
+  });
+  assert.equal(io.code, 1);
+  assert.equal(io.report.kind, 'io');
 });
 
 test('sendOutposts stops after the configured max payload count', async () => {
