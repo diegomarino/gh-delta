@@ -2,7 +2,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseEntitySelection, validateMonitorId, validateRepo } from '../lib/args.mjs';
+import {
+  parseEntitySelection,
+  validateMonitorId,
+  validateRepo,
+  canonicalEntityKey,
+} from '../lib/args.mjs';
 
 test('parseEntitySelection accepts pr, issue, or both and rejects empty selections', () => {
   assert.deepEqual(parseEntitySelection('pr,issue'), {
@@ -61,4 +66,10 @@ test('validateRepo canonicalizes to lowercase and rejects dot-only segments', ()
   assert.equal(validateRepo('../..').ok, false);
   assert.equal(validateRepo('./repo').ok, false);
   assert.equal(validateRepo('owner/..').ok, false);
+});
+
+test('canonicalEntityKey canonicalizes order, whitespace, and duplicates; unknown tokens pass through', () => {
+  assert.equal(canonicalEntityKey('issue,pr'), 'pr-issue');
+  assert.equal(canonicalEntityKey(' pr , pr '), 'pr');
+  assert.equal(canonicalEntityKey('weird'), 'weird');
 });

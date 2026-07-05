@@ -9,6 +9,7 @@ import {
   readSnapshot,
   writeSnapshotAtomic,
   horizonCutoff,
+  defaultStateDir,
 } from '../lib/snapshot.mjs';
 
 test('snapshotPath is collision-free for repo and monitor ids that slug the same', () => {
@@ -106,6 +107,43 @@ test('horizonCutoff derives from meta, falls back to fingerprints, honors overla
     '2026-07-01T10:00:00.000Z', // legacy: max fingerprint updatedAt
   );
   assert.equal(horizonCutoff({ pr: {}, issue: {} }), null); // empty legacy: open-only tick
+});
+
+test('snapshot filenames are injective across the __monitor- boundary', () => {
+  const a = snapshotPath('a/b', 'c__monitor-d', 'pr', '/x');
+  const b = snapshotPath('a/b__monitor-c', 'd', 'pr', '/x');
+  assert.notEqual(a, b);
+});
+
+test('defaultStateDir derives a per-user dir under the system tmpdir', () => {
+  const dir = defaultStateDir({ tmpdir: () => '/tmp-x', userInfo: () => ({ username: 'a_b' }) });
+  assert.equal(dir, '/tmp-x/gh-delta-a%5Fb');
+  const fallback = defaultStateDir({
+    tmpdir: () => '/t',
+    userInfo: () => {
+      throw new Error('no user db entry');
+    },
+    env: { USER: 'env-user' },
+  });
+  assert.equal(fallback, '/t/gh-delta-env-user');
+});
+
+test('writeSnapshotAtomic forwards dirMode to mkdir', () => {
+  const opts = [];
+  const fs = {
+    mkdirSync: (_path, options) => opts.push(options),
+    writeFileSync: () => {},
+    renameSync: () => {},
+    unlinkSync: () => {},
+  };
+  writeSnapshotAtomic(
+    '/tmp/snap.json',
+    { pr: {}, issue: {} },
+    { fs, uniqueSuffix: () => 'a', dirMode: 0o700 },
+  );
+  writeSnapshotAtomic('/tmp/snap.json', { pr: {}, issue: {} }, { fs, uniqueSuffix: () => 'b' });
+  assert.equal(opts[0].mode, 0o700);
+  assert.equal('mode' in opts[1], false);
 });
 
 test('writeSnapshotAtomic validates shape before writing', () => {
