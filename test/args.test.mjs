@@ -1,12 +1,14 @@
 // Shared argument parser tests: both CLIs depend on this contract.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 
 import {
   parseEntitySelection,
   validateMonitorId,
   validateRepo,
   canonicalEntityKey,
+  defaultMonitorId,
 } from '../lib/args.mjs';
 
 test('parseEntitySelection accepts pr, issue, or both and rejects empty selections', () => {
@@ -72,4 +74,18 @@ test('canonicalEntityKey canonicalizes order, whitespace, and duplicates; unknow
   assert.equal(canonicalEntityKey('issue,pr'), 'pr-issue');
   assert.equal(canonicalEntityKey(' pr , pr '), 'pr');
   assert.equal(canonicalEntityKey('weird'), 'weird');
+});
+
+test('defaultMonitorId derives a stable, grammar-valid per-machine id', () => {
+  const expected = `host-${createHash('sha1').update('box-a').digest('hex').slice(0, 12)}`;
+  assert.equal(defaultMonitorId({ hostname: () => 'box-a' }), expected);
+  assert.notEqual(
+    defaultMonitorId({ hostname: () => 'box-a' }),
+    defaultMonitorId({ hostname: () => 'box-b' }),
+  );
+  assert.equal(
+    defaultMonitorId({ hostname: () => '' }),
+    `host-${createHash('sha1').update('unknown').digest('hex').slice(0, 12)}`,
+  );
+  assert.equal(validateMonitorId(defaultMonitorId({ hostname: () => 'x' })).ok, true);
 });

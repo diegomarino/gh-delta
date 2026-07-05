@@ -208,6 +208,7 @@ test('--help-json returns machine-readable help without fetching GitHub', () => 
   assert.ok(help.options.some((option) => option.name === '--version'));
   assert.equal(help.version, packageJson.version);
   assert.equal(help.options.find((option) => option.name === '--repo')?.required, true);
+  assert.equal(help.options.find((option) => option.name === '--monitor-id')?.required, false);
   assert.match(help.exitCodes.find((entry) => entry.code === 10)?.meaning ?? '', /Deltas found/);
   assert.deepEqual(help.output.formats, ['json', 'text']);
 });
@@ -242,19 +243,15 @@ test('missing --repo returns code 2 before fetching', () => {
   assert.match(report.error, /--repo/);
 });
 
-test('missing --monitor-id returns code 2 before fetching', () => {
-  const d = {
-    fetchPRs: () => {
-      throw new Error('should not fetch');
-    },
-    fetchIssues: () => {
-      throw new Error('should not fetch');
-    },
-    now: () => '2026-07-01T12:00:00Z',
-  };
-  const { code, report } = run(['--repo', 'o/r', '--state-file', '/tmp/x.json'], d);
-  assert.equal(code, 2);
-  assert.match(report.error, /--monitor-id/);
+test('missing --monitor-id defaults to a stable per-machine host id', () => {
+  const d = deps([[]]);
+  const { code, report } = run(['--repo', 'o/r'], d);
+  assert.equal(code, 0);
+  assert.match(report.monitorId, /^host-[0-9a-f]{12}$/);
+  assert.ok(d.readPath.includes(`__monitor-${report.monitorId}__`));
+  const again = deps([[]]);
+  const { report: report2 } = run(['--repo', 'o/r'], again);
+  assert.equal(report2.monitorId, report.monitorId); // stable across invocations
 });
 
 test('--state-file and --state-dir are mutually exclusive', () => {
@@ -704,7 +701,10 @@ test('duplicate --outpost-url uses last-wins like every other flag', async () =>
 test('error kinds map to exit codes: config/snapshot=2, github/io=1', () => {
   const base = ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'];
   const noFetch = { now: () => '2026-07-01T12:00:00Z' };
-  const config = run(['--repo', 'o/r'], noFetch);
+  const config = run(
+    ['--repo', 'o/r', '--monitor-id', '../bad', '--state-file', '/tmp/x.json'],
+    noFetch,
+  );
   assert.equal(config.code, 2);
   assert.equal(config.report.kind, 'config');
   const snapshot = run(base, {
