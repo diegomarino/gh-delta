@@ -1,0 +1,82 @@
+# Copy into the watched repo's .github/workflows/. Requires one secret:
+# SLACK_WEBHOOK_URL (an incoming-webhook URL). Uses the default GITHUB_TOKEN
+# for read access; `gh` and node are preinstalled on ubuntu runners.
+name: gh-delta watch
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+# One tick at a time: overlapping runs would restore the same snapshot and
+# double-post the same deltas to Slack.
+concurrency:
+  group: gh-delta-watch
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Restore snapshot state
+        uses: actions/cache/restore@v4
+        with:
+          path: .gh-delta-state
+          key: gh-delta-state-${{ github.run_id }}
+          restore-keys: |
+            gh-delta-state-
+
+      - name: Run one detector tick
+        id: tick
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          npx gh-delta \
+            --repo "${{ github.repository }}" \
+            --monitor-id actions-slack \
+            --state-dir .gh-delta-state \
+            --entities pr,issue \
+            --format json --detail > report.json
+          code=$?
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          cat report.json
+          case "$code" in
+            0 | 10) ;;
+            1)
+              echo "::warning::gh-delta transient error (exit 1); next scheduled tick retries: $(jq -r '.error // empty' report.json)"
+              ;;
+            2)
+              echo "::error::gh-delta permanent config/snapshot error (exit 2); fix the flags or delete the cached state: $(jq -r '.error // empty' report.json)"
+              exit 1
+              ;;
+            *)
+              echo "::error::unexpected gh-delta exit $code"
+              exit 1
+              ;;
+          esac
+          if [ "$(jq -r '.baseline // false' report.json)" = 'true' ]; then
+            echo "::notice::gh-delta baseline re-seeded (first run or cache eviction); deltas since the previous baseline were not observed."
+          fi
+
+      - name: Post Slack digest
+        if: steps.tick.outputs.code == '10'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          text=$(jq -r '"gh-delta: \(.summary) in \(.repo)\n" + (.deltas | map("• " + .line) | join("\n"))' report.json)
+          jq -n --arg text "$text" '{ text: $text }' \
+            | curl -sf -X POST -H 'Content-type: application/json' -d @- "$SLACK_WEBHOOK_URL"
+
+      - name: Save snapshot state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .gh-delta-state
+          key: gh-delta-state-${{ github.run_id }}
