@@ -7,6 +7,7 @@
 // reach a phone. Zero dependencies.
 //
 // Env: NTFY_TOPIC (required), PORT (default 8787),
+//      HOST (default 127.0.0.1; set 0.0.0.0 only if the detector runs on another machine),
 //      NTFY_BASE_URL (default https://ntfy.sh; point at a self-hosted ntfy),
 //      NTFY_CLASSES (comma list; empty = forward every class),
 //      SEEN_FILE (default ./seen-events.jsonl).
@@ -14,6 +15,7 @@ import { createServer } from 'node:http';
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 
 const PORT = Number(process.env.PORT ?? 8787);
+const HOST = process.env.HOST ?? '127.0.0.1';
 const NTFY_TOPIC = process.env.NTFY_TOPIC;
 const NTFY_BASE_URL = process.env.NTFY_BASE_URL ?? 'https://ntfy.sh';
 const SEEN_FILE = process.env.SEEN_FILE ?? './seen-events.jsonl';
@@ -93,6 +95,6 @@ const server = createServer((req, res) => {
   });
 });
 
-server.listen(PORT, () =>
-  console.log(`gh-delta outpost receiver on :${PORT} -> ${NTFY_BASE_URL}/${NTFY_TOPIC}`),
+server.listen(PORT, HOST, () =>
+  console.log(`gh-delta outpost receiver on ${HOST}:${PORT} -> ${NTFY_BASE_URL}/${NTFY_TOPIC}`),
 );

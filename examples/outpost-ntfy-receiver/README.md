@@ -48,4 +48,4 @@ narrows pings to the classes you care about;
 ## Requirements
 
 Node >= 18 (global `fetch`). No packages. An ntfy topic (free, no account) or
-a self-hosted ntfy server.
+a self-hosted ntfy server. `gh-delta` resolves via `npx gh-delta` once published, or `node <checkout>/gh-delta.mjs` from a checkout.

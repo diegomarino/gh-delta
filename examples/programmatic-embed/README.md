@@ -54,6 +54,9 @@ produces — the fingerprint reads these exact fields:
   classes are a note, never an error).
 - **Exit codes mirror the CLI** (`0` / `10`, usage error `2`) so cron or any
   wrapper can treat this script exactly like the binary.
+- **Pagination**: the fetch is deliberately a single page (`per_page=100`); if a
+  label ever has more than 100 items, the overflow falls out of the fetch and
+  enters the missing lifecycle — paginate before trusting this at that scale.
 
 ## Requirements
 
