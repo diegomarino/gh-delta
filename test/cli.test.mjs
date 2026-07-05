@@ -2,6 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { run, runCommand } from '../lib/cli.mjs';
 
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -255,21 +257,6 @@ test('missing --monitor-id returns code 2 before fetching', () => {
   assert.match(report.error, /--monitor-id/);
 });
 
-test('missing state path returns code 2 before fetching', () => {
-  const d = {
-    fetchPRs: () => {
-      throw new Error('should not fetch');
-    },
-    fetchIssues: () => {
-      throw new Error('should not fetch');
-    },
-    now: () => '2026-07-01T12:00:00Z',
-  };
-  const { code, report } = run(['--repo', 'o/r', '--monitor-id', 'main'], d);
-  assert.equal(code, 2);
-  assert.match(report.error, /--state-file.*--state-dir/);
-});
-
 test('--state-file and --state-dir are mutually exclusive', () => {
   const d = {
     fetchPRs: () => {
@@ -286,6 +273,31 @@ test('--state-file and --state-dir are mutually exclusive', () => {
   );
   assert.equal(code, 2);
   assert.match(report.error, /mutually exclusive/);
+});
+
+test('missing state flags default to a per-user tmpdir-derived snapshot', () => {
+  const d = deps([[]]);
+  const { code, report } = run(['--repo', 'o/r', '--monitor-id', 'main'], d);
+  assert.equal(code, 0);
+  assert.ok(d.readPath.startsWith(join(tmpdir(), 'gh-delta-')), d.readPath);
+  assert.ok(d.readPath.endsWith(`${'/'}repo-o%2Fr__monitor-main__pr-issue.json`));
+  assert.equal(report.stateFile, d.readPath);
+  assert.equal(report.baseline, true);
+});
+
+test('explicit state flags still resolve verbatim and populate report.stateFile', () => {
+  const d = deps([[]]);
+  const { report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'],
+    d,
+  );
+  assert.equal(report.stateFile, '/tmp/x.json');
+  const d2 = deps([[]]);
+  const { report: report2 } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-dir', '/tmp/state', '--entities', 'pr'],
+    d2,
+  );
+  assert.equal(report2.stateFile, '/tmp/state/repo-o%2Fr__monitor-main__pr.json');
 });
 
 test('invalid --entities returns code 2 before fetching', () => {
