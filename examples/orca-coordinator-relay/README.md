@@ -58,6 +58,11 @@ remote, snapshot `--monitor-id` from the repo name, coordinator handle from
 - **Self-echo:** the coordinator's own PR comments come back as deltas one
   tick later; the relayed line tells it to ignore deltas caused by its own
   just-posted comments.
+- **Exit taxonomy:** only exit `10` relays. Exit `1` (transient: network, gh,
+  timeout) is logged and left for the next tick; exit `2` (permanent: bad
+  flags or unreadable snapshot) is logged loudly — it will refire every tick
+  until a human fixes it, so grep the relay log for `PERMANENT` when a monitor
+  goes quiet. Neither ever types into the coordinator's TUI.
 
 ## Requirements
 

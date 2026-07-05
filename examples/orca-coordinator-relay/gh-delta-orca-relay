@@ -47,8 +47,13 @@ OUT=$(node "$HOME/Dev/gh-delta/gh-delta.mjs" \
 CODE=$?
 
 TS=$(date '+%F %T')
-if [ "$CODE" -eq 1 ]; then echo "$TS ERROR gh-delta failed ($REPO)" >>"$LOG"; exit 0; fi
-if [ "$CODE" -eq 0 ]; then echo "$TS ok no-delta ($REPO)" >>"$LOG"; exit 0; fi
+case "$CODE" in
+  0) echo "$TS ok no-delta ($REPO)" >>"$LOG"; exit 0 ;;
+  1) echo "$TS ERROR transient gh-delta failure ($REPO); next tick retries" >>"$LOG"; exit 0 ;;
+  2) echo "$TS ERROR PERMANENT gh-delta config/snapshot error ($REPO): fix the relay flags or state dir; this refires every tick until fixed" >>"$LOG"; exit 0 ;;
+  10) : ;; # deltas: fall through to the relay below
+  *) echo "$TS ERROR unexpected gh-delta exit $CODE ($REPO)" >>"$LOG"; exit 0 ;;
+esac
 
 SUMMARY=$(echo "$OUT" | tr '\n' ' | ' | tr -s ' ' | cut -c1-600)
 H=$(orca terminal list --json 2>/dev/null | jq -r --arg p "$CHECKOUT" \
