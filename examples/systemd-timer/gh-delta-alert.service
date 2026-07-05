@@ -1,0 +1,8 @@
+[Unit]
+Description=Alert on permanent gh-delta configuration error
+
+[Service]
+Type=oneshot
+# journald at err priority is the reliable channel; notify-send is a
+# best-effort extra that only works in a desktop session.
+ExecStart=/bin/sh -c 'echo "gh-delta permanent config/snapshot error: fix flags or state; retrying will not help (journalctl --user -u gh-delta-watch)" | systemd-cat -t gh-delta-alert -p err; command -v notify-send >/dev/null && notify-send -u critical "gh-delta config error" "fix before it refires every tick" || true'

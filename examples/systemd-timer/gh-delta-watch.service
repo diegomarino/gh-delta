@@ -1,0 +1,11 @@
+[Unit]
+Description=gh-delta one-shot detector tick
+OnFailure=gh-delta-alert.service
+
+[Service]
+Type=oneshot
+# Exit taxonomy -> unit state: deltas (10) and transient errors (1) are
+# normal tick outcomes; ONLY exit 2 (permanent config/snapshot error) marks
+# the unit failed and fires the alert. See docs/contract.md#exit-codes.
+SuccessExitStatus=1 10
+ExecStart=%h/.local/bin/gh-delta --repo OWNER/NAME --monitor-id systemd --state-dir %h/.local/state/gh-delta --entities pr,issue --format text

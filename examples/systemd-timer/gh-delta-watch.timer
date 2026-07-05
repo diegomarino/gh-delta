@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the gh-delta detector every 5 minutes
+
+[Timer]
+OnCalendar=*:0/5
+# Persistent=false on purpose: after suspend/boot the next tick covers the
+# gap anyway (the snapshot horizon does the catching up), so a catch-up fire
+# would add nothing but an early tick.
+Persistent=false
+
+[Install]
+WantedBy=timers.target
