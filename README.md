@@ -154,7 +154,7 @@ gh-delta \
 ## CLI
 
 ```bash
-gh-delta --repo <owner/name> --monitor-id <id> (--state-dir <dir> | --state-file <path>) [--entities pr,issue] [--format json|text] [--detail] [--outpost-url <url>] [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>] [--gh-timeout-ms <ms>]
+gh-delta --repo <owner/name> --monitor-id <id> [--state-file <path> | --state-dir <dir>] [--entities pr,issue] [--format json|text] [--detail] [--outpost-url <url>] [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>] [--gh-timeout-ms <ms>]
 ```
 
 Options:
@@ -166,8 +166,11 @@ Options:
   derived snapshot paths. Must start with a letter or number and contain only
   letters, numbers, dot, underscore, or dash. Required.
 - `--state-dir`: directory for a derived snapshot path scoped by repo, monitor
-  id, and selected entities. Mutually exclusive with `--state-file`.
-- `--state-file`: explicit snapshot JSON path. Mutually exclusive with
+  id, and selected entities. Optional; mutually exclusive with `--state-file`.
+  When neither flag is given, a per-user temp directory under the system temp
+  dir is used automatically (ephemeral — reboots or tmp cleanup silently
+  re-seed the baseline). Pass `--state-dir` explicitly for durable monitors.
+- `--state-file`: explicit snapshot JSON path. Optional; mutually exclusive with
   `--state-dir`.
 - `--entities`: `pr`, `issue`, or `pr,issue`. Defaults to `pr,issue`. When a
   partial entity set is used, the unrequested side of the snapshot is preserved.
@@ -199,7 +202,7 @@ For scheduled runs, use the cron-native loop guidance in [RUNBOOK.md](RUNBOOK.md
 
 ## Snapshot Identity
 
-With `--state-dir`, the snapshot path is derived from:
+When `--state-dir` is given, the snapshot path is derived from:
 
 ```text
 repo + monitor-id + entities
@@ -216,6 +219,23 @@ uses:
 ```text
 ./state/repo-org%2Fapp__monitor-prs-5m__pr.json
 ```
+
+When neither `--state-dir` nor `--state-file` is given, the snapshot lives under
+a per-user directory in the system temp dir:
+
+```text
+/tmp/gh-delta-<user>/repo-org%2Fapp__monitor-prs-5m__pr.json
+```
+
+This default is **ephemeral** — reboots and tmp cleanup silently re-seed the
+baseline. The `baseline: true` field in the report (and the baseline line in text
+mode) is the signal that the monitor re-seeded. Use `--state-dir` for scheduled
+or durable monitors.
+
+Filename segments are encoded with `encodeURIComponent` **plus `_` additionally
+encoded as `%5F`** — for example, a repo named `org/my_app` becomes
+`repo-org%2Fmy%5Fapp`. This ensures derived names are injective for all valid CLI
+inputs.
 
 Use different `--monitor-id` values for monitors that should keep independent
 state. Reusing the same monitor id and entity set points multiple invocations at
@@ -285,8 +305,18 @@ import {
   sendOutposts,
   validateOutpostUrl,
 } from 'gh-delta/outpost';
-import { readSnapshot, snapshotPath, writeSnapshotAtomic } from 'gh-delta/snapshot';
-import { parseEntitySelection, validateRepo, validateMonitorId } from 'gh-delta/args';
+import {
+  readSnapshot,
+  snapshotPath,
+  writeSnapshotAtomic,
+  defaultStateDir,
+} from 'gh-delta/snapshot';
+import {
+  parseEntitySelection,
+  validateRepo,
+  validateMonitorId,
+  canonicalEntityKey,
+} from 'gh-delta/args';
 import { getPackageMetadata, renderVersionText } from 'gh-delta/version';
 import {
   REPORT_SCHEMA_VERSION,
@@ -312,8 +342,8 @@ compile-time checking.
 | `gh-delta/detect`      | `detectDeltas`                                                                    | Pure delta classification          |
 | `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint`        | GitHub object fingerprint helpers  |
 | `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`        | Outpost payload + delivery helpers |
-| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`                             | Snapshot path/read/write helpers   |
-| `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`                       | Shared argument parsing helpers    |
+| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`, `defaultStateDir`          | Snapshot path/read/write helpers   |
+| `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`, `canonicalEntityKey` | Shared argument parsing helpers    |
 | `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                         | Package metadata + version text    |
 | `gh-delta/contract`    | `REPORT_SCHEMA_VERSION`, `OUTPOST_SCHEMA_VERSION`, `DELTA_CLASSES`, `ERROR_KINDS` | Runtime contract constants         |
 
@@ -390,7 +420,7 @@ examples. Excerpt:
   "command": "gh-delta",
   "version": "0.1.0",
   "summary": "Deterministic GitHub issue and pull request delta detector.",
-  "usage": "gh-delta --repo <owner/name> --monitor-id <id> (--state-dir <dir> | --state-file <path>) [--entities pr,issue] [--format json|text] [--detail] [--outpost-url <url>]",
+  "usage": "gh-delta --repo <owner/name> --monitor-id <id> [--state-file <path> | --state-dir <dir>] [--entities pr,issue] [--format json|text] [--detail] [--outpost-url <url>] [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>] [--gh-timeout-ms <ms>]",
   "purpose": "Run one deterministic detection pass, update the snapshot after a successful fetch, print JSON or operator text, and exit. Scheduling belongs to the caller.",
   "options": [
     {
@@ -451,6 +481,15 @@ Research for future entity types and selectors lives under
 public CLI contract.
 
 ## Troubleshooting / FAQ
+
+**My monitor re-baselined after a reboot.**
+The temp-dir default (`<system temp dir>/gh-delta-<user>/...`) is ephemeral by
+design — the OS may clear `/tmp` on reboot or on schedule. When the snapshot
+file is gone, the next run seeds a fresh baseline: `baseline: true` in the JSON
+report (or the baseline line in text mode) is the signal. If you need durable
+state that survives reboots, pass `--state-dir` pointing at a persistent
+directory. Agent loops and casual CLI runs that can tolerate post-reboot
+re-baselines are fine with the default.
 
 **`gh` is not authenticated — exit `1` on first run.**
 Run `gh auth status` to verify authentication. `gh-delta` delegates all GitHub

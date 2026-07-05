@@ -12,7 +12,7 @@ form of this document is available at `gh-delta --help-json`.
 
 ```
 gh-delta --repo <owner/name> --monitor-id <id>
-         (--state-file <path> | --state-dir <dir>)
+         [--state-file <path> | --state-dir <dir>]
          [--entities pr,issue] [--format json|text] [--detail]
          [--outpost-url <url>]
          [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>]
@@ -24,10 +24,14 @@ gh-delta --repo <owner/name> --monitor-id <id>
   report echoes, and outpost event IDs always use the lowercased form.
 - `--monitor-id` must start with a letter or number and contain only letters,
   numbers, dot, underscore, or dash.
-- `--state-file` and `--state-dir` are mutually exclusive, and exactly one is
-  required. `--state-file` is an explicit snapshot path; `--state-dir` derives a
+- `--state-file` and `--state-dir` are mutually exclusive and **optional**. When
+  neither is given, the snapshot lives at
+  `<system temp dir>/gh-delta-<user>/repo-<repo>__monitor-<id>__<entities>.json`;
+  the directory is per-user (`0700`) and **ephemeral** — reboots and tmp cleanup
+  silently re-seed the baseline; pass `--state-dir` explicitly for durable
+  monitors. `--state-file` is an explicit snapshot path; `--state-dir` derives a
   path scoped by repo, monitor id, and selected entities (see
-  [Snapshot Semantics](#snapshot-semantics)).
+  [Snapshot Semantics](#snapshot-semantics)). Both together exit `2` (config).
 - `--entities` defaults to `pr,issue`. Accepted: `pr`, `issue`, `pr,issue`.
 - `--format` defaults to `json`. `text` is an operator/log mode, not a machine
   contract; automated consumers must use `json`.
@@ -68,8 +72,8 @@ subpaths; the package root is intentionally not exported.
 | `gh-delta/detect`      | `detectDeltas`                                                                    | Pure delta classification engine      |
 | `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint`        | Stable object fingerprint builders    |
 | `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`        | Outpost payload and transport helpers |
-| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`                             | Snapshot path and persistence helpers |
-| `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`                       | Shared argument parsing policies      |
+| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`, `defaultStateDir`          | Snapshot path and persistence helpers |
+| `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`, `canonicalEntityKey` | Shared argument parsing policies      |
 | `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                         | Package metadata and version output   |
 | `gh-delta/contract`    | `REPORT_SCHEMA_VERSION`, `OUTPOST_SCHEMA_VERSION`, `DELTA_CLASSES`, `ERROR_KINDS` | Runtime contract constants            |
 
@@ -130,6 +134,7 @@ Success reports (exit `0` and `10`):
   "repo": "owner/repo",
   "monitorId": "prs-5m",
   "entities": ["pr"],
+  "stateFile": "/tmp/gh-delta-user/repo-owner%2Frepo__monitor-prs-5m__pr.json",
   "at": "2026-07-01T12:00:00.000Z",
   "deltas": [
     {
@@ -157,6 +162,8 @@ Field guarantees:
 - `repo`, `monitorId` (string): echo the flags.
 - `entities` (string[]): the selected families, always in canonical order
   `["pr", "issue"]` regardless of the `--entities` input order.
+- `stateFile` (string): the resolved snapshot path — useful when the temp-dir
+  default is in effect.
 - `at` (string): ISO-8601 UTC timestamp of the run.
 - `summary` (string): **human-readable only.** Wording is not stable; do not
   parse it (it varies between "baseline established: N PRs, M issues" and
@@ -263,7 +270,7 @@ stored fingerprints as the horizon.
 - The consumer supplies the snapshot **location**, never snapshot **data**.
   gh-delta reads it, diffs, and atomically rewrites it after a successful fetch.
 - The **first run** (no snapshot file) seeds a baseline: exit `0`,
-  `baseline: true`, `deltas: []`. Persist the state directory between runs.
+  `baseline: true`, `deltas: []`. Persist the state directory between runs (or accept the ephemeral temp default's silent re-baseline).
 - Snapshot JSON is strict. A missing file seeds a baseline, but any present file
   that is not `{ "pr": object, "issue": object }` with numeric object keys is an
   error (exit `2`) and is not migrated. Write-side validation runs before the
@@ -272,6 +279,10 @@ stored fingerprints as the horizon.
 - A derived `--state-dir` path is scoped by repo, monitor id, **and** selected
   entities. A `--entities pr` run and a `--entities pr,issue` run use **different**
   files; keep `--entities` fixed per monitor so state is not split.
+- Filename segments are encoded with `encodeURIComponent` **plus `_` additionally
+  encoded as `%5F`**, making derived names injective for CLI inputs. Library
+  callers passing raw entity strings containing `__` to `snapshotPath` directly
+  are outside this guarantee.
 - A partial `--entities` run preserves the omitted family's memory in the
   snapshot; it does not erase it.
 - **Do not run concurrent ticks against the same state file.** Writes are atomic

@@ -95,9 +95,16 @@ start
         -> no GitHub fetch
         -> no snapshot read or write
      -> neither --state-file nor --state-dir
-        -> exit 2 (config: permanent)
-        -> no GitHub fetch
-        -> no snapshot read or write
+        -> derive per-user temp default (mkdir 0700 + ownership check)
+        -> ownership mismatch (dir owned by a different uid)
+           -> exit 1 (io: transient)
+           -> no GitHub fetch
+           -> no snapshot read or write
+        -> mkdir or stat fails
+           -> exit 1 (io: transient)
+           -> no GitHub fetch
+           -> no snapshot read or write
+        -> ownership check is a no-op on Windows (process.getuid absent)
   -> validate --entities
      -> invalid value
         -> exit 2 (config: permanent)
@@ -128,6 +135,10 @@ validated args
      -> use that exact path
   -> --state-dir present
      -> derive <state-dir>/repo-<encoded repo>__monitor-<encoded monitor-id>__<entities>.json
+  -> neither present
+     -> derive <os.tmpdir()>/gh-delta-<encoded user>/repo-<encoded repo>__monitor-<encoded monitor-id>__<entities>.json
+     -> directory created with mode 0700 (per-user isolation on shared /tmp)
+     -> ownership guard on POSIX: uid mismatch → exit 1 (io)
 ```
 
 Detection flow:
@@ -238,6 +249,22 @@ Example:
 ```text
 ./state/repo-org%2Fapp__monitor-prs-5m__pr.json
 ```
+
+When neither `--state-dir` nor `--state-file` is given, the default directory is:
+
+```text
+<os.tmpdir()>/gh-delta-<encoded user>/
+```
+
+and the snapshot path follows the same `repo-<encoded repo>__monitor-<encoded monitor-id>__<entities>.json`
+pattern inside it. This default is **ephemeral**: reboots or tmp cleanup silently
+re-seed the baseline. Scheduled or durable monitors must pass an explicit
+`--state-dir`.
+
+Filename segment encoding uses `encodeURIComponent` **with `_` additionally
+encoded as `%5F`** so that the `__` separator is unambiguous — derived names are
+injective for all valid CLI inputs. Library callers passing raw entity strings
+containing `__` to `snapshotPath` directly are outside this guarantee.
 
 `--state-file` bypasses path derivation for operators that need a fully explicit
 path, but `--monitor-id` is still required because reports and outpost event IDs

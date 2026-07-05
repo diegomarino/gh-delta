@@ -22,6 +22,12 @@ such as `ScheduleWakeup`.
 - A scheduler: cron, launchd, systemd, GitHub Actions, Claude Code `/loop`,
   Claude Code `CronCreate`, Codex automation, or another equivalent clock owner.
 
+> **Note:** scheduled and durable monitors must pass an explicit `--state-dir`
+> pointing at a persistent directory. The default (no `--state-dir` and no
+> `--state-file`) uses a per-user temp directory that is ephemeral — reboots and
+> tmp cleanup silently re-seed the baseline. That default is suitable for casual
+> CLI runs and agent loops that can tolerate post-reboot re-baselines.
+
 ## Seed The Baseline
 
 Run the detector once before creating the recurring job:
