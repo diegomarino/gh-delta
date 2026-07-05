@@ -84,11 +84,13 @@ start
         -> exit 2 (config: permanent)
         -> no GitHub fetch
         -> no snapshot read or write
-  -> validate --monitor-id
-     -> missing or invalid characters
-        -> exit 2 (config: permanent)
-        -> no GitHub fetch
-        -> no snapshot read or write
+  -> resolve --monitor-id
+     -> when omitted: default to `host-` + first 12 hex of sha1(os.hostname())
+     -> validate resolved id
+        -> invalid characters
+           -> exit 2 (config: permanent)
+           -> no GitHub fetch
+           -> no snapshot read or write
   -> validate state flags
      -> both --state-file and --state-dir
         -> exit 2 (config: permanent)
@@ -238,6 +240,21 @@ dependencies.
 selector, interval, or execution id. Every scheduled fire for the same monitor
 should reuse the same `--monitor-id`.
 
+**Default derivation.** When `--monitor-id` is omitted, the CLI derives a
+per-machine default: `host-` + the first 12 hex characters of
+`sha1(os.hostname())`. Hashing serves two purposes: it keeps raw hostnames out
+of outpost payloads (where they would appear in `monitorId` and `eventId` fields),
+and it always produces a token that satisfies the monitor-id grammar regardless of
+hostname content. A hostname change — host rename, container rebuild, or CI runner
+with a per-job ephemeral hostname — yields a different hash and therefore a fresh
+baseline with no history.
+
+**Same id across repos is safe.** The repo slug is part of both the derived
+snapshot filename (`repo-<encoded>__monitor-<id>__<entities>.json`) and the
+outpost `eventId` (`gh-delta.delta.v1:<repo>:<monitorId>:...`). Two monitors with
+the same `--monitor-id` watching different repos never share a snapshot file or
+collide on `eventId`.
+
 With `--state-dir`, snapshot paths are derived from:
 
 ```text
@@ -267,8 +284,8 @@ injective for all valid CLI inputs. Library callers passing raw entity strings
 containing `__` to `snapshotPath` directly are outside this guarantee.
 
 `--state-file` bypasses path derivation for operators that need a fully explicit
-path, but `--monitor-id` is still required because reports and outpost event IDs
-use it.
+path. `--monitor-id` is still resolved (and defaults to the `host-` derivation
+when omitted) because reports and outpost event IDs use it.
 
 ## GitHub Fetch Contract
 

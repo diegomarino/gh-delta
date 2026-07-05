@@ -28,6 +28,14 @@ such as `ScheduleWakeup`.
 > tmp cleanup silently re-seed the baseline. That default is suitable for casual
 > CLI runs and agent loops that can tolerate post-reboot re-baselines.
 
+> **Monitor naming:** pass `--monitor-id` explicitly for any durable, scheduled,
+> or multi-cadence monitor, and always in CI — CI runners with per-job hostnames
+> produce a new `host-` default on every job, which means an eternal baseline and
+> no deltas ever. If two users share an explicit `--state-dir` on one machine,
+> they derive the same `host-` id — and therefore the same snapshot file —
+> silently clobbering each other's baselines; name monitors explicitly for shared
+> state dirs.
+
 ## Seed The Baseline
 
 Run the detector once before creating the recurring job:

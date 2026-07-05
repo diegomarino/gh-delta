@@ -11,7 +11,7 @@ form of this document is available at `gh-delta --help-json`.
 ## CLI
 
 ```
-gh-delta --repo <owner/name> --monitor-id <id>
+gh-delta --repo <owner/name> [--monitor-id <id>]
          [--state-file <path> | --state-dir <dir>]
          [--entities pr,issue] [--format json|text] [--detail]
          [--outpost-url <url>]
@@ -19,7 +19,12 @@ gh-delta --repo <owner/name> --monitor-id <id>
          [--gh-timeout-ms <ms>]
 ```
 
-- `--repo` and `--monitor-id` are required.
+- `--repo` is required.
+- `--monitor-id` is optional. Default: `host-` + the first 12 hex characters of
+  the sha1 of `os.hostname()` — stable per machine and always grammar-valid. A
+  hostname change (host rename, container, or CI runner with a per-job hostname)
+  yields a new id and a fresh baseline. The minimal zero-config invocation is
+  `gh-delta --repo <owner/name>`.
 - `--repo` must be `owner/name`. **Canonicalized to lowercase** — snapshot paths,
   report echoes, and outpost event IDs always use the lowercased form.
 - `--monitor-id` must start with a letter or number and contain only letters,

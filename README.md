@@ -81,6 +81,12 @@ gh auth status
   <img src="docs/img/usage.png" alt="gh-delta command-line invocation" width="520">
 </p>
 
+Minimal zero-config invocation — state and monitor identity are derived automatically (see [Snapshot Identity](#snapshot-identity)):
+
+```bash
+gh-delta --repo owner/repo
+```
+
 Install from npm once published:
 
 ```bash
@@ -154,7 +160,7 @@ gh-delta \
 ## CLI
 
 ```bash
-gh-delta --repo <owner/name> --monitor-id <id> [--state-file <path> | --state-dir <dir>] [--entities pr,issue] [--format json|text] [--detail] [--outpost-url <url>] [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>] [--gh-timeout-ms <ms>]
+gh-delta --repo <owner/name> [--monitor-id <id>] [--state-file <path> | --state-dir <dir>] [--entities pr,issue] [--format json|text] [--detail] [--outpost-url <url>] [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>] [--gh-timeout-ms <ms>]
 ```
 
 Options:
@@ -164,7 +170,11 @@ Options:
   the lowercased form.
 - `--monitor-id`: stable monitor identity used in reports, event IDs, and
   derived snapshot paths. Must start with a letter or number and contain only
-  letters, numbers, dot, underscore, or dash. Required.
+  letters, numbers, dot, underscore, or dash. **Optional**: defaults to
+  `host-` + the first 12 hex characters of the sha1 of the machine hostname —
+  stable per machine. A renamed host, container, or CI runner with a per-job
+  hostname gets a new id and a fresh baseline; pass `--monitor-id` explicitly
+  in CI.
 - `--state-dir`: directory for a derived snapshot path scoped by repo, monitor
   id, and selected entities. Optional; mutually exclusive with `--state-file`.
   When neither flag is given, a per-user temp directory under the system temp
@@ -220,11 +230,16 @@ uses:
 ./state/repo-org%2Fapp__monitor-prs-5m__pr.json
 ```
 
+When `--monitor-id` is omitted, it defaults to `host-` + the first 12 hex
+characters of the sha1 of the machine hostname — stable per machine and always
+grammar-valid. A hostname change (host rename, container, or CI runner with a
+per-job hostname) yields a new id and therefore a fresh baseline.
+
 When neither `--state-dir` nor `--state-file` is given, the snapshot lives under
 a per-user directory in the system temp dir:
 
 ```text
-/tmp/gh-delta-<user>/repo-org%2Fapp__monitor-prs-5m__pr.json
+/tmp/gh-delta-<user>/repo-org%2Fapp__monitor-host-<hashed-hostname>__pr.json
 ```
 
 This default is **ephemeral** — reboots and tmp cleanup silently re-seed the
@@ -420,7 +435,7 @@ examples. Excerpt:
   "command": "gh-delta",
   "version": "0.1.0",
   "summary": "Deterministic GitHub issue and pull request delta detector.",
-  "usage": "gh-delta --repo <owner/name> --monitor-id <id> [--state-file <path> | --state-dir <dir>] [--entities pr,issue] [--format json|text] [--detail] [--outpost-url <url>] [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>] [--gh-timeout-ms <ms>]",
+  "usage": "gh-delta --repo <owner/name> [--monitor-id <id>] [--state-file <path> | --state-dir <dir>] [--entities pr,issue] [--format json|text] [--detail] [--outpost-url <url>] [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>] [--gh-timeout-ms <ms>]",
   "purpose": "Run one deterministic detection pass, update the snapshot after a successful fetch, print JSON or operator text, and exit. Scheduling belongs to the caller.",
   "options": [
     {
@@ -434,8 +449,8 @@ examples. Excerpt:
       "name": "--monitor-id",
       "valueName": "id",
       "type": "string",
-      "required": true,
-      "description": "Stable monitor identity used in reports, event IDs, and derived snapshot paths."
+      "required": false,
+      "description": "Stable monitor identity used in reports, event IDs, and derived snapshot paths. Optional: defaults to a stable per-machine id (host- + hashed hostname). A renamed host — or a CI runner with a per-job hostname — gets a new id and a fresh baseline; pass an explicit id in CI."
     }
   ]
 }
