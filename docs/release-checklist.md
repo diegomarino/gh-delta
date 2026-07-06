@@ -23,6 +23,20 @@ Expected:
 - `npm pack --dry-run` lists only expected public package files;
 - the CLI prints human help, JSON help, and version output, then exits `0`.
 
+## Example Artifacts
+
+The README screenshots and demo are generated from fixtures. If the report shape
+(`lib/contract.mjs`) changed since the last release, regenerate them so they stay
+truthful:
+
+```bash
+npm run examples:svg
+```
+
+`test/examples.test.mjs` fails when the fixtures drift from the frozen contract,
+so a red `release:check` is the signal to regenerate. Commit any changed
+`docs/img/*.svg`. Requires `jq` and network access for `npx svg-term-cli`.
+
 ## Publish Safety
 
 Check for private or local-only material:
@@ -50,12 +64,13 @@ Before the first public publish:
 
 ## Package Contents
 
-The package should contain:
+The package should contain exactly the files enumerated in `package.json#files`:
 
 - `gh-delta.mjs`;
 - `lib/*.mjs`;
-- `docs/*.md`;
-- `docs/img/*.png` referenced by `README.md`;
+- `docs/architecture.md`, `docs/contract.md`, `docs/watch-loop-prompt.md`, `docs/release-checklist.md`;
+- `docs/img/` (the four generated SVGs: `demo.svg`, `usage.svg`, `text-output.svg`, `json-output.svg`);
+- `docs/entities-research/` (all real entity pages — `pr.md`, `issue.md`, `selectors.md`, etc., and the subtree `README.md`; **not** `_template.md`);
 - `README.md`;
 - `RUNBOOK.md`;
 - `CHANGELOG.md`;
@@ -64,7 +79,6 @@ The package should contain:
 
 It should not contain:
 
-- `gh-delta-tick.mjs`;
 - `test/`;
 - `.github/`;
 - `node_modules/`;

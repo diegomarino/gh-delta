@@ -23,7 +23,7 @@ See [Alternatives and adjacent tools](docs/alternatives.md) for how `gh-delta`
 compares to related projects.
 
 <p align="center">
-  <img src="docs/img/text-output.png" alt="gh-delta reporting two GitHub deltas in text output" width="760">
+  <img src="docs/img/demo.svg" alt="gh-delta seeding a zero-config baseline, then reporting two GitHub deltas on the next tick" width="820">
 </p>
 
 ## Table of Contents <!-- omit in toc -->
@@ -62,7 +62,7 @@ gh auth status
 ## Quick Start
 
 <p align="center">
-  <img src="docs/img/usage.png" alt="gh-delta command-line invocation" width="520">
+  <img src="docs/img/usage.svg" alt="gh-delta zero-config command-line invocation seeding a baseline" width="560">
 </p>
 
 Minimal zero-config invocation — state and monitor identity are derived automatically (see [Snapshot Identity](#snapshot-identity)):
@@ -370,14 +370,18 @@ Text output consists of an ISO timestamp heartbeat line followed by one block
 per delta. Each block has the entity label, the delta classes, and a suggested
 action derived from those classes:
 
-```text
-2026-07-01T12:00:00.000Z | 2 delta(s)
+<p align="center">
+  <img src="docs/img/text-output.svg" alt="gh-delta --format text report for a changed PR and a relabeled issue" width="720">
+</p>
 
-PR #42 "Add widget": ci-changed, review-changed
+```text
+2026-07-01T12:05:00.000Z | 2 delta(s)
+
+PR #42 "Add billing webhook": ci-changed, review-changed
 classes: ci-changed, review-changed
 suggested action: CI/review changed. Read checks and review threads before merge.
 
-ISSUE #17 "Backfill imports": relabeled
+ISSUE #17 "Backfill customer imports": relabeled
 classes: relabeled
 suggested action: scope/state changed. Reassess dispatch.
 ```
@@ -418,7 +422,7 @@ when it also needs structured class-level explanations such as comment-count
 deltas or label additions/removals.
 
 <p align="center">
-  <img src="docs/img/json-output.png" alt="gh-delta --format json report for a relabeled issue" width="480">
+  <img src="docs/img/json-output.svg" alt="gh-delta --format json --detail report for a PR with CI and review changes" width="520">
 </p>
 
 ### `--help-json`
