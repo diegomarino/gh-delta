@@ -8,3 +8,8 @@ node_modules/
 coverage/
 *.tgz
 tools/examples/build/
+
+# Session/process artifacts — not versioned
+docs/audits/
+.prompts/
+docs/superpowers/
