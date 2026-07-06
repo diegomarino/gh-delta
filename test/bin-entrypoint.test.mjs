@@ -47,5 +47,16 @@ test('gh-delta/contract exposes the runtime contract constants', async () => {
   assert.equal(contract.OUTPOST_SCHEMA_VERSION, 1);
   assert.ok(Object.isFrozen(contract.DELTA_CLASSES));
   assert.ok(contract.DELTA_CLASSES.includes('presumed-deleted'));
+  assert.ok(Object.isFrozen(contract.REPORT_FIELDS));
+  assert.ok(contract.REPORT_FIELDS.includes('warnings'));
+  assert.ok(Object.isFrozen(contract.DELTA_FIELDS));
+  assert.ok(contract.DELTA_FIELDS.includes('summaryLine'));
+  assert.ok(contract.DELTA_FIELDS.includes('line'));
+  assert.ok(contract.DELTA_FIELDS.includes('details'));
+  assert.ok(Object.isFrozen(contract.DELTA_DETAIL_FIELDS));
+  assert.ok(contract.DELTA_DETAIL_FIELDS.includes('opaque'));
+  assert.ok(Object.isFrozen(contract.DELTA_DETAIL_FIELDS_BY_CLASS));
+  assert.deepEqual(contract.DELTA_DETAIL_FIELDS_BY_CLASS['new-comments'], ['comments']);
+  assert.deepEqual(contract.DELTA_DETAIL_FIELDS_BY_CLASS.relabeled, ['labels']);
   assert.deepEqual(contract.ERROR_KINDS, ['config', 'snapshot', 'github', 'io']);
 });

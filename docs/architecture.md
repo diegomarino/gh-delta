@@ -16,19 +16,19 @@ Given identical input snapshot and fetch results, detection output is determinis
 
 ## Boundaries
 
-```text
-watch loop / timer
-  -> gh-delta.mjs
-      -> lib/cli.mjs          internal CLI runner used by bin/tests only
-      -> lib/args.mjs         parse shared CLI option policy
-      -> lib/contract.mjs     runtime contract constants
-      -> lib/gh.mjs           incremental GraphQL fetch of GitHub state
-      -> lib/snapshot.mjs     read previous snapshot; derive horizon cutoff
-      -> lib/detect.mjs       compare old and current fingerprints
-      -> lib/snapshot.mjs     atomically write new snapshot (with meta.horizon)
-      -> lib/outpost.mjs      optional HTTP POST per delta
-      -> lib/text-output.mjs  optional operator text formatting
-  -> caller decides what to do with deltas
+```mermaid
+flowchart LR
+    Sched[scheduler / watch loop] --> Bin[gh-delta.mjs]
+    Bin --> CLI[lib/cli.mjs]
+    CLI --> Args[lib/args.mjs]
+    CLI --> GH[lib/gh.mjs]
+    CLI --> Snap[lib/snapshot.mjs]
+    CLI --> Det[lib/detect.mjs] --> FP[lib/fingerprint.mjs]
+    CLI --> Out[lib/outpost.mjs]
+    CLI --> Txt[lib/text-output.mjs]
+    GH -. gh api graphql .-> GitHub[(GitHub GraphQL)]
+    Out -. HTTP POST .-> Endpoint[(outpost endpoint)]
+    Snap -. read/atomic write .-> FS[(snapshot file)]
 ```
 
 The public CLI is one one-shot command. `--format json` prints the structured
@@ -38,8 +38,8 @@ automations, or wake-ups.
 
 ## Failure safety guarantees
 
-- Config and snapshot errors exit `2` (permanent); GitHub and I/O errors exit
-  `1` (transient). Snapshots are never updated on any error path.
+- Snapshots are never updated on any error path. The exit code for each error
+  kind follows the taxonomy in [Exit Codes](contract.md#exit-codes).
 - Snapshot writes are atomic and only occur after a successful fetch+diff cycle.
 - Open-items fetch fails closed beyond 1 000 items (10 pages × 100) per family;
   updated-items fetch fails closed beyond 3 000 items (30 pages × 100) per tick.
@@ -54,79 +54,40 @@ The process entrypoint is deliberately thin:
 ```text
 process argv
   -> choose requested output format
-  -> when format is text, add detector detail unless already requested
+  -> add optional summaryLine/details fields for JSON, or a human line for text
   -> run the detector, with optional outpost delivery
   -> render stdout/stderr
   -> exit with the detector code
 ```
 
-Argument and configuration flow:
+Run control flow (argument validation through exit):
 
-```text
-start
-  -> pre-scan for --help, --help-json, --version (wins over all other flags)
-     -> --help or --help-json
-        -> exit 0
-        -> no GitHub fetch
-        -> no snapshot read or write
-     -> --version
-        -> read package metadata
-        -> exit 0
-        -> no GitHub fetch
-        -> no snapshot read or write
-  -> strict argument parse
-     -> unknown option or parse error
-        -> exit 2 (config: permanent)
-        -> no GitHub fetch
-        -> no snapshot read or write
-  -> validate --repo
-     -> missing or invalid owner/name form
-        -> exit 2 (config: permanent)
-        -> no GitHub fetch
-        -> no snapshot read or write
-  -> resolve --monitor-id
-     -> when omitted: default to `host-` + first 12 hex of sha1(os.hostname())
-     -> validate resolved id
-        -> invalid characters
-           -> exit 2 (config: permanent)
-           -> no GitHub fetch
-           -> no snapshot read or write
-  -> validate state flags
-     -> both --state-file and --state-dir
-        -> exit 2 (config: permanent)
-        -> no GitHub fetch
-        -> no snapshot read or write
-     -> neither --state-file nor --state-dir
-        -> derive per-user temp default (mkdir 0700 + ownership check)
-        -> ownership mismatch (dir owned by a different uid)
-           -> exit 1 (io: transient)
-           -> no GitHub fetch
-           -> no snapshot read or write
-        -> mkdir or stat fails
-           -> exit 1 (io: transient)
-           -> no GitHub fetch
-           -> no snapshot read or write
-        -> ownership check is a no-op on Windows (process.getuid absent)
-  -> validate --entities
-     -> invalid value
-        -> exit 2 (config: permanent)
-        -> no GitHub fetch
-        -> no snapshot read or write
-  -> validate --format
-     -> invalid value
-        -> exit 2 (config: permanent)
-        -> no GitHub fetch
-        -> no snapshot read or write
-  -> validate --outpost-url (if present)
-     -> invalid URL or non-HTTP(S) URL
-        -> exit 2 (config: permanent)
-        -> no GitHub fetch
-        -> no snapshot read or write
-  -> validate numeric flags (--outpost-timeout-ms, --outpost-max-posts, --gh-timeout-ms)
-     -> non-positive-integer value
-        -> exit 2 (config: permanent)
-        -> no GitHub fetch
-        -> no snapshot read or write
+```mermaid
+flowchart TD
+    A[argv] --> B{help / version?}
+    B -- yes --> B0[print doc → exit 0]
+    B -- no --> C{strict parse ok?}
+    C -- no --> X2[exit 2 · config]
+    C -- yes --> D{--repo valid?}
+    D -- no --> X2
+    D -- yes --> E{"--monitor-id valid?<br/>(default host-hash if omitted)"}
+    E -- no --> X2
+    E -- yes --> F{state flags}
+    F -- both set --> X2
+    F -- neither --> G{temp dir owned by user?}
+    G -- no / mkdir fails --> X1[exit 1 · io]
+    G -- ok --> H
+    F -- one set --> H{entities · format · numeric flags valid?}
+    H -- no --> X2
+    H -- yes --> R{read snapshot}
+    R -- corrupt / bad shape --> X2s[exit 2 · snapshot]
+    R -- missing --> K[fetch GitHub]
+    R -- ok --> K
+    K -- gh error / page cap --> X1g[exit 1 · github]
+    K -- ok --> L[diff → write snapshot atomically]
+    L --> M{baseline or 0 deltas?}
+    M -- yes --> O0[exit 0]
+    M -- no --> O10[exit 10 → optional outpost POST per delta]
 ```
 
 Snapshot path selection:
@@ -141,37 +102,6 @@ validated args
      -> derive <os.tmpdir()>/gh-delta-<encoded user>/repo-<encoded repo>__monitor-<encoded monitor-id>__<entities>.json
      -> directory created with mode 0700 (per-user isolation on shared /tmp)
      -> ownership guard on POSIX: uid mismatch → exit 1 (io)
-```
-
-Detection flow:
-
-```text
-resolved snapshot path
-  -> read snapshot file
-     -> file does not exist
-        -> old snapshot is null (will seed baseline)
-     -> file exists, parses as valid JSON with correct shape
-        -> proceed to fetch
-     -> file exists, invalid JSON
-        -> exit 2 (snapshot: permanent)
-        -> GitHub is not fetched
-     -> file exists, valid JSON but invalid shape
-        -> exit 2 (snapshot: permanent)
-        -> GitHub is not fetched
-  -> fetch requested GitHub entities
-     -> error (GitHub CLI, network, timeout, or page cap exceeded)
-        -> exit 1 (github: transient)
-        -> snapshot is not written
-     -> per-item nested-page overflow (statusCheckRollup, latestReviews,
-        reviewThreads, labels)
-        -> exit 1 (github: transient)
-        -> snapshot is not written
-     -> success
-        -> compare old snapshot with current fetch
-        -> preserve unrequested entity families
-        -> write snapshot (with meta.horizon = run timestamp)
-        -> exit 0 when baseline or no deltas
-        -> exit 10 when deltas
 ```
 
 Outpost flow:
@@ -223,7 +153,9 @@ The npm package exposes one CLI and a small ESM import surface:
 - `gh-delta/args`: shared argument parsing helpers.
 - `gh-delta/version`: package metadata and version text helpers.
 - `gh-delta/contract`: runtime contract constants (`REPORT_SCHEMA_VERSION`,
-  `OUTPOST_SCHEMA_VERSION`, `DELTA_CLASSES`, `ERROR_KINDS`).
+  `OUTPOST_SCHEMA_VERSION`), field catalogs (`REPORT_FIELDS`, `DELTA_FIELDS`,
+  `DELTA_DETAIL_FIELDS`, `DELTA_DETAIL_FIELDS_BY_CLASS`), delta classes, and
+  error kinds.
 
 The package root is intentionally not exported. `package.json#main` still points
 at `gh-delta.mjs` for metadata compatibility, but supported programmatic imports
@@ -241,8 +173,8 @@ selector, interval, or execution id. Every scheduled fire for the same monitor
 should reuse the same `--monitor-id`.
 
 **Default derivation.** When `--monitor-id` is omitted, the CLI derives a
-per-machine default: `host-` + the first 12 hex characters of
-`sha1(os.hostname())`. Hashing serves two purposes: it keeps raw hostnames out
+per-machine default using a hashed hostname prefix; see [CLI](contract.md#cli)
+for the exact formula. Hashing serves two purposes: it keeps raw hostnames out
 of outpost payloads (where they would appear in `monitorId` and `eventId` fields),
 and it always produces a token that satisfies the monitor-id grammar regardless of
 hostname content. A hostname change — host rename, container rebuild, or CI runner
@@ -294,18 +226,26 @@ All fetches use `gh api graphql` with UPDATED_AT DESC pagination. There are no
 
 **Incremental fetch strategy (per family: PR and issue):**
 
-1. **Open-items phase** — fetch all OPEN items, walking pages until exhausted or
-   the page cap is reached (10 pages × 100 = 1 000 items max). Fails closed with
-   exit `1` if the cap is exceeded.
-2. **Updated-items phase** (incremental only; skipped on baseline) — fetch
-   ALL-states items ordered by UPDATED_AT DESC, stopping at the snapshot horizon
-   minus a 5-minute overlap. Walking more than 30 pages × 100 = 3 000 items
-   fails closed with exit `1` and the message "narrow the monitor scope or
-   re-seed the baseline".
+```mermaid
+flowchart TD
+    A[fetch one family: PR or issue] --> C[Open-items phase: states=OPEN, UPDATED_AT DESC]
+    C --> D{"> 10 pages (1000 items)?"}
+    D -- yes --> E["exit 1: narrow scope / re-seed"]
+    D -- no --> F{prior snapshot exists?}
+    F -->|"no (baseline)"| Z[normalize + fingerprint]
+    F -- yes --> G["Updated-items phase: states=null (all), stop at horizon − 5 min"]
+    G --> H{"> 30 pages (3000 items)?"}
+    H -- yes --> E
+    H -- no --> I[merge — open-items phase wins on duplicate]
+    I --> J{nested sub-page overflow? CI / reviews / threads / labels}
+    J -- yes --> E
+    J -- no --> Z
+```
 
 Open-items results and updated-items results are merged: the open-items phase
 wins on duplicates (an open item appearing in both is only counted once from the
-open-items pass).
+open-items pass). The exact page-cap values and their exit codes are specified in
+[Exit Codes](contract.md#exit-codes).
 
 **Fail-closed per-item nested pagination:** each PR node is checked for page
 overflow on `statusCheckRollup.contexts`, `latestReviews`, and `reviewThreads`.
@@ -337,22 +277,9 @@ The issue fingerprint tracks:
 
 ## Snapshot Contract
 
-Snapshots are plain JSON with shape `{ "pr": object, "issue": object, "meta"?: object }`:
-
-```json
-{
-  "pr": {
-    "42": {
-      "state": "OPEN",
-      "updatedAt": "2026-07-01T10:00:00Z"
-    }
-  },
-  "issue": {},
-  "meta": {
-    "horizon": "2026-07-01T12:00:00.000Z"
-  }
-}
-```
+Snapshot JSON shape and field semantics are specified in
+[Snapshot Semantics](contract.md#snapshot-semantics). Internals below explain
+how `snapshot.mjs` manages the horizon and write guarantees.
 
 `meta.horizon` is stamped with the run timestamp on every successful write and
 used as the starting point for the incremental-fetch horizon (minus 5 minutes of
@@ -404,11 +331,12 @@ See [Outpost payload schema v1](contract.md#outpost-payload-schema-v1) for the f
 
 ## Error Contract
 
-Transient errors (kind `github` or `io`) exit `1`; permanent errors (kind
-`config` or `snapshot`) exit `2`. In both cases the snapshot is not written.
-This prevents transient network or rate-limit failures from erasing the previous
-known-good baseline, and permanent errors signal that human intervention is
-required before retrying.
+The error kind → exit code mapping is defined in
+[Error Report Shape](contract.md#error-report-shape). In all error cases the
+snapshot is not written. This design prevents transient network or rate-limit
+failures (kind `github` or `io`) from erasing the previous known-good baseline,
+and permanent errors (kind `config` or `snapshot`) signal that human intervention
+is required before retrying.
 
 ## Future Entity And Selector Research
 

@@ -13,7 +13,8 @@ form of this document is available at `gh-delta --help-json`.
 ```
 gh-delta --repo <owner/name> [--monitor-id <id>]
          [--state-file <path> | --state-dir <dir>]
-         [--entities pr,issue] [--format json|text] [--detail]
+         [--entities pr,issue] [--format json|text]
+         [--summary-line] [--detail]
          [--outpost-url <url>]
          [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>]
          [--gh-timeout-ms <ms>]
@@ -40,7 +41,11 @@ gh-delta --repo <owner/name> [--monitor-id <id>]
 - `--entities` defaults to `pr,issue`. Accepted: `pr`, `issue`, `pr,issue`.
 - `--format` defaults to `json`. `text` is an operator/log mode, not a machine
   contract; automated consumers must use `json`.
-- `--detail` adds a human-readable `line` to each delta in JSON output.
+- `--summary-line` adds a human-readable `summaryLine` to each delta in JSON
+  output. This is for logs and agent messages; do not parse it.
+- `--detail` adds structured `details` to each delta, also adds `summaryLine`,
+  and keeps the backward-compatible `line` alias. Consumers should prefer
+  `summaryLine` for the human line and `details` / `classes` for decisions.
 - `--outpost-url` is optional at-most-once HTTP delivery; see
   [Outpost Payload](#outpost-payload-schema-v1). It does not affect the JSON
   report, exit code, or snapshot.
@@ -72,15 +77,15 @@ is invalid.
 The package publishes a small, explicit ESM surface. Imports must use explicit
 subpaths; the package root is intentionally not exported.
 
-| Export path            | Symbols                                                                           | Purpose                               |
-| ---------------------- | --------------------------------------------------------------------------------- | ------------------------------------- |
-| `gh-delta/detect`      | `detectDeltas`                                                                    | Pure delta classification engine      |
-| `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint`        | Stable object fingerprint builders    |
-| `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`        | Outpost payload and transport helpers |
-| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`, `defaultStateDir`          | Snapshot path and persistence helpers |
-| `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`, `canonicalEntityKey` | Shared argument parsing policies      |
-| `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                         | Package metadata and version output   |
-| `gh-delta/contract`    | `REPORT_SCHEMA_VERSION`, `OUTPOST_SCHEMA_VERSION`, `DELTA_CLASSES`, `ERROR_KINDS` | Runtime contract constants            |
+| Export path            | Symbols                                                                                                                                                                   | Purpose                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `gh-delta/detect`      | `detectDeltas`                                                                                                                                                            | Pure delta classification engine              |
+| `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint`                                                                                                | Stable object fingerprint builders            |
+| `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`                                                                                                | Outpost payload and transport helpers         |
+| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`, `defaultStateDir`                                                                                                  | Snapshot path and persistence helpers         |
+| `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`, `canonicalEntityKey`                                                                                         | Shared argument parsing policies              |
+| `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                                                                                                                 | Package metadata and version output           |
+| `gh-delta/contract`    | `REPORT_SCHEMA_VERSION`, `OUTPOST_SCHEMA_VERSION`, `REPORT_FIELDS`, `DELTA_FIELDS`, `DELTA_DETAIL_FIELDS`, `DELTA_DETAIL_FIELDS_BY_CLASS`, `DELTA_CLASSES`, `ERROR_KINDS` | Runtime contract constants and field catalogs |
 
 Behavioral notes for consumers:
 
@@ -128,6 +133,30 @@ the array is not significant and not guaranteed stable.
 Consumers must treat an unrecognized class as "something changed, inspect,"
 never as an error. See also [schemaVersion policy](#schemaversion-policy).
 
+### Lifecycle of a missing item
+
+When a previously-tracked open item vanishes from the fetch, it advances through this fixed lifecycle before going permanently silent.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Present: observed in fetch
+    Present --> Present: fingerprint change → class delta
+    Present --> Missing: OPEN item absent — tick 1 — emit "missing"
+    Missing --> StillMissing: absent — tick 2 — emit "still-missing"
+    StillMissing --> PresumedDeleted: absent — tick 3 — emit "presumed-deleted" (once)
+    PresumedDeleted --> Archived: absent — tick 4+ — silent, memory intact
+    Archived --> Archived: still absent (silent)
+    Missing --> Reappeared: returns to fetch — emit "reappeared" (+ changes)
+    StillMissing --> Reappeared: returns to fetch
+    PresumedDeleted --> Reappeared: returns to fetch
+    Archived --> Reappeared: returns to fetch
+    Reappeared --> Present
+    note right of Missing
+        Only items the snapshot believes OPEN enter here.
+        Absent CLOSED/MERGED items stay dormant — no delta.
+    end note
+```
+
 ## Report Shape
 
 Success reports (exit `0` and `10`):
@@ -146,10 +175,20 @@ Success reports (exit `0` and `10`):
       "entity": "pr",
       "number": 42,
       "title": "Add widget",
-      "classes": ["ci-changed", "review-changed"],
-      "from": {},
-      "to": {},
-      "line": "PR #42 \"Add widget\": ci-changed, review-changed"
+      "classes": ["new-comments"],
+      "from": { "state": "OPEN", "comments": 1 },
+      "to": { "state": "OPEN", "comments": 3 },
+      "summaryLine": "PR #42 \"Add widget\": new-comments",
+      "line": "PR #42 \"Add widget\": new-comments",
+      "details": [
+        {
+          "class": "new-comments",
+          "field": "comments",
+          "from": 1,
+          "to": 3,
+          "delta": 2
+        }
+      ]
     }
   ],
   "summary": "1 delta(s)"
@@ -168,7 +207,9 @@ Field guarantees:
 - `entities` (string[]): the selected families, always in canonical order
   `["pr", "issue"]` regardless of the `--entities` input order.
 - `stateFile` (string): the resolved snapshot path — useful when the temp-dir
-  default is in effect.
+  default is in effect. The temp-dir default resolves under the OS temp dir —
+  `/tmp/…` on Linux, `/var/folders/…/T/…` on macOS; trust this field rather
+  than assuming `/tmp`.
 - `at` (string): ISO-8601 UTC timestamp of the run.
 - `summary` (string): **human-readable only.** Wording is not stable; do not
   parse it (it varies between "baseline established: N PRs, M issues" and
@@ -191,7 +232,27 @@ Each delta:
 - `from`, `to`: entity [fingerprints](#fingerprint-fields), or `null`. `from` is
   `null` when `classes` includes `new`; `to` is `null` when `classes` includes
   `missing` or `still-missing`.
-- `line` (string): present **only** with `--detail`.
+- `summaryLine` (string): present **only** with `--summary-line` or `--detail`.
+  Human-readable; wording is not a stable machine contract.
+- `line` (string): present **only** with `--detail`. Backward-compatible alias of
+  `summaryLine`; prefer `summaryLine` in new consumers.
+- `details` (array): present **only** with `--detail`. Structured explanation of
+  the selected `classes`. Entries are additive; tolerate new fields and new
+  detail shapes.
+
+Detail entries use `class` to name the class being explained. Common shapes:
+
+- field transition: `{ "class": "closed", "field": "state", "from": "OPEN", "to": "CLOSED" }`;
+- numeric transition: `{ "class": "new-comments", "field": "comments", "from": 1, "to": 3, "delta": 2 }`;
+- label transition: `{ "class": "relabeled", "field": "labels", "added": ["urgent"], "removed": [] }`;
+- presence transition: `{ "class": "missing", "field": "presence", "from": "present", "to": "missing", "missingTicks": 1 }`.
+
+Some details are intentionally partial. `ci-changed` currently reports the
+opaque CI digest transition (`opaque: true`) because the snapshot stores a stable
+rollup hash, not every check/status row. `review-changed` may include both a
+readable `review` transition and an opaque latest-reviews digest transition.
+The public field catalogs are also available without parsing Markdown through
+`gh-delta/contract` and `gh-delta --help-json`.
 
 **Ordering:** within a report, PR deltas precede issue deltas; within each family
 the order follows the GitHub fetch result. Do not rely on positional access
@@ -309,6 +370,25 @@ One JSON `POST` per delta when the detector exits `10` and `--outpost-url` is se
 `from` and `to` are the entity fingerprint objects, or `null` when there is no
 prior/next state (`from` is `null` for a `new` object; `to` is `null` for a
 `missing` object).
+
+The delivery sequence makes the at-most-once guarantee explicit: the snapshot is written before any POST, and a delivery failure leaves the exit code and report unchanged.
+
+```mermaid
+sequenceDiagram
+    participant CLI as gh-delta
+    participant FS as snapshot file
+    participant EP as outpost endpoint
+    CLI->>FS: write new snapshot (atomic)
+    Note over CLI: exit code 10 (deltas found)
+    loop one per delta, up to --outpost-max-posts
+        CLI->>EP: POST payload v1 (eventId, deliveryId)
+        alt 2xx
+            EP-->>CLI: ok
+        else timeout / 4xx / 5xx / DNS
+            EP-->>CLI: failure → warning (exit code stays 10)
+        end
+    end
+```
 
 ```json
 {

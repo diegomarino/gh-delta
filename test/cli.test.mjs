@@ -141,8 +141,8 @@ test('a gh failure returns code 1 and does NOT write the snapshot', () => {
   assert.equal(code, 1);
 });
 
-test('--detail attaches a human line to each delta', () => {
-  const d = deps([[{ ...basePr, comments: [{}, {}], updatedAt: '2026-07-01T11:00:00Z' }]], {
+test('--summary-line attaches only the human summary line to each delta', () => {
+  const d = deps([[{ ...basePr, totalCommentsCount: 2, updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: {
       pr: {
         42: {
@@ -151,7 +151,35 @@ test('--detail attaches a human line to each delta', () => {
           isDraft: false,
           ci: 'x',
           review: 'REVIEW_REQUIRED',
-          reviews: 'y',
+          reviews: 'da39a3ee5e6b',
+          mergeable: 'UNKNOWN',
+          comments: 0,
+          head: 'sha1',
+        },
+      },
+      issue: {},
+    },
+  });
+  const { report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--summary-line'],
+    d,
+  );
+  assert.equal(report.deltas[0].summaryLine, 'PR #42 "add widget": ci-changed, new-comments');
+  assert.equal(report.deltas[0].line, undefined);
+  assert.equal(report.deltas[0].details, undefined);
+});
+
+test('--detail keeps line compatibility and adds structured class details', () => {
+  const d = deps([[{ ...basePr, totalCommentsCount: 2, updatedAt: '2026-07-01T11:00:00Z' }]], {
+    existing: {
+      pr: {
+        42: {
+          state: 'OPEN',
+          updatedAt: '2026-07-01T10:00:00Z',
+          isDraft: false,
+          ci: 'x',
+          review: 'REVIEW_REQUIRED',
+          reviews: 'da39a3ee5e6b',
           mergeable: 'UNKNOWN',
           comments: 0,
           head: 'sha1',
@@ -164,7 +192,25 @@ test('--detail attaches a human line to each delta', () => {
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--detail'],
     d,
   );
-  assert.ok(report.deltas[0].line.includes('#42'));
+  const delta = report.deltas[0];
+  assert.equal(delta.line, 'PR #42 "add widget": ci-changed, new-comments');
+  assert.equal(delta.summaryLine, delta.line);
+  assert.deepEqual(delta.details, [
+    {
+      class: 'ci-changed',
+      field: 'ci',
+      from: 'x',
+      to: 'da39a3ee5e6b',
+      opaque: true,
+    },
+    {
+      class: 'new-comments',
+      field: 'comments',
+      from: 0,
+      to: 2,
+      delta: 2,
+    },
+  ]);
 });
 
 test('--help returns usage text without fetching GitHub', () => {
@@ -201,9 +247,12 @@ test('--help-json returns machine-readable help without fetching GitHub', () => 
   assert.equal(help.helpSchemaVersion, 1);
   assert.equal(help.command, 'gh-delta');
   assert.match(help.usage, /^gh-delta --repo/);
+  assert.match(help.usage, /\[--summary-line\]/);
+  assert.match(help.usage, /\[--detail\]/);
   assert.ok(help.options.some((option) => option.name === '--monitor-id'));
   assert.ok(help.options.some((option) => option.name === '--state-dir'));
   assert.ok(help.options.some((option) => option.name === '--format'));
+  assert.ok(help.options.some((option) => option.name === '--summary-line'));
   assert.ok(help.options.some((option) => option.name === '--help-json'));
   assert.ok(help.options.some((option) => option.name === '--version'));
   assert.equal(help.version, packageJson.version);
@@ -580,10 +629,18 @@ test('duplicate --format flags use the same last-value rule for parsing and rend
   assert.match(jsonThenText.output, /Baseline seeded/);
 });
 
-test('--help-json usage includes --detail and documents entities grammar', () => {
+test('--help-json usage includes detail flags and documents entities grammar', () => {
   const { report } = run(['--help-json'], { now: () => '2026-07-01T12:00:00Z' });
   const help = JSON.parse(report);
+  assert.match(help.usage, /\[--summary-line\]/);
   assert.match(help.usage, /\[--detail\]/);
+  assert.ok(help.options.some((option) => option.name === '--summary-line'));
+  assert.ok(help.output.deltaFields.includes('summaryLine'));
+  assert.ok(help.output.deltaFields.includes('line'));
+  assert.ok(help.output.deltaFields.includes('details'));
+  assert.ok(help.output.deltaDetailFields.includes('opaque'));
+  assert.deepEqual(help.output.deltaDetailFieldsByClass['new-comments'], ['comments']);
+  assert.deepEqual(help.output.deltaDetailFieldsByClass.relabeled, ['labels']);
   const entities = help.options.find((option) => option.name === '--entities');
   assert.equal(
     entities.grammar,

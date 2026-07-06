@@ -19,6 +19,9 @@ orchestrator, script, or agent owns the action.
 `gh-delta` is not a dashboard, inbox, or PR bot. It is a deterministic GitHub
 delta detector for schedulers, scripts, and agent loops.
 
+See [Alternatives and adjacent tools](docs/alternatives.md) for how `gh-delta`
+compares to related projects.
+
 <p align="center">
   <img src="docs/img/text-output.png" alt="gh-delta reporting two GitHub deltas in text output" width="760">
 </p>
@@ -26,7 +29,6 @@ delta detector for schedulers, scripts, and agent loops.
 ## Table of Contents <!-- omit in toc -->
 
 - [Requirements](#requirements)
-- [Alternatives and Adjacent Tools](#alternatives-and-adjacent-tools)
 - [Quick Start](#quick-start)
 - [CLI](#cli)
 - [Snapshot Identity](#snapshot-identity)
@@ -40,7 +42,7 @@ delta detector for schedulers, scripts, and agent loops.
   - [`--format json`](#--format-json)
   - [`--help-json`](#--help-json)
 - [Design Notes](#design-notes)
-- [Troubleshooting / FAQ](#troubleshooting--faq)
+- [Troubleshooting](#troubleshooting)
 - [Development](#development)
 - [Documentation](#documentation)
 - [License](#license)
@@ -56,24 +58,6 @@ To validate `gh` auth locally:
 ```bash
 gh auth status
 ```
-
-## Alternatives and Adjacent Tools
-
-### Closer alternatives
-
-| Project                                                       | What it is                                                                                      | Why it is somewhat close                                | Why `gh-delta` is different                                                                                                                   |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`openclaw/gitcrawl`](https://github.com/openclaw/gitcrawl)   | Local-first GitHub issue and pull request crawler with SQLite, CLI/JSON/TUI surfaces            | Local-first, CLI-oriented, works from GitHub state      | `gitcrawl` is a broader crawler and triage system; `gh-delta` is narrower and centered on deterministic snapshot-to-snapshot change detection |
-| [`yungookim/oh-my-pr`](https://github.com/yungookim/oh-my-pr) | Local-first PR babysitter that watches repos and dispatches AI agents to fix code               | Also watches GitHub state and is automation-oriented    | `oh-my-pr` takes actions and manages agent workflows; `gh-delta` stops at detection and leaves actions to the caller                          |
-| [`k1LoW/gh-triage`](https://github.com/k1LoW/gh-triage)       | `gh` extension for triaging issues, pull requests, and discussions through unread notifications | Terminal-native GitHub workflow tool for ongoing triage | Notification-inbox workflow, not deterministic diffing against a local snapshot                                                               |
-
-### Adjacent tools, not near-direct replacements
-
-| Project                                                         | What it is                                                                              | Why it is adjacent                               | Why it is not a near-direct replacement                                                               |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| [`google/triage-party`](https://github.com/google/triage-party) | Stateless self-hosted web app for issue and PR triage                                   | Helps teams react to GitHub activity             | Human-facing web triage UI, not a one-shot machine-readable delta detector                            |
-| [`kenn-io/middleman`](https://github.com/kenn-io/middleman)     | Local-first maintainer console and dashboard for triage, review, and merge across repos | Local-first GitHub operations surface            | Interactive dashboard and console rather than a detector primitive for schedulers, scripts, or agents |
-| [`meiji163/gh-notify`](https://github.com/meiji163/gh-notify)   | `gh` extension to view GitHub notifications in the terminal                             | Lightweight terminal tool around GitHub activity | Notification reader UX, not snapshot-based state change detection                                     |
 
 ## Quick Start
 
@@ -160,7 +144,7 @@ gh-delta \
 ## CLI
 
 ```bash
-gh-delta --repo <owner/name> [--monitor-id <id>] [--state-file <path> | --state-dir <dir>] [--entities pr,issue] [--format json|text] [--detail] [--outpost-url <url>] [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>] [--gh-timeout-ms <ms>]
+gh-delta --repo <owner/name> [--monitor-id <id>] [--state-file <path> | --state-dir <dir>] [--entities pr,issue] [--format json|text] [--summary-line] [--detail] [--outpost-url <url>] [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>] [--gh-timeout-ms <ms>]
 ```
 
 Options:
@@ -185,8 +169,9 @@ Options:
 - `--entities`: `pr`, `issue`, or `pr,issue`. Defaults to `pr,issue`. When a
   partial entity set is used, the unrequested side of the snapshot is preserved.
 - `--format`: `json` or `text`. Defaults to `json`.
-- `--detail`: add a human-readable `line` field to each delta in JSON output.
-  Text output adds detail automatically.
+- `--summary-line`: add a human-readable `summaryLine` field to each JSON delta.
+- `--detail`: add structured `details` per JSON delta, plus `summaryLine` and the
+  backward-compatible `line` alias. Text output adds the human line automatically.
 - `--outpost-url`: HTTP(S) endpoint that receives one JSON `POST` per delta when
   the detector exits `10`.
 - `--outpost-timeout-ms`: timeout in milliseconds for each outpost POST (default
@@ -239,8 +224,11 @@ When neither `--state-dir` nor `--state-file` is given, the snapshot lives under
 a per-user directory in the system temp dir:
 
 ```text
-/tmp/gh-delta-<user>/repo-org%2Fapp__monitor-host-<hashed-hostname>__pr.json
+<system temp dir>/gh-delta-<user>/repo-org%2Fapp__monitor-host-<hashed-hostname>__pr.json
 ```
+
+`<system temp dir>` is `/tmp` on Linux and `/var/folders/…/T` on macOS; the
+report's `stateFile` field always echoes the resolved path.
 
 This default is **ephemeral** — reboots and tmp cleanup silently re-seed the
 baseline. The `baseline: true` field in the report (and the baseline line in text
@@ -278,6 +266,8 @@ The external endpoint is responsible for filtering events, deduplicating by
 `eventId`, and executing any downstream action. Outpost logs intentionally
 avoid printing endpoint URLs, query strings, headers, or future auth material.
 
+Worked receiver: [examples/outpost-ntfy-receiver/](examples/outpost-ntfy-receiver/).
+
 See [Outpost payload schema v1](docs/contract.md#outpost-payload-schema-v1) for the full envelope and `eventId` semantics.
 
 ## Report Shape
@@ -297,6 +287,8 @@ whose prompt runs one detector pass with `--format text` and stops. Do not call
 
 See [docs/watch-loop-prompt.md](docs/watch-loop-prompt.md) for a prompt template
 for cron-owned watcher ticks.
+
+Worked schedulers and receivers: see [examples/](examples/README.md).
 
 Delivery note: successful detections advance the snapshot before any agent
 action or outpost finishes. Keep scheduler logs for text output, or add an
@@ -336,6 +328,10 @@ import { getPackageMetadata, renderVersionText } from 'gh-delta/version';
 import {
   REPORT_SCHEMA_VERSION,
   OUTPOST_SCHEMA_VERSION,
+  REPORT_FIELDS,
+  DELTA_FIELDS,
+  DELTA_DETAIL_FIELDS,
+  DELTA_DETAIL_FIELDS_BY_CLASS,
   DELTA_CLASSES,
   ERROR_KINDS,
 } from 'gh-delta/contract';
@@ -352,15 +348,15 @@ source files are shipped). There are no bundled declaration files yet, so TypeSc
 consumers should pin to a known `gh-delta` version and add local types if they need
 compile-time checking.
 
-| Import                 | Exported names                                                                    | Purpose                            |
-| ---------------------- | --------------------------------------------------------------------------------- | ---------------------------------- |
-| `gh-delta/detect`      | `detectDeltas`                                                                    | Pure delta classification          |
-| `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint`        | GitHub object fingerprint helpers  |
-| `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`        | Outpost payload + delivery helpers |
-| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`, `defaultStateDir`          | Snapshot path/read/write helpers   |
-| `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`, `canonicalEntityKey` | Shared argument parsing helpers    |
-| `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                         | Package metadata + version text    |
-| `gh-delta/contract`    | `REPORT_SCHEMA_VERSION`, `OUTPOST_SCHEMA_VERSION`, `DELTA_CLASSES`, `ERROR_KINDS` | Runtime contract constants         |
+| Import                 | Exported names                                                                                                                                                            | Purpose                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `gh-delta/detect`      | `detectDeltas`                                                                                                                                                            | Pure delta classification                     |
+| `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint`                                                                                                | GitHub object fingerprint helpers             |
+| `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`                                                                                                | Outpost payload + delivery helpers            |
+| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`, `defaultStateDir`                                                                                                  | Snapshot path/read/write helpers              |
+| `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`, `canonicalEntityKey`                                                                                         | Shared argument parsing helpers               |
+| `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                                                                                                                 | Package metadata + version text               |
+| `gh-delta/contract`    | `REPORT_SCHEMA_VERSION`, `OUTPOST_SCHEMA_VERSION`, `REPORT_FIELDS`, `DELTA_FIELDS`, `DELTA_DETAIL_FIELDS`, `DELTA_DETAIL_FIELDS_BY_CLASS`, `DELTA_CLASSES`, `ERROR_KINDS` | Runtime contract constants and field catalogs |
 
 All subpaths are pure ESM (`"type": "module"`). The package has no runtime dependencies.
 
@@ -417,6 +413,9 @@ Snapshot was not updated. Fix the configuration or snapshot; retrying will not h
 The same detection tick, machine-readable. Each delta carries its previous and
 current fingerprints as `from`/`to`; see
 [Report Shape](docs/contract.md#report-shape) for the full envelope.
+Use `--summary-line` when an agent only needs a display sentence. Use `--detail`
+when it also needs structured class-level explanations such as comment-count
+deltas or label additions/removals.
 
 <p align="center">
   <img src="docs/img/json-output.png" alt="gh-delta --format json report for a relabeled issue" width="480">
@@ -435,7 +434,7 @@ examples. Excerpt:
   "command": "gh-delta",
   "version": "0.1.0",
   "summary": "Deterministic GitHub issue and pull request delta detector.",
-  "usage": "gh-delta --repo <owner/name> [--monitor-id <id>] [--state-file <path> | --state-dir <dir>] [--entities pr,issue] [--format json|text] [--detail] [--outpost-url <url>] [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>] [--gh-timeout-ms <ms>]",
+  "usage": "gh-delta --repo <owner/name> [--monitor-id <id>] [--state-file <path> | --state-dir <dir>] [--entities pr,issue] [--format json|text] [--summary-line] [--detail] [--outpost-url <url>] [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>] [--gh-timeout-ms <ms>]",
   "purpose": "Run one deterministic detection pass, update the snapshot after a successful fetch, print JSON or operator text, and exit. Scheduling belongs to the caller.",
   "options": [
     {
@@ -495,60 +494,15 @@ Research for future entity types and selectors lives under
 [docs/entities-research](docs/entities-research/README.md). Those notes are not
 public CLI contract.
 
-## Troubleshooting / FAQ
+## Troubleshooting
 
-**My monitor re-baselined after a reboot.**
-The temp-dir default (`<system temp dir>/gh-delta-<user>/...`) is ephemeral by
-design — the OS may clear `/tmp` on reboot or on schedule. When the snapshot
-file is gone, the next run seeds a fresh baseline: `baseline: true` in the JSON
-report (or the baseline line in text mode) is the signal. If you need durable
-state that survives reboots, pass `--state-dir` pointing at a persistent
-directory. Agent loops and casual CLI runs that can tolerate post-reboot
-re-baselines are fine with the default.
+Common failure symptoms include: monitor re-baselined after a reboot (ephemeral
+temp-dir default), `gh` auth failures (exit `1`), page-cap errors (exit `1`,
+narrow the monitor scope), and corrupt snapshots (exit `2`, delete and re-seed).
 
-**`gh` is not authenticated — exit `1` on first run.**
-Run `gh auth status` to verify authentication. `gh-delta` delegates all GitHub
-fetches to the `gh` CLI. If `gh` is not authenticated or lacks read access to
-the repository, the detector exits `1` and does not touch the snapshot. Fix
-authentication first, then retry.
-
-**"exceeded N pages — narrow the monitor scope or re-seed the baseline".**
-The tool fails closed (exit `1`) rather than silently truncating results.
-Open items are limited to 1 000 per family (10 pages × 100). Updated items per
-tick are limited to 3 000 (30 pages × 100); the guidance is to narrow the
-monitor scope or re-seed the baseline. Per-item nested pagination (CI contexts,
-reviews, review threads, labels) also fails closed if a sub-page overflows.
-Narrow the monitor scope (a tighter `--entities` selection, watch a fork, or
-split into multiple monitors) before continuing.
-
-**The same delta refires every tick.**
-If `gh-delta` repeatedly reports the same delta on every scheduled run, stop
-and investigate the underlying GitHub state before taking any action. If an item
-has been absent for 3 consecutive ticks, it is demoted to `presumed-deleted` and
-goes silent — no further ticks will mention it unless it reappears. Repeated
-firing before that demotion is a signal that something unexpected is happening on
-the GitHub side or in your monitor configuration.
-
-**An issue I deleted showed `missing` → `still-missing` → `presumed-deleted` — is that a bug?**
-No, that is expected behavior. `missing` (tick 1) and `still-missing` (tick 2)
-are warnings that an open item vanished from the fetch. `presumed-deleted` (tick 3) is the terminal class — it fires once and then the object goes silent with
-memory intact. If the item reappears, `reappeared` fires. If it is truly gone,
-silence is correct. You can verify on GitHub; no further action is required from
-the monitor.
-
-**Corrupt snapshot / invalid JSON — exit `2`, snapshot not updated.**
-If the snapshot file is invalid JSON or has an unrecognized shape, `gh-delta`
-exits `2` (permanent error) and leaves the file untouched to preserve monitor
-memory. Do not hand-edit snapshot files. If recovery is needed, delete the
-snapshot and re-seed the baseline with a fresh first run.
-
-**Snapshot file grows over time on a long-lived monitor.**
-Snapshot files retain dormant closed items and archived `presumed-deleted`
-fingerprints indefinitely by design — this is what preserves monitor memory
-and prevents reappearing items from being treated as new. On very long-lived
-active monitors the file grows slowly as new items accumulate. Deleting the
-snapshot and re-seeding the baseline is the reset; the next run will treat all
-current open items as new.
+See [Troubleshooting / FAQ](docs/troubleshooting.md) for the full list of
+symptoms, causes, and fixes — including how to locate your snapshot file on
+Linux and macOS.
 
 ## Development
 
@@ -580,21 +534,27 @@ new npm release.
 Documentation changes should follow behavior changes: if you change CLI flags,
 delta classes, snapshot behavior, or any outpost path, update:
 
-- this README;
-- [docs/contract.md](docs/contract.md);
-- [docs/architecture.md](docs/architecture.md).
+- [docs/contract.md](docs/contract.md) first — it is the canonical source for
+  all CLI options, delta classes, exit codes, report shape, and outpost schema;
+- this README, for narrative context or user-facing prose that references those
+  facts;
+- [docs/architecture.md](docs/architecture.md) for internals and rationale
+  only — it links into `contract.md` rather than restating contract tables.
 
 ## Documentation
 
-| Doc                                                                  | Read it when                                               |
-| -------------------------------------------------------------------- | ---------------------------------------------------------- |
-| [RUNBOOK.md](RUNBOOK.md)                                             | Setting up a scheduled watch loop                          |
-| [docs/contract.md](docs/contract.md)                                 | You need the exact classes, exit codes, and payload schema |
-| [docs/architecture.md](docs/architecture.md)                         | Understanding internals and boundaries                     |
-| [docs/watch-loop-prompt.md](docs/watch-loop-prompt.md)               | You want a cron-tick prompt template                       |
-| [docs/entities-research/README.md](docs/entities-research/README.md) | Researching future watch entities                          |
-| [CONTRIBUTING.md](CONTRIBUTING.md)                                   | Contributing changes                                       |
-| [CHANGELOG.md](CHANGELOG.md)                                         | Checking what changed between versions                     |
+| Doc                                                                  | Read it when                                                 |
+| -------------------------------------------------------------------- | ------------------------------------------------------------ |
+| [RUNBOOK.md](RUNBOOK.md)                                             | Setting up a scheduled watch loop                            |
+| [docs/contract.md](docs/contract.md)                                 | You need the exact classes, exit codes, and payload schema   |
+| [docs/architecture.md](docs/architecture.md)                         | Understanding internals and boundaries                       |
+| [docs/watch-loop-prompt.md](docs/watch-loop-prompt.md)               | You want a cron-tick prompt template                         |
+| [examples/README.md](examples/README.md)                             | You want a worked integration — cron/CI/systemd/push/library |
+| [docs/troubleshooting.md](docs/troubleshooting.md)                   | Something misbehaves                                         |
+| [docs/alternatives.md](docs/alternatives.md)                         | Comparing `gh-delta` to other tools                          |
+| [docs/entities-research/README.md](docs/entities-research/README.md) | Researching future watch entities                            |
+| [CONTRIBUTING.md](CONTRIBUTING.md)                                   | Contributing changes                                         |
+| [CHANGELOG.md](CHANGELOG.md)                                         | Checking what changed between versions                       |
 
 ## License
 
