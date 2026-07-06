@@ -22,10 +22,10 @@ unless it materially improves correctness.
 
 ## Scope and review checklist for docs/API edits
 
-- If a CLI flag, schema, or delta class changes, update at minimum:
-  - [README.md](README.md)
-  - [docs/contract.md](docs/contract.md)
-  - [docs/architecture.md](docs/architecture.md)
+- If a CLI flag, schema, or delta class changes:
+  - update [`docs/contract.md`](docs/contract.md) **first** — it is the canonical source of truth; README and architecture link to it rather than restate its tables
+  - then update [README.md](README.md) for any user-visible wording changes
+  - then update [docs/architecture.md](docs/architecture.md) if internal behavior changed (link to `contract.md` anchors rather than duplicating contract tables)
 - If public imports or programmatic behavior changes, update:
   - [package.json](package.json#exports) export surface
   - [docs/contract.md](docs/contract.md)
