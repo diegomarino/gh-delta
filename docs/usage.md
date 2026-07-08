@@ -96,6 +96,31 @@ path in the output.
 Exact path derivation, filename encoding, default monitor-id behavior, and
 snapshot shape are specified in [Snapshot Semantics](contract.md#snapshot-semantics).
 
+## Listing Monitors
+
+`gh-delta list` answers "which monitors have run here, and when?" without
+touching anything: it decodes the derived snapshot filenames in one state
+directory and reports each monitor's repo, monitor id, entities, last run, and
+stored object counts. It never contacts GitHub and never creates, updates, or
+deletes snapshots, so it is safe to run while monitors tick.
+
+```bash
+gh-delta list --state-dir ./state --format text
+```
+
+Add `--since` to keep only monitors that ran recently:
+
+```bash
+gh-delta list --state-dir ./state --since 24h --format text
+```
+
+Without `--state-dir`, `list` inventories the zero-config temp-dir location the
+detector uses by default. A corrupt snapshot shows up as an entry with an error
+instead of failing the listing, which makes `list` a quick health check for a
+shared state directory. Only derived snapshots are discoverable; a monitor
+using an explicit `--state-file` is not listed. The exact flags and report
+shape are specified in [gh-delta list](contract.md#gh-delta-list).
+
 ## Watch Loop Use
 
 `gh-delta` does not create timers. A scheduler should invoke one detector pass,

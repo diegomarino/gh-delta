@@ -15,6 +15,9 @@
     "./fingerprint": {
       "import": "./lib/fingerprint.mjs"
     },
+    "./list": {
+      "import": "./lib/list.mjs"
+    },
     "./outpost": {
       "import": "./lib/outpost.mjs"
     },

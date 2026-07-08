@@ -1103,3 +1103,144 @@ test('mixed-case --repo shares one snapshot and one eventId space', async () => 
   assert.equal(posts[0].eventId, 'gh-delta.delta.v1:o/r:main:pr:42:merged');
   assert.match(posts[0].links.html, /^https:\/\/github\.com\/o\/r\/pull\/42$/);
 });
+
+test('list subcommand returns a read-only inventory report with code 0', () => {
+  const calls = [];
+  const d = {
+    now: () => '2026-07-08T12:00:00.000Z',
+    listMonitors: (stateDir, options) => {
+      calls.push([stateDir, options.sinceMs]);
+      return {
+        monitors: [
+          {
+            repo: 'o/r',
+            monitorId: 'prs-5m',
+            entities: ['pr'],
+            stateFile: '/state/repo-o%2Fr__monitor-prs-5m__pr.json',
+            lastRun: '2026-07-08T11:00:00.000Z',
+            prCount: 2,
+            issueCount: 0,
+          },
+        ],
+        skippedFiles: 1,
+      };
+    },
+  };
+  const { code, report } = run(['list', '--state-dir', '/state', '--since', '24h'], d);
+  assert.equal(code, 0);
+  assert.equal(report.schemaVersion, 1);
+  assert.equal(report.command, 'list');
+  assert.equal(report.stateDir, '/state');
+  assert.equal(report.since, '24h');
+  assert.equal(report.at, '2026-07-08T12:00:00.000Z');
+  assert.equal(report.monitors.length, 1);
+  assert.equal(report.skippedFiles, 1);
+  assert.equal(report.summary, '1 monitor(s)');
+  assert.deepEqual(calls, [['/state', 86_400_000]]);
+});
+
+test('list rejects an invalid --since as a permanent config error', () => {
+  const { code, report } = run(['list', '--since', 'yesterday'], {
+    now: () => '2026-07-08T12:00:00.000Z',
+    listMonitors: () => {
+      throw new Error('must not be called');
+    },
+  });
+  assert.equal(code, 2);
+  assert.equal(report.kind, 'config');
+  assert.match(report.error, /--since/);
+});
+
+test('list maps an unreadable state directory to a transient io error', () => {
+  const { code, report } = run(['list', '--state-dir', '/state'], {
+    now: () => '2026-07-08T12:00:00.000Z',
+    listMonitors: () => {
+      throw new Error('EACCES: permission denied');
+    },
+  });
+  assert.equal(code, 1);
+  assert.equal(report.kind, 'io');
+  assert.match(report.error, /EACCES/);
+});
+
+test('list --help and --help-json describe the subcommand without touching disk', () => {
+  const d = {
+    listMonitors: () => {
+      throw new Error('must not be called');
+    },
+  };
+  const helpText = run(['list', '--help'], d);
+  assert.equal(helpText.code, 0);
+  assert.match(helpText.report, /gh-delta list \[--state-dir <dir>\]/);
+  const helpJson = run(['list', '--help-json'], d);
+  assert.equal(helpJson.code, 0);
+  const help = JSON.parse(helpJson.report);
+  assert.equal(help.command, 'gh-delta list');
+  assert.ok(help.options.some((option) => option.name === '--since'));
+  assert.equal(
+    help.exitCodes.find((entry) => entry.code === 0)?.meaning.includes('Inventory'),
+    true,
+  );
+});
+
+test('main --help advertises the list subcommand', () => {
+  const { report } = run(['--help'], {});
+  assert.match(report, /Subcommands:/);
+  assert.match(report, /\n {2}list\s+Read-only inventory/);
+});
+
+test('list --format text renders one line per monitor plus skipped files', async () => {
+  const d = {
+    now: () => '2026-07-08T12:00:00.000Z',
+    listMonitors: () => ({
+      monitors: [
+        {
+          repo: 'o/r',
+          monitorId: 'prs-5m',
+          entities: ['pr', 'issue'],
+          stateFile: '/state/x.json',
+          lastRun: '2026-07-08T11:00:00.000Z',
+          prCount: 2,
+          issueCount: 3,
+        },
+        {
+          repo: 'o/r',
+          monitorId: 'broken',
+          entities: ['pr'],
+          stateFile: '/state/y.json',
+          lastRun: '2026-07-08T10:00:00.000Z',
+          prCount: null,
+          issueCount: null,
+          error: 'invalid snapshot JSON at /state/y.json',
+        },
+      ],
+      skippedFiles: 2,
+    }),
+  };
+  const { code, output } = await runCommand(
+    ['list', '--state-dir', '/state', '--format', 'text'],
+    d,
+  );
+  assert.equal(code, 0);
+  assert.match(output, /^2026-07-08T12:00:00\.000Z \| 2 monitor\(s\) \| \/state\n/);
+  assert.match(
+    output,
+    /o\/r \| monitor: prs-5m \| entities: pr,issue \| last run: 2026-07-08T11:00:00\.000Z \| 2 PR\(s\), 3 issue\(s\)/,
+  );
+  assert.match(output, /o\/r \| monitor: broken \| .* \| snapshot error: invalid snapshot JSON/);
+  assert.match(output, /2 unrecognized file\(s\) skipped\./);
+});
+
+test('list --format text reports an empty inventory and echoes the window', async () => {
+  const d = {
+    now: () => '2026-07-08T12:00:00.000Z',
+    listMonitors: () => ({ monitors: [], skippedFiles: 0 }),
+  };
+  const windowed = await runCommand(
+    ['list', '--state-dir', '/state', '--since', '1h', '--format', 'text'],
+    d,
+  );
+  assert.match(windowed.output, /No monitor snapshots ran in the last 1h\./);
+  const bare = await runCommand(['list', '--state-dir', '/state', '--format', 'text'], d);
+  assert.match(bare.output, /No monitor snapshots found\./);
+});

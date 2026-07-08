@@ -61,6 +61,77 @@ gh-delta --repo <owner/name> [--monitor-id <id>]
 `--help-json` receives the help document even when the rest of the command line
 is invalid.
 
+### gh-delta list
+
+```
+gh-delta list [--state-dir <dir>] [--since <duration>] [--format json|text]
+```
+
+Read-only inventory of the monitors that have run against one state directory,
+decoded from derived snapshot filenames. `list` never contacts GitHub and never
+creates, updates, or deletes snapshots, so it is safe to run at any time,
+including while monitors tick.
+
+- `--state-dir` is optional. Default: the same per-user temp state directory the
+  detector uses when neither `--state-file` nor `--state-dir` is given. A
+  missing directory is an empty inventory (exit `0`), not an error.
+- `--since` is optional. Grammar: a positive integer followed by one unit —
+  `s`, `m`, `h`, or `d` (e.g. `90s`, `15m`, `24h`, `7d`). Only monitors whose
+  `lastRun` falls inside the window are listed. Without it, every monitor
+  snapshot is listed.
+- `--format` defaults to `json`; `text` is the operator/log mode.
+- **Scope:** only derived snapshots (`--state-dir` or the temp-dir default) are
+  discoverable — their filenames encode repo, monitor id, and entities. A
+  monitor using an explicit `--state-file` is not listed; its filename carries
+  no identity.
+- `--help`, `--help-json`, and `--version` follow the same indestructible-help
+  precedence as the detector; `gh-delta list --help-json` documents this
+  subcommand.
+
+Success report (exit `0`; the shape is also available as `reportFields` /
+`monitorFields` in `gh-delta list --help-json` and as `LIST_REPORT_FIELDS` /
+`LIST_MONITOR_FIELDS` in `gh-delta/contract`):
+
+```json
+{
+  "schemaVersion": 1,
+  "command": "list",
+  "stateDir": "./state",
+  "since": "24h",
+  "at": "2026-07-08T12:00:00.000Z",
+  "monitors": [
+    {
+      "repo": "owner/repo",
+      "monitorId": "prs-5m",
+      "entities": ["pr"],
+      "stateFile": "state/repo-owner%2Frepo__monitor-prs-5m__pr.json",
+      "lastRun": "2026-07-08T11:00:00.000Z",
+      "prCount": 12,
+      "issueCount": 0
+    }
+  ],
+  "skippedFiles": 0,
+  "summary": "1 monitor(s)"
+}
+```
+
+- `command` (string): always `"list"`; discriminates this report from a
+  detector report.
+- `since` (string|null): the echoed `--since` value, or `null` when no window
+  was given.
+- `monitors` (array): sorted by `lastRun`, newest first. `lastRun` is the
+  snapshot's `meta.horizon` when readable, the file mtime otherwise (legacy or
+  corrupt snapshots). A corrupt snapshot keeps its entry with an `error` string
+  and `null` counts instead of failing the listing.
+- `skippedFiles` (number): directory entries that are not derived snapshot
+  files. They are counted, never guessed at.
+- `summary` (string): human-readable only; do not parse it.
+
+Exit codes: `0` inventory produced (possibly empty), `1` transient error (state
+directory unreadable), `2` permanent error (invalid arguments). `list` never
+exits `10`. Error reports use the standard
+[error report shape](#error-report-shape).
+
 ## Exit Codes
 
 - `0`: baseline established or no deltas.
@@ -81,6 +152,7 @@ subpaths; the package root is intentionally not exported.
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
 | `gh-delta/detect`      | `detectDeltas`                                                                                                                                                            | Pure delta classification engine              |
 | `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint`                                                                                                | Stable object fingerprint builders            |
+| `gh-delta/list`        | `listMonitors`, `parseSnapshotFilename`, `parseSince`                                                                                                                     | Read-only monitor snapshot inventory          |
 | `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`                                                                                                | Outpost payload and transport helpers         |
 | `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`, `defaultStateDir`                                                                                                  | Snapshot path and persistence helpers         |
 | `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`, `canonicalEntityKey`                                                                                         | Shared argument parsing policies              |
