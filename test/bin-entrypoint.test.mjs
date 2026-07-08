@@ -31,6 +31,7 @@ test('package publishes only the gh-delta bin', () => {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
   assert.deepEqual(pkg.bin, { 'gh-delta': 'gh-delta.mjs' });
+  assert.equal(pkg.main, undefined);
   assert.equal(pkg.exports['.'], undefined);
   assert.equal(pkg.exports['./tick'], undefined);
   assert.ok(!pkg.files.includes('gh-delta-tick.mjs'));

@@ -5,7 +5,6 @@
   "description": "Deterministic GitHub issue and pull request delta detector for agent watch loops",
   "license": "MIT",
   "packageManager": "npm@10.9.8",
-  "main": "./gh-delta.mjs",
   "exports": {
     "./contract": {
       "import": "./lib/contract.mjs"
@@ -46,6 +45,7 @@
     "lib",
     "docs/architecture.md",
     "docs/contract.md",
+    "docs/usage.md",
     "docs/watch-loop-prompt.md",
     "docs/release-checklist.md",
     "docs/alternatives.md",
