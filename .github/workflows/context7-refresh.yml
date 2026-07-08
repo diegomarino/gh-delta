@@ -32,14 +32,21 @@ jobs:
           fi
           # Best-effort docs sync: capture status + body, never fail the release
           # pipeline over a refresh hiccup (cooldown, outage) — warn and move on.
+          # `|| true` is required: steps run under `bash -e`, and curl exits
+          # non-zero on transport failures (DNS/connection/TLS/timeout), which
+          # would abort the step before the warning case. `-w '%{http_code}'`
+          # yields `000` in that case; the timeouts stop a hung host from
+          # stalling the runner.
           code=$(curl -sS -o /tmp/c7.out -w '%{http_code}' \
+            --connect-timeout 10 --max-time 30 \
             -X POST https://context7.com/api/v1/refresh \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $CONTEXT7_API_KEY" \
-            -d '{"libraryName": "/${{ github.repository }}"}')
+            -d '{"libraryName": "/${{ github.repository }}"}') || true
           echo "HTTP $code"
-          echo "Response: $(cat /tmp/c7.out)"
+          echo "Response: $(cat /tmp/c7.out 2>/dev/null || true)"
           case "$code" in
             2*) echo "Context7 refresh requested for /${{ github.repository }}" ;;
+            000) echo "::warning::Context7 unreachable (transport failure) — non-fatal" ;;
             *) echo "::warning::Context7 refresh returned HTTP $code (non-fatal)" ;;
           esac
