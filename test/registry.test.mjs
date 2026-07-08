@@ -6,6 +6,7 @@ import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  canonicalStateFileKey,
   defaultRegistryDir,
   readRegistry,
   registerMonitor,
@@ -82,4 +83,25 @@ test('readRegistry treats a missing directory as an empty registry', () => {
     entries: [],
     skippedFiles: 0,
   });
+});
+
+test('canonicalStateFileKey case-folds only on Windows', () => {
+  // Same monitor referenced with different casing: one identity on win32
+  // (case-insensitive filesystems), two on POSIX (case-sensitive).
+  assert.equal(
+    canonicalStateFileKey('/State/X.json', 'win32'),
+    canonicalStateFileKey('/state/x.json', 'win32'),
+  );
+  assert.notEqual(
+    canonicalStateFileKey('/State/X.json', 'linux'),
+    canonicalStateFileKey('/state/x.json', 'linux'),
+  );
+  assert.equal(
+    registryEntryPath('/reg', '/State/X.json', 'win32'),
+    registryEntryPath('/reg', '/state/x.json', 'win32'),
+  );
+  assert.notEqual(
+    registryEntryPath('/reg', '/State/X.json', 'linux'),
+    registryEntryPath('/reg', '/state/x.json', 'linux'),
+  );
 });

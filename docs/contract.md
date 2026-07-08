@@ -158,8 +158,8 @@ deltas), the CLI writes one small breadcrumb per monitor:
   `$XDG_STATE_HOME/gh-delta/registry`, falling back to
   `~/.local/state/gh-delta/registry`. Durable on purpose — unlike the temp-dir
   snapshot default, a reboot must not erase the inventory.
-- **Shape:** one JSON file per monitor, keyed by a sha256 hash of the resolved
-  snapshot path, containing `registryVersion`, `repo`, `monitorId`, `entities`,
+- **Shape:** one JSON file per monitor, keyed by a sha256 hash of the canonical
+  snapshot path (case-folded on Windows; see [Platform Notes](#platform-notes)), containing `registryVersion`, `repo`, `monitorId`, `entities`,
   `stateFile`, and `lastRun` (the field catalog is `REGISTRY_ENTRY_FIELDS` in
   `gh-delta/contract`). Re-registering the same monitor overwrites its own
   file (temp file + atomic rename): idempotent, last-writer-wins, and
@@ -198,7 +198,7 @@ subpaths; the package root is intentionally not exported.
 | `gh-delta/detect`      | `detectDeltas`                                                                                                                                                                                                                                  | Pure delta classification engine              |
 | `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint`                                                                                                                                                                      | Stable object fingerprint builders            |
 | `gh-delta/list`        | `listMonitors`, `parseSnapshotFilename`, `parseSince`                                                                                                                                                                                           | Read-only monitor snapshot inventory          |
-| `gh-delta/registry`    | `registerMonitor`, `readRegistry`, `defaultRegistryDir`, `registryEntryPath`                                                                                                                                                                    | Run-registry breadcrumbs for gh-delta list    |
+| `gh-delta/registry`    | `registerMonitor`, `readRegistry`, `defaultRegistryDir`, `registryEntryPath`, `canonicalStateFileKey`                                                                                                                                           | Run-registry breadcrumbs for gh-delta list    |
 | `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`                                                                                                                                                                      | Outpost payload and transport helpers         |
 | `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`, `defaultStateDir`                                                                                                                                                                        | Snapshot path and persistence helpers         |
 | `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`, `canonicalEntityKey`                                                                                                                                                               | Shared argument parsing policies              |
@@ -523,6 +523,31 @@ removed. **Additive changes** (new optional fields on the report, a delta, or a
 fingerprint; new classes; new error kinds) **never bump `schemaVersion`.**
 Unknown classes or kinds mean "something changed, inspect", never an error.
 Assert `schemaVersion === 1` and handle unknown classes/kinds gracefully.
+
+## Platform Notes
+
+`gh-delta` targets Node >= 18 on any OS, but the guarantees above are
+POSIX-worded. CI exercises Linux only; macOS shares the POSIX semantics.
+On **Windows** the behavior degrades explicitly, never silently:
+
+- **Atomic writes.** Snapshot and registry writes go through a unique temp file
+  plus rename. The rename is guaranteed atomic on POSIX within one filesystem;
+  on Windows it is a best-effort `MoveFileEx`-style replace — safe against
+  partial JSON, but without the same atomicity guarantee under concurrent
+  writers. The "serialize ticks per monitor" rule matters more there.
+- **Permissions.** The `0700` modes on the temp-dir default and the registry
+  directory are ignored on Windows (ACLs come from the user profile), and the
+  temp-dir ownership guard (refusing a default dir owned by another uid) is
+  skipped — `process.getuid` does not exist on Windows.
+- **Locations.** The temp-dir default resolves under `%TEMP%`
+  (`os.tmpdir()`); the run registry lands at
+  `%USERPROFILE%\.local\state\gh-delta\registry` unless `XDG_STATE_HOME` or
+  `GH_DELTA_REGISTRY_DIR` overrides it. Both are echoed in reports
+  (`stateFile`, `registryDir`) — trust the echo, not the convention.
+- **Case-insensitive paths.** Registry entry keys and `gh-delta list` dedupe
+  keys case-fold the resolved snapshot path on Windows, so `C:\State\x.json`
+  and `c:\state\x.json` are one monitor, not two. On POSIX, paths that differ
+  by case are genuinely different files and are kept distinct.
 
 ## Outpost Payload (schema v1)
 

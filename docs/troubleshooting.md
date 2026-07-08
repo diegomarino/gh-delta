@@ -13,9 +13,11 @@ re-baselines are fine with the default.
 
 **Where is my snapshot file?**
 The report's `stateFile` field always echoes the resolved path — check that
-field first. `<system temp dir>` is `/tmp` on Linux and `/var/folders/…/T` on
-macOS; `os.tmpdir()` resolves differently per platform, so the `stateFile` echo
-is the authoritative answer.
+field first. `<system temp dir>` is `/tmp` on Linux, `/var/folders/…/T` on
+macOS, and `%TEMP%` on Windows; `os.tmpdir()` resolves differently per
+platform, so the `stateFile` echo is the authoritative answer. Windows-specific
+behavior (permissions, atomicity, path casing, registry location) is specified
+in [Platform Notes](contract.md#platform-notes).
 
 **Which monitors have run on this machine?**
 Run `gh-delta list` (read-only). Without flags it merges the

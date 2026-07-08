@@ -44,6 +44,9 @@ compares to related projects.
 - Node.js 18 or newer.
 - GitHub CLI (`gh`) installed and authenticated.
 - Read access to the repository being watched.
+- Any OS: Linux and macOS get the POSIX guarantees (and Linux is what CI
+  exercises); Windows works with documented caveats — see
+  [Platform Notes](docs/contract.md#platform-notes).
 
 To validate `gh` auth locally:
 
