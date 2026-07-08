@@ -1,0 +1,37 @@
+name: context7-refresh
+
+# Refresh gh-delta's Context7-indexed docs on every published release, so the
+# contract/README/help changes that ship with a release are searchable through
+# Context7 immediately instead of waiting for its lazy, popularity-based
+# background refresh. Context7 indexes from the GitHub repo (not npm), so the
+# published Release — where the updated docs already live on the tag — is the
+# right trigger.
+on:
+  release:
+    types: [published]
+  workflow_dispatch: # manual re-trigger
+
+# This job only calls an external HTTP API; it needs no repository access.
+permissions: {}
+
+concurrency:
+  group: context7-refresh-${{ github.event.release.tag_name || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Context7 refresh API
+        env:
+          CONTEXT7_API_KEY: ${{ secrets.CONTEXT7_API_KEY }}
+        run: |
+          if [ -z "$CONTEXT7_API_KEY" ]; then
+            echo "CONTEXT7_API_KEY secret not set; skipping Context7 refresh."
+            exit 0
+          fi
+          curl -fsS -X POST https://context7.com/api/v1/refresh \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $CONTEXT7_API_KEY" \
+            -d '{"libraryName": "/${{ github.repository }}"}'
+          echo "Requested Context7 refresh for /${{ github.repository }}"
