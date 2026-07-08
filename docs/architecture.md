@@ -32,9 +32,14 @@ flowchart LR
     CLI --> Det[lib/detect.mjs] --> FP[lib/fingerprint.mjs]
     CLI --> Out[lib/outpost.mjs]
     CLI --> Txt[lib/text-output.mjs]
+    CLI --> Lst[lib/list.mjs]
+    CLI --> Reg[lib/registry.mjs]
     GH -. gh api graphql .-> GitHub[(GitHub GraphQL)]
     Out -. HTTP POST .-> Endpoint[(outpost endpoint)]
     Snap -. read/atomic write .-> FS[(snapshot file)]
+    Reg -. atomic breadcrumb write .-> RegFS[(run registry)]
+    Lst -. read-only scan .-> FS
+    Lst -. read-only scan .-> RegFS
 ```
 
 The public CLI is one one-shot command. JSON output is for programs; text output
@@ -141,7 +146,14 @@ The impure edges are isolated:
   and computes the incremental-fetch horizon cutoff.
 - `outpost.mjs` validates optional outpost URLs, builds payloads, and sends
   short-timeout HTTP POSTs.
-- `text-output.mjs` formats heartbeat text and outpost warnings.
+- `text-output.mjs` formats heartbeat text, list inventory text, and outpost
+  warnings.
+- `list.mjs` builds the read-only monitor inventory for `gh-delta list`:
+  decodes derived snapshot filenames, recognizes self-describing snapshot
+  `meta` identity, and merges run-registry entries without writing anything.
+- `registry.mjs` owns the run-registry boundary: one atomic breadcrumb file per
+  monitor in a fixed per-user directory, written best-effort after each
+  successful run and read back by `list`.
 - `version.mjs` reads package metadata for version output and help JSON.
 - `help.mjs` keeps human `--help` and machine-readable `--help-json` output in
   one versioned source of truth.

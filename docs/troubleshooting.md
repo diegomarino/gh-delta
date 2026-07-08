@@ -17,6 +17,23 @@ field first. `<system temp dir>` is `/tmp` on Linux and `/var/folders/…/T` on
 macOS; `os.tmpdir()` resolves differently per platform, so the `stateFile` echo
 is the authoritative answer.
 
+**Which monitors have run on this machine?**
+Run `gh-delta list` (read-only). Without flags it merges the
+[run registry](contract.md#run-registry) with the temp-dir default location, so
+monitors using any `--state-dir` or `--state-file` appear with their repo,
+monitor id, entities, and last run. `--since 24h` narrows to recent runs;
+`--state-dir <dir>` narrows to one directory. A `stale: true` entry means the
+monitor was registered but its snapshot file is gone (retired monitor or
+cleaned state).
+
+**gh-delta wrote a file under `~/.local/state` — what is it?**
+That is the run registry: one ~200-byte breadcrumb per monitor so `gh-delta
+list` can inventory monitors in any state location. It is an index, not
+detector state — deleting the directory is always safe (it rebuilds as monitors
+run) and never causes false deltas or re-baselines. Opt out per run with
+`--no-registry`, or globally with `GH_DELTA_NO_REGISTRY=1` (hermetic CI,
+ephemeral containers). See [Run Registry](contract.md#run-registry).
+
 **`gh` is not authenticated — exit `1` on first run.**
 Run `gh auth status` to verify authentication. `gh-delta` delegates all GitHub
 fetches to the `gh` CLI. If `gh` is not authenticated or lacks read access to

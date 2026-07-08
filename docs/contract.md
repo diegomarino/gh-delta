@@ -467,7 +467,9 @@ Emitted with exit code `1` (transient) or `2` (permanent). It **does not** carry
 
 ## Snapshot Semantics
 
-The detector is stateless between runs except for the snapshot it owns.
+The detector is stateless between runs except for the snapshot it owns and
+the best-effort [run-registry](#run-registry) breadcrumb (an index for
+`gh-delta list`, never consulted by detection).
 
 **Incremental fetch contract:** open items are always fetched in full (the scope
 for missing detection). When a prior snapshot exists, `meta.horizon` (the
