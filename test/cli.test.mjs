@@ -437,6 +437,31 @@ test('corrupt snapshot read failure returns code 2 and does NOT write', () => {
   assert.match(report.error, /invalid snapshot JSON/);
 });
 
+test('invalid snapshot horizon returns code 2 before fetching', () => {
+  let fetched = false;
+  let writes = 0;
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'],
+    {
+      fetchPRs: () => {
+        fetched = true;
+        return [];
+      },
+      fetchIssues: () => [],
+      readSnapshot: () => ({ pr: {}, issue: {}, meta: { horizon: 'not-a-date' } }),
+      writeSnapshotAtomic: () => {
+        writes++;
+      },
+      now: () => '2026-07-01T12:00:00Z',
+    },
+  );
+  assert.equal(code, 2);
+  assert.equal(report.kind, 'snapshot');
+  assert.match(report.error, /invalid snapshot horizon/);
+  assert.equal(fetched, false);
+  assert.equal(writes, 0);
+});
+
 test('invalid repo and monitor id fail before fetching', () => {
   const d = {
     fetchPRs: () => {

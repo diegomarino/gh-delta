@@ -93,6 +93,15 @@ test('snapshots round-trip an optional meta.horizon', () => {
   assert.deepEqual(readSnapshot(p), data);
 });
 
+test('snapshots reject an invalid meta.horizon', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-'));
+  const p = join(dir, 'meta.json');
+  assert.throws(
+    () => writeSnapshotAtomic(p, { pr: {}, issue: {}, meta: { horizon: 'not-a-date' } }),
+    /meta\.horizon must be an ISO date string/,
+  );
+});
+
 test('horizonCutoff derives from meta, falls back to fingerprints, honors overlap', () => {
   assert.equal(horizonCutoff(null), null);
   assert.equal(
@@ -107,6 +116,17 @@ test('horizonCutoff derives from meta, falls back to fingerprints, honors overla
     '2026-07-01T10:00:00.000Z', // legacy: max fingerprint updatedAt
   );
   assert.equal(horizonCutoff({ pr: {}, issue: {} }), null); // empty legacy: open-only tick
+});
+
+test('horizonCutoff rejects invalid legacy fingerprint dates', () => {
+  assert.throws(
+    () =>
+      horizonCutoff({
+        pr: { 42: { state: 'OPEN', updatedAt: 'not-a-date' } },
+        issue: {},
+      }),
+    /invalid snapshot horizon/,
+  );
 });
 
 test('snapshot filenames are injective across the __monitor- boundary', () => {
