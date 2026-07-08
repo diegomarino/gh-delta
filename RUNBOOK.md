@@ -184,8 +184,8 @@ developer polling loops or webhook-driven automation.
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `new` (PR)                    | a worker opened a PR; read it and queue review                                                                                      |
 | `first-seen`                  | first observed non-open item; inspect it before treating it as newly created                                                        |
-| `ci-changed`                  | CI green: consider merge path; CI red: nudge worker with the failure                                                                |
-| `review-changed`              | approved: merge candidate; changes requested: relay to worker                                                                       |
+| `ci-changed`                  | CI green: consider merge path; CI red: nudge worker with the failure (with `--format json --detail`, the delta's `ci` detail names the exact checks that changed) |
+| `review-changed`              | approved: merge candidate; changes requested: relay to worker (with `--format json --detail`, the `reviews` detail names the reviewers and state transitions)     |
 | `became-mergeable`            | conflicts resolved; merge candidate                                                                                                 |
 | `merged` / `closed`           | slice done; advance build order or sync spawn base                                                                                  |
 | `new-comments`                | read PR threads; fold review comments before merge                                                                                  |

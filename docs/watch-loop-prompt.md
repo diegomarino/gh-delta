@@ -5,6 +5,14 @@ tick. The prompt is deliberately stateless and does not rearm itself.
 
 Replace the placeholders before scheduling it.
 
+The command in step 1 uses `--format text` for readable scheduler logs. If the
+acting agent should see exactly which checks or reviews changed without a
+second GitHub query, schedule step 1 with `--format json --detail` instead: the
+`ci`/`reviews` details then name the added/removed/changed entries (see
+[the contract](contract.md#report-shape)). A detail marked `opaque: true`
+cannot name the change — inspect GitHub in that case. Pick the format up front:
+a tick advances the snapshot, so a re-run cannot recover the details.
+
 ```text
 [gh-delta watch tick -- fired by cron; the cron owns the schedule, do NOT rearm]
 
