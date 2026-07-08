@@ -8,8 +8,13 @@
 // `from`/`to` states are internally consistent on purpose (fixes audit finding
 // D5, the "impossible delta"). test/examples.test.mjs asserts these objects
 // still cover the frozen contract field lists, so a schema change fails loudly.
+import { deltaId, deltaIdentity } from '../../lib/fingerprint.mjs';
 
 const REPO = 'owner/repo';
+
+// Stamp the content-addressed id exactly as lib/cli.mjs run() does, so a fixture
+// delta is byte-identical to a live one (id leads the object).
+const withId = (delta) => ({ id: deltaId(deltaIdentity(REPO, delta)), ...delta });
 // Zero-config default: `--monitor-id` derives to `host-<sha1(hostname)[:12]>`.
 // A realistic frozen value so the demo command can stay flag-free yet honest.
 const MONITOR = 'host-9c1f7b2a4e83';
@@ -20,7 +25,7 @@ const AT_BASELINE = '2026-07-01T12:00:00.000Z';
 // The PR #42 delta: a single item that exercises three distinct detail field
 // groups (opaque `ci`, `review`, and label add/remove) so `--detail` is shown
 // off in one place.
-const pr42 = {
+const pr42 = withId({
   entity: 'pr',
   number: 42,
   title: 'Add billing webhook',
@@ -37,16 +42,16 @@ const pr42 = {
     review: 'APPROVED',
     reviews: 'r-2c1d',
   },
-};
+});
 
-const issue17 = {
+const issue17 = withId({
   entity: 'issue',
   number: 17,
   title: 'Backfill customer imports',
   classes: ['relabeled'],
   from: { state: 'OPEN', labels: ['worker'] },
   to: { state: 'OPEN', labels: ['backend', 'worker'] },
-};
+});
 
 /** Run 1 — zero-config baseline seed. */
 export const baselineReport = Object.freeze({

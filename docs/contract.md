@@ -173,6 +173,7 @@ Success reports (exit `0` and `10`):
   "at": "2026-07-01T12:00:00.000Z",
   "deltas": [
     {
+      "id": "a7c7fb531053f88bf5c237de83f130adb23ffe7490dec72c0103ccde6a1c0d12",
       "entity": "pr",
       "number": 42,
       "title": "Add widget",
@@ -223,6 +224,15 @@ Field guarantees:
 
 Each delta:
 
+- `id` (string): a 64-character lowercase sha256 hex **content hash of the
+  observed change's identity**, present on every delta. It hashes
+  `{ repo, entity, number, to }` for an observed entity, or
+  `{ repo, entity, number, from, classes, missingTicks }` when `to` is `null`
+  (the missing lifecycle). It is **stable across runs and across monitors** and
+  deliberately **excludes `monitorId`**, the report `at`, `title`, and every
+  derived display field — so two monitors observing the same current GitHub
+  state emit the same `id`. Use it as the idempotency key for dedupe. Added
+  additively; it does not bump `schemaVersion`.
 - `entity` (`"pr"` | `"issue"`): the **only** discriminator between an issue and
   a PR. GitHub numbers are shared across issues and PRs, so `number` alone is
   ambiguous — always key on `(entity, number)`.
@@ -399,6 +409,7 @@ sequenceDiagram
 {
   "type": "gh-delta.delta",
   "schemaVersion": 1,
+  "id": "6499ce3b352467f7bfabf0fa35571eed8ed4e24cc3373fb715ec245680904e0d",
   "eventId": "gh-delta.delta.v1:owner/repo:prs-5m:pr:42:new",
   "deliveryId": "gh-delta.delivery.v1:owner/repo:prs-5m:pr:42:new:2026-07-01T12:00:00.000Z",
   "repo": "owner/repo",
@@ -416,8 +427,12 @@ sequenceDiagram
 }
 ```
 
-Outpost is best-effort notification. `eventId` is stable for the semantic delta
-and is the receiver's dedupe key. `deliveryId` includes the detector timestamp
+Outpost is best-effort notification. `id` is the same content-addressed delta id
+carried in the JSON report — stable across runs **and across monitors** (it
+excludes `monitorId`), so it is the dedupe key when one receiver collapses the
+same observed change reported by several monitors. `eventId` is stable for the
+semantic delta **within a monitor** (it includes `monitorId`) and is the
+receiver's per-monitor dedupe key. `deliveryId` includes the detector timestamp
 and identifies one delivery attempt. `gh-delta` does not provide reliable
 delivery, retries, an outbox, acknowledgement, or replay in `0.1`. Classes are
 sorted before they are joined into the ids, so semantic identity is independent

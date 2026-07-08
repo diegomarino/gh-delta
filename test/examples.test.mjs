@@ -15,6 +15,7 @@ import {
   DELTA_DETAIL_FIELDS_BY_CLASS,
 } from '../lib/contract.mjs';
 import { enrichDelta } from '../lib/cli.mjs';
+import { deltaId, deltaIdentity } from '../lib/fingerprint.mjs';
 import { baselineReport, deltaReport, detailReport } from '../tools/examples/fixtures.mjs';
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
@@ -42,12 +43,30 @@ test('a fully enriched missing delta covers exactly the frozen DELTA_FIELDS', ()
     from: { state: 'OPEN', missing: true, missingTicks: 1 },
     to: null,
   };
+  // `id` is attached at report assembly (with repo in scope), not by enrichDelta.
+  delta.id = deltaId(deltaIdentity('owner/repo', delta));
   enrichDelta(delta, { summaryLine: true, legacyLine: true, details: true });
   assert.deepEqual(
     [...keySet(delta)].sort(),
     [...DELTA_FIELDS].sort(),
     'the detail fixture delta must exercise every contract delta field',
   );
+});
+
+test('every example delta carries the canonical content-addressed id', () => {
+  // Guards the actual fixture objects fed to the cast/SVG renderers (not just a
+  // synthetic delta), so a new mandatory delta field cannot silently drift the
+  // shipped README artifacts.
+  for (const [name, report] of Object.entries({ deltaReport, detailReport })) {
+    for (const delta of report.deltas) {
+      assert.match(delta.id, /^[0-9a-f]{64}$/, `${name} #${delta.number} must carry a hex id`);
+      assert.equal(
+        delta.id,
+        deltaId(deltaIdentity(report.repo, delta)),
+        `${name} #${delta.number} id must be the canonical hash of its identity`,
+      );
+    }
+  }
 });
 
 test('every emitted detail row stays within the frozen detail contract', () => {
