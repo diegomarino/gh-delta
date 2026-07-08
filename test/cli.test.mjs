@@ -299,6 +299,38 @@ test('--detail names the exact checks and reviews that changed when the snapshot
   });
 });
 
+test('--detail falls back to opaque when duplicate check names would collapse the diff', () => {
+  // Two rollup rows can share a name (e.g. a CheckRun and a StatusContext).
+  // Keying the diff by name would silently drop the removed failing `build`
+  // row and misreport `lint` as the only change, so the detail must refuse to
+  // name the breakdown instead.
+  const before = {
+    ...basePr,
+    statusCheckRollup: [
+      { name: 'build', status: 'COMPLETED', conclusion: 'FAILURE' },
+      { name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    ],
+  };
+  const after = {
+    ...basePr,
+    updatedAt: '2026-07-01T11:00:00Z',
+    statusCheckRollup: [
+      { name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' },
+      { name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    ],
+  };
+  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const { report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--detail'],
+    d,
+  );
+  const ci = report.deltas[0].details.find((row) => row.class === 'ci-changed');
+  assert.equal(ci.opaque, true);
+  assert.equal(ci.added, undefined);
+  assert.equal(ci.removed, undefined);
+  assert.equal(ci.changed, undefined);
+});
+
 test('pre-summary snapshots upgrade without phantom deltas and persist summaries', () => {
   const { ciChecks: _ci, reviewSummary: _reviews, ...legacy } = prFingerprint(basePr);
   const d = deps([[basePr]], { existing: { pr: { 42: legacy }, issue: {} } });

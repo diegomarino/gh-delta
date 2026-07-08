@@ -305,8 +305,9 @@ introduced). The digest transition keeps its `from`/`to` values and gains
 by `author` (`{ author, state, submittedAt, commit }`), and may also include a
 readable `review` (review decision) transition. When a detail **cannot** name
 the change — the `from` side comes from a snapshot written before summaries were
-persisted, or the digests differ in a way the summary does not explain — it
-falls back to marking the digest transition `opaque: true` with no named arrays.
+persisted, either side repeats a key (two rollup rows sharing one check name),
+or the digests differ in a way the summary does not explain — it falls back to
+marking the digest transition `opaque: true` with no named arrays.
 Consumers should treat `opaque: true` as "re-query GitHub if you need
 specifics" and its absence as "the named breakdown is authoritative."
 The public field catalogs are also available without parsing Markdown through
