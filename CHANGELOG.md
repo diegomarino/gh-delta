@@ -4,6 +4,14 @@ All notable changes to this package will be documented here.
 
 This project follows semantic versioning once published to npm.
 
+## [0.2.0](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.1.1...gh-delta-v0.2.0) (2026-07-08)
+
+
+### Features
+
+* add content-addressed id to every delta ([#5](https://github.com/diegomarino/gh-delta/issues/5)) ([917ba42](https://github.com/diegomarino/gh-delta/commit/917ba42e68ceb787e4cfd12487ea3e4dd167518b))
+* carry PR head branch (headRefName) on deltas ([#7](https://github.com/diegomarino/gh-delta/issues/7)) ([1e5e536](https://github.com/diegomarino/gh-delta/commit/1e5e536831b9cdfc877e352cd0eb3f0e688dbb3a))
+
 ## [0.1.1](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.1.0...gh-delta-v0.1.1) (2026-07-08)
 
 
