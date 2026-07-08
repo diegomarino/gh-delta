@@ -154,7 +154,7 @@ test('normalizeIssue filters null elements from labels nodes', () => {
   assert.deepEqual(rows[0].labels, [{ name: 'worker' }]);
 });
 
-test('the PR query requests headRefName and normalizePr carries it (null when GitHub omits it)', () => {
+test('the PR query requests headRefName and normalizePr carries it (defensively null if absent)', () => {
   let sentQuery = '';
   const exec = (_cmd, args) => {
     sentQuery = args.find((a) => a.startsWith('query=')) ?? '';
@@ -164,12 +164,13 @@ test('the PR query requests headRefName and normalizePr carries it (null when Gi
   assert.ok(sentQuery.includes('headRefName'), 'PR GraphQL selection must request headRefName');
   assert.equal(rows[0].headRefName, 'feature/login');
 
-  // A deleted head branch comes back as null from GitHub; normalize to null, never undefined.
-  const deleted = fetchPRs('o/r', {
+  // Defensive: GitHub's headRefName is String! and retained after deletion, but
+  // if a node ever lacks it, normalize to null rather than undefined (never throw).
+  const missingName = fetchPRs('o/r', {
     exec: () => page([prNode({ headRefName: null })]),
     horizonCutoff: null,
   });
-  assert.equal(deleted[0].headRefName, null);
+  assert.equal(missingName[0].headRefName, null);
 });
 
 test('normalizePr filters null elements from statusCheckRollup contexts nodes', () => {

@@ -58,11 +58,25 @@ test('an issue delta never carries headRefName', () => {
   assert.equal('headRefName' in r.deltas[0], false);
 });
 
-test('a PR whose head branch was deleted emits headRefName: null without error', () => {
+test('a merged PR keeps its head branch name (GitHub retains headRefName after deletion)', () => {
+  // GitHub's headRefName is String! and survives the branch being deleted at
+  // merge, so a `merged` delta still carries the (now-deleted) branch for routing.
+  const base = detectDeltas(null, { pr: [pr({ headRefName: 'feature/x' })], issue: [] });
+  const r = detectDeltas(base.snapshot, {
+    pr: [pr({ headRefName: 'feature/x', state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' })],
+    issue: [],
+  });
+  assert.ok(r.deltas[0].classes.includes('merged'));
+  assert.equal(r.deltas[0].headRefName, 'feature/x');
+});
+
+test('a PR object missing headRefName normalizes to null without throwing (defensive)', () => {
+  // headRefName is effectively always present from GitHub; the null path is a
+  // defensive guard, not a "branch deleted" signal.
   const base = detectDeltas(null, { pr: [], issue: [] });
   const r = detectDeltas(base.snapshot, { pr: [pr({ headRefName: null })], issue: [] });
   assert.equal(r.deltas[0].headRefName, null);
-  assert.equal('headRefName' in r.deltas[0], true); // present, just null
+  assert.equal('headRefName' in r.deltas[0], true);
 });
 
 test('headRefName is present across families with a current object, absent on missing', () => {
