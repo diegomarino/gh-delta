@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { formatTextOutput } from '../lib/text-output.mjs';
+import { DELTA_CLASSES } from '../lib/contract.mjs';
 
 const issueDelta = {
   entity: 'issue',
@@ -104,6 +105,28 @@ test('delta text output prints each delta with suggested action', () => {
   assert.match(output, /suggested action: absent for several consecutive ticks/);
   assert.match(output, /PR #11 "Deploy backend v2"/);
   assert.match(output, /suggested action: item completed or closed/);
+});
+
+test('every contract delta class has a specific suggested action', () => {
+  const fallback = 'inspect this delta and decide the next action.';
+  for (const klass of DELTA_CLASSES) {
+    const output = formatTextOutput({
+      code: 10,
+      report: {
+        baseline: false,
+        repo: 'owner/repo',
+        monitorId: 'watch',
+        at: '2026-07-01T10:05:00.000Z',
+        deltas: [{ entity: 'pr', number: 1, title: 't', classes: [klass] }],
+      },
+      now: () => '2026-07-01T10:05:00.000Z',
+    });
+    assert.doesNotMatch(
+      output,
+      new RegExp(`suggested action: ${fallback}`),
+      `class "${klass}" falls back to the generic hint; add a SUGGESTIONS entry`,
+    );
+  }
 });
 
 test('error text output reports snapshot-preserving failure', () => {
