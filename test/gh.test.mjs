@@ -14,6 +14,7 @@ function prNode(over = {}) {
     reviewDecision: 'REVIEW_REQUIRED',
     totalCommentsCount: 2,
     headRefOid: 'sha1',
+    headRefName: 'feature/one',
     commits: {
       nodes: [
         {
@@ -151,6 +152,24 @@ test('normalizeIssue filters null elements from labels nodes', () => {
     ]);
   const rows = fetchIssues('o/r', { exec, horizonCutoff: null });
   assert.deepEqual(rows[0].labels, [{ name: 'worker' }]);
+});
+
+test('the PR query requests headRefName and normalizePr carries it (null when GitHub omits it)', () => {
+  let sentQuery = '';
+  const exec = (_cmd, args) => {
+    sentQuery = args.find((a) => a.startsWith('query=')) ?? '';
+    return page([prNode({ headRefName: 'feature/login' })]);
+  };
+  const rows = fetchPRs('o/r', { exec, horizonCutoff: null });
+  assert.ok(sentQuery.includes('headRefName'), 'PR GraphQL selection must request headRefName');
+  assert.equal(rows[0].headRefName, 'feature/login');
+
+  // A deleted head branch comes back as null from GitHub; normalize to null, never undefined.
+  const deleted = fetchPRs('o/r', {
+    exec: () => page([prNode({ headRefName: null })]),
+    horizonCutoff: null,
+  });
+  assert.equal(deleted[0].headRefName, null);
 });
 
 test('normalizePr filters null elements from statusCheckRollup contexts nodes', () => {
