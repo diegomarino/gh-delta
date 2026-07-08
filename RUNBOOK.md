@@ -180,24 +180,24 @@ developer polling loops or webhook-driven automation.
 
 ## Delta Classes
 
-| class                         | typical orchestrator action                                                                                                         |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `new` (PR)                    | a worker opened a PR; read it and queue review                                                                                      |
-| `first-seen`                  | first observed non-open item; inspect it before treating it as newly created                                                        |
+| class                         | typical orchestrator action                                                                                                                                       |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `new` (PR)                    | a worker opened a PR; read it and queue review                                                                                                                    |
+| `first-seen`                  | first observed non-open item; inspect it before treating it as newly created                                                                                      |
 | `ci-changed`                  | CI green: consider merge path; CI red: nudge worker with the failure (with `--format json --detail`, the delta's `ci` detail names the exact checks that changed) |
 | `review-changed`              | approved: merge candidate; changes requested: relay to worker (with `--format json --detail`, the `reviews` detail names the reviewers and state transitions)     |
-| `became-mergeable`            | conflicts resolved; merge candidate                                                                                                 |
-| `merged` / `closed`           | slice done; advance build order or sync spawn base                                                                                  |
-| `new-comments`                | read PR threads; fold review comments before merge                                                                                  |
-| `unresolved-threads-added`    | unresolved review threads appeared; resolve before merge                                                                            |
-| `unresolved-threads-resolved` | review threads resolved; re-check CI and review state                                                                               |
-| `review-threads-changed`      | review thread activity changed; inspect before acting                                                                               |
-| `relabeled`                   | scope or state change on an issue; reassess dispatch                                                                                |
-| `missing`                     | open item disappeared from fetch; check pagination, permissions, or scope                                                           |
-| `still-missing`               | open item remains absent (tick 2); unresolved operational issue, not a fresh delta                                                  |
-| `presumed-deleted`            | absent for 3 consecutive ticks; treat as gone; verify on GitHub if unexpected; no further ticks will mention it unless it reappears |
-| `updated`                     | catch-all (`updatedAt` or head-only); inspect GitHub before dismissing                                                              |
-| `reappeared`                  | object returned after prior `missing`; check why it vanished before acting                                                          |
+| `became-mergeable`            | conflicts resolved; merge candidate                                                                                                                               |
+| `merged` / `closed`           | slice done; advance build order or sync spawn base                                                                                                                |
+| `new-comments`                | read PR threads; fold review comments before merge                                                                                                                |
+| `unresolved-threads-added`    | unresolved review threads appeared; resolve before merge                                                                                                          |
+| `unresolved-threads-resolved` | review threads resolved; re-check CI and review state                                                                                                             |
+| `review-threads-changed`      | review thread activity changed; inspect before acting                                                                                                             |
+| `relabeled`                   | scope or state change on an issue; reassess dispatch                                                                                                              |
+| `missing`                     | open item disappeared from fetch; check pagination, permissions, or scope                                                                                         |
+| `still-missing`               | open item remains absent (tick 2); unresolved operational issue, not a fresh delta                                                                                |
+| `presumed-deleted`            | absent for 3 consecutive ticks; treat as gone; verify on GitHub if unexpected; no further ticks will mention it unless it reappears                               |
+| `updated`                     | catch-all (`updatedAt` or head-only); inspect GitHub before dismissing                                                                                            |
+| `reappeared`                  | object returned after prior `missing`; check why it vanished before acting                                                                                        |
 
 ## Operating Rules
 
