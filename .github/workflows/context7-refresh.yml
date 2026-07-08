@@ -30,8 +30,16 @@ jobs:
             echo "CONTEXT7_API_KEY secret not set; skipping Context7 refresh."
             exit 0
           fi
-          curl -fsS -X POST https://context7.com/api/v1/refresh \
+          # Best-effort docs sync: capture status + body, never fail the release
+          # pipeline over a refresh hiccup (cooldown, outage) — warn and move on.
+          code=$(curl -sS -o /tmp/c7.out -w '%{http_code}' \
+            -X POST https://context7.com/api/v1/refresh \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $CONTEXT7_API_KEY" \
-            -d '{"libraryName": "/${{ github.repository }}"}'
-          echo "Requested Context7 refresh for /${{ github.repository }}"
+            -d '{"libraryName": "/${{ github.repository }}"}')
+          echo "HTTP $code"
+          echo "Response: $(cat /tmp/c7.out)"
+          case "$code" in
+            2*) echo "Context7 refresh requested for /${{ github.repository }}" ;;
+            *) echo "::warning::Context7 refresh returned HTTP $code (non-fatal)" ;;
+          esac
