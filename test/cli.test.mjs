@@ -982,6 +982,53 @@ test('the CLI threads the snapshot horizon into fetchers and stamps a new one', 
   assert.equal(d.written.meta.horizon, '2026-07-01T12:00:00.000Z');
 });
 
+test('--detail reports the current missing tick for still-missing', () => {
+  const d = {
+    fetchPRs: () => [],
+    fetchIssues: () => [],
+    readSnapshot: () => ({
+      pr: {
+        42: {
+          state: 'OPEN',
+          updatedAt: '2026-07-01T10:00:00Z',
+          isDraft: false,
+          ci: 'da39a3ee5e6b',
+          review: 'REVIEW_REQUIRED',
+          reviews: 'da39a3ee5e6b',
+          mergeable: 'UNKNOWN',
+          comments: 0,
+          head: 'sha1',
+          missing: true,
+          missingTicks: 1,
+        },
+      },
+      issue: {},
+    }),
+    writeSnapshotAtomic: (_p, data) => {
+      d.written = data;
+    },
+    now: () => '2026-07-01T12:00:00.000Z',
+  };
+  const { code, report } = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/x.json',
+      '--entities',
+      'pr',
+      '--detail',
+    ],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.deepEqual(report.deltas[0].classes, ['still-missing']);
+  assert.equal(report.deltas[0].missingTicks, 2);
+  assert.equal(report.deltas[0].details[0].missingTicks, 2);
+});
+
 test('mixed-case --repo shares one snapshot and one eventId space', async () => {
   const { runWithOutpost } = await import('../lib/cli.mjs');
   const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {

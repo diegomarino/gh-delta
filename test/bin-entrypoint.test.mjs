@@ -46,6 +46,7 @@ test('gh-delta/contract exposes the runtime contract constants', async () => {
   assert.equal(contract.REPORT_SCHEMA_VERSION, 1);
   assert.equal(contract.OUTPOST_SCHEMA_VERSION, 1);
   assert.ok(Object.isFrozen(contract.DELTA_CLASSES));
+  assert.ok(contract.DELTA_CLASSES.includes('first-seen'));
   assert.ok(contract.DELTA_CLASSES.includes('presumed-deleted'));
   assert.ok(Object.isFrozen(contract.REPORT_FIELDS));
   assert.ok(contract.REPORT_FIELDS.includes('warnings'));

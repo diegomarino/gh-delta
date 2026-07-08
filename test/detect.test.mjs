@@ -34,6 +34,16 @@ test('a brand-new PR after baseline emits `new`', () => {
   assert.deepEqual(r.deltas[0].classes, ['new']);
 });
 
+test('a first-observed closed PR emits first-seen instead of new', () => {
+  const base = detectDeltas(null, { pr: [], issue: [] });
+  const r = detectDeltas(base.snapshot, {
+    pr: [pr({ state: 'MERGED', updatedAt: '2026-07-01T09:00:00Z' })],
+    issue: [],
+  });
+  assert.equal(r.deltas.length, 1);
+  assert.deepEqual(r.deltas[0].classes, ['first-seen']);
+});
+
 test('OPEN → MERGED emits `merged`, not `closed`', () => {
   const base = detectDeltas(null, { pr: [pr()], issue: [] });
   const r = detectDeltas(base.snapshot, {
@@ -204,6 +214,7 @@ test('objects missing from a fetched collection emit missing and are retained', 
   assert.equal(r.deltas.length, 1);
   assert.equal(r.deltas[0].entity, 'pr');
   assert.deepEqual(r.deltas[0].classes, ['missing']);
+  assert.equal(r.deltas[0].missingTicks, 1);
   assert.equal(r.deltas[0].to, null);
   assert.ok(r.snapshot.pr['42']);
   assert.equal(r.snapshot.pr['42'].missing, true);
@@ -214,6 +225,7 @@ test('objects still missing emit still-missing after the first missing tick', ()
   const missing = detectDeltas(base.snapshot, { pr: [], issue: [] });
   const still = detectDeltas(missing.snapshot, { pr: [], issue: [] });
   assert.deepEqual(still.deltas[0].classes, ['still-missing']);
+  assert.equal(still.deltas[0].missingTicks, 2);
 });
 
 test('a missing object that reappears unchanged emits reappeared', () => {
@@ -268,8 +280,10 @@ test('missing demotes to presumed-deleted on the third absent tick, then goes si
   assert.equal(t1.snapshot.pr['42'].missingTicks, 1);
   const t2 = detectDeltas(t1.snapshot, { pr: [], issue: [] });
   assert.deepEqual(t2.deltas[0].classes, ['still-missing']);
+  assert.equal(t2.deltas[0].missingTicks, 2);
   const t3 = detectDeltas(t2.snapshot, { pr: [], issue: [] });
   assert.deepEqual(t3.deltas[0].classes, ['presumed-deleted']);
+  assert.equal(t3.deltas[0].missingTicks, 3);
   const t4 = detectDeltas(t3.snapshot, { pr: [], issue: [] });
   assert.deepEqual(t4.deltas, []);
   assert.equal(t4.snapshot.pr['42'].missing, true); // memory intact
