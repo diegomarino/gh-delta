@@ -3,9 +3,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   canonicalizeCiRollup,
+  comparableFingerprint,
   hashReviews,
   prFingerprint,
   issueFingerprint,
+  summarizeCiRollup,
+  summarizeReviews,
 } from '../lib/fingerprint.mjs';
 
 test('canonicalizeCiRollup is order-independent', () => {
@@ -26,6 +29,69 @@ test('canonicalizeCiRollup changes when a conclusion changes', () => {
 test('canonicalizeCiRollup handles StatusContext shape (context/state)', () => {
   const rollup = [{ context: 'ci/circleci', state: 'SUCCESS' }];
   assert.equal(typeof canonicalizeCiRollup(rollup), 'string');
+});
+
+test('summarizeCiRollup normalizes both rollup shapes into sorted named rows', () => {
+  const rollup = [
+    { name: 'lint', status: 'COMPLETED', conclusion: 'FAILURE' },
+    { context: 'ci/circleci', state: 'SUCCESS' },
+    { name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' },
+  ];
+  assert.deepEqual(summarizeCiRollup(rollup), [
+    { name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { name: 'ci/circleci', status: 'SUCCESS', conclusion: 'SUCCESS' },
+    { name: 'lint', status: 'COMPLETED', conclusion: 'FAILURE' },
+  ]);
+  assert.deepEqual(summarizeCiRollup(), []);
+});
+
+test('canonicalizeCiRollup digests are frozen across the summary refactor', () => {
+  // Digests persisted by pre-summary snapshots; a change here would emit a
+  // phantom ci-changed delta for every PR on upgrade.
+  assert.equal(canonicalizeCiRollup([]), 'da39a3ee5e6b');
+  assert.equal(
+    canonicalizeCiRollup([{ name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' }]),
+    '53d176557e2f',
+  );
+});
+
+test('summarizeReviews extracts compact sorted author/state rows', () => {
+  const reviews = [
+    {
+      id: 'r2',
+      submittedAt: '2026-07-01T11:00:00Z',
+      author: { login: 'bob' },
+      state: 'COMMENTED',
+      commit: { oid: 'c2' },
+    },
+    {
+      id: 'r1',
+      submittedAt: '2026-07-01T10:00:00Z',
+      author: { login: 'alice' },
+      state: 'APPROVED',
+      commit: { oid: 'c1' },
+    },
+  ];
+  assert.deepEqual(summarizeReviews(reviews), [
+    { author: 'alice', state: 'APPROVED', submittedAt: '2026-07-01T10:00:00Z', commit: 'c1' },
+    { author: 'bob', state: 'COMMENTED', submittedAt: '2026-07-01T11:00:00Z', commit: 'c2' },
+  ]);
+  assert.deepEqual(summarizeReviews(), []);
+});
+
+test('comparableFingerprint drops the detail-only summaries', () => {
+  const fp = prFingerprint({
+    state: 'OPEN',
+    updatedAt: '2026-07-01T10:00:00Z',
+    statusCheckRollup: [{ name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+    latestReviews: [{ author: { login: 'alice' }, state: 'APPROVED' }],
+  });
+  const comparable = comparableFingerprint(fp);
+  assert.equal('ciChecks' in comparable, false);
+  assert.equal('reviewSummary' in comparable, false);
+  // A pre-summary snapshot of the same PR must compare equal to a current one.
+  const { ciChecks: _ci, reviewSummary: _reviews, ...legacy } = fp;
+  assert.deepEqual(comparableFingerprint(legacy), comparable);
 });
 
 test('hashReviews is order-independent and reflects state', () => {
@@ -88,6 +154,10 @@ test('prFingerprint extracts the tracked fields', () => {
   assert.equal(fp.unresolvedReviewThreads, 2);
   assert.equal(fp.head, 'abc123');
   assert.equal(typeof fp.ci, 'string');
+  assert.deepEqual(fp.ciChecks, [{ name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' }]);
+  assert.deepEqual(fp.reviewSummary, [
+    { author: 'alice', state: 'APPROVED', submittedAt: '', commit: '' },
+  ]);
 });
 
 test('prFingerprint reads exact totals beyond the old 100 cap', () => {

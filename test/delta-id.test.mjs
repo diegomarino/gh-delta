@@ -88,8 +88,16 @@ test('deltaIdentity keys on `to` (comparable) when the entity was observed', () 
     number: 42,
     classes: ['ci-changed'],
     from: { state: 'OPEN' },
-    // churn fields must be stripped so identity is stable
-    to: { state: 'OPEN', missing: false, missingTicks: 0, commentsOverflow: false },
+    // churn and detail-only summary fields must be stripped so identity is
+    // stable across versions and monitors
+    to: {
+      state: 'OPEN',
+      missing: false,
+      missingTicks: 0,
+      commentsOverflow: false,
+      ciChecks: [{ name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+      reviewSummary: [],
+    },
   });
   assert.deepEqual(identity, { repo: 'o/r', entity: 'pr', number: 42, to: { state: 'OPEN' } });
 });

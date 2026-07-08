@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { run, runCommand } from '../lib/cli.mjs';
+import { prFingerprint } from '../lib/fingerprint.mjs';
 
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -211,6 +212,104 @@ test('--detail keeps line compatibility and adds structured class details', () =
       delta: 2,
     },
   ]);
+});
+
+test('--detail names the exact checks and reviews that changed when the snapshot carries summaries', () => {
+  const before = {
+    ...basePr,
+    statusCheckRollup: [
+      { name: 'build', status: 'COMPLETED', conclusion: 'FAILURE' },
+      { name: 'docs', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    ],
+    reviewDecision: 'CHANGES_REQUESTED',
+    latestReviews: [
+      {
+        id: 'r1',
+        submittedAt: '2026-07-01T09:00:00Z',
+        author: { login: 'alice' },
+        state: 'CHANGES_REQUESTED',
+        commit: { oid: 'c1' },
+      },
+    ],
+  };
+  const after = {
+    ...basePr,
+    updatedAt: '2026-07-01T11:00:00Z',
+    statusCheckRollup: [
+      { name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' },
+      { name: 'lint', status: 'IN_PROGRESS', conclusion: '' },
+    ],
+    reviewDecision: 'APPROVED',
+    latestReviews: [
+      {
+        id: 'r2',
+        submittedAt: '2026-07-01T10:30:00Z',
+        author: { login: 'alice' },
+        state: 'APPROVED',
+        commit: { oid: 'c2' },
+      },
+      {
+        id: 'r3',
+        submittedAt: '2026-07-01T10:31:00Z',
+        author: { login: 'bob' },
+        state: 'COMMENTED',
+        commit: { oid: 'c2' },
+      },
+    ],
+  };
+  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--detail'],
+    d,
+  );
+  assert.equal(code, 10);
+  const details = report.deltas[0].details;
+
+  const ci = details.find((row) => row.class === 'ci-changed');
+  assert.equal(ci.opaque, undefined);
+  assert.deepEqual(ci.added, [{ name: 'lint', status: 'IN_PROGRESS', conclusion: '' }]);
+  assert.deepEqual(ci.removed, [{ name: 'docs', status: 'COMPLETED', conclusion: 'SUCCESS' }]);
+  assert.deepEqual(ci.changed, [
+    {
+      name: 'build',
+      from: { status: 'COMPLETED', conclusion: 'FAILURE' },
+      to: { status: 'COMPLETED', conclusion: 'SUCCESS' },
+    },
+  ]);
+
+  const reviews = details.find((row) => row.field === 'reviews');
+  assert.equal(reviews.opaque, undefined);
+  assert.deepEqual(reviews.added, [
+    { author: 'bob', state: 'COMMENTED', submittedAt: '2026-07-01T10:31:00Z', commit: 'c2' },
+  ]);
+  assert.deepEqual(reviews.removed, []);
+  assert.deepEqual(reviews.changed, [
+    {
+      author: 'alice',
+      from: { state: 'CHANGES_REQUESTED', submittedAt: '2026-07-01T09:00:00Z', commit: 'c1' },
+      to: { state: 'APPROVED', submittedAt: '2026-07-01T10:30:00Z', commit: 'c2' },
+    },
+  ]);
+  const decision = details.find((row) => row.field === 'review');
+  assert.deepEqual(decision, {
+    class: 'review-changed',
+    field: 'review',
+    from: 'CHANGES_REQUESTED',
+    to: 'APPROVED',
+  });
+});
+
+test('pre-summary snapshots upgrade without phantom deltas and persist summaries', () => {
+  const { ciChecks: _ci, reviewSummary: _reviews, ...legacy } = prFingerprint(basePr);
+  const d = deps([[basePr]], { existing: { pr: { 42: legacy }, issue: {} } });
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'],
+    d,
+  );
+  assert.equal(code, 0);
+  assert.deepEqual(report.deltas, []);
+  assert.deepEqual(d.stored.pr['42'].ciChecks, []);
+  assert.deepEqual(d.stored.pr['42'].reviewSummary, []);
 });
 
 test('--help returns usage text without fetching GitHub', () => {
