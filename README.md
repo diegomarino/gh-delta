@@ -110,10 +110,11 @@ the [Usage Guide](docs/usage.md). For the exact CLI contract, use
   deltas. Error behavior is specified in [Exit Codes](docs/contract.md#exit-codes).
 - `--format json` is the machine contract. `--format text` is an operator log
   format.
-- `gh-delta list` is a read-only inventory of the monitors that have run
-  against a state directory — which repo, monitor id, and entities, when each
-  last ran, and whether its snapshot is healthy. It never contacts GitHub and
-  never touches snapshots.
+- `gh-delta list` is a read-only inventory of the monitors that have run on
+  this machine — which repo, monitor id, and entities, when each last ran, and
+  whether its snapshot is healthy. Every successful run leaves a best-effort
+  registry breadcrumb (opt out with `--no-registry`) so `list` sees monitors in
+  any state location. It never contacts GitHub and never touches snapshots.
 
 Exact CLI flags, report fields, delta classes, snapshot semantics, and outpost
 payloads live in [docs/contract.md](docs/contract.md).

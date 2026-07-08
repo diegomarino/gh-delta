@@ -6,6 +6,7 @@ import { mkdtempSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { listMonitors, parseSince, parseSnapshotFilename } from '../lib/list.mjs';
+import { registerMonitor } from '../lib/registry.mjs';
 import { snapshotPath, writeSnapshotAtomic } from '../lib/snapshot.mjs';
 
 const NOW = '2026-07-08T12:00:00.000Z';
@@ -125,4 +126,89 @@ test('listMonitors treats a missing directory as an empty inventory', () => {
     monitors: [],
     skippedFiles: 0,
   });
+});
+
+test('listMonitors identifies self-describing snapshots with arbitrary filenames', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-list-'));
+  writeSnapshotAtomic(join(dir, 'my-private-monitor.json'), {
+    pr: { 5: { state: 'OPEN' } },
+    issue: {},
+    meta: {
+      horizon: '2026-07-08T11:00:00.000Z',
+      repo: 'o/r',
+      monitorId: 'prs-fast',
+      entities: ['pr'],
+    },
+  });
+
+  const { monitors, skippedFiles } = listMonitors(dir, { now: () => NOW });
+  assert.equal(skippedFiles, 0);
+  assert.equal(monitors.length, 1);
+  assert.equal(monitors[0].repo, 'o/r');
+  assert.equal(monitors[0].monitorId, 'prs-fast');
+  assert.deepEqual(monitors[0].entities, ['pr']);
+  assert.equal(monitors[0].prCount, 1);
+});
+
+test('listMonitors merges the registry, dedupes scanned paths, and marks stale entries', () => {
+  const stateDir = mkdtempSync(join(tmpdir(), 'gd-list-'));
+  const elsewhere = mkdtempSync(join(tmpdir(), 'gd-elsewhere-'));
+  const registryDir = mkdtempSync(join(tmpdir(), 'gd-reg-'));
+  const env = { GH_DELTA_REGISTRY_DIR: registryDir };
+
+  // Monitor A: derived snapshot inside the scanned dir, also registered.
+  const scanned = seed(stateDir, 'o/r', 'prs-5m', 'pr', {
+    pr: { 1: { state: 'OPEN' } },
+    issue: {},
+    meta: { horizon: '2026-07-08T11:00:00.000Z' },
+  });
+  registerMonitor({
+    repo: 'o/r',
+    monitorId: 'prs-5m',
+    entities: ['pr'],
+    stateFile: scanned,
+    lastRun: '2026-07-08T11:00:00.000Z',
+    env,
+  });
+  // Monitor B: --state-file snapshot outside the scanned dir, known via registry.
+  const external = join(elsewhere, 'private.json');
+  writeSnapshotAtomic(external, {
+    pr: {},
+    issue: { 9: { state: 'OPEN' } },
+    meta: { horizon: '2026-07-08T10:00:00.000Z' },
+  });
+  registerMonitor({
+    repo: 'o/other',
+    monitorId: 'issues',
+    entities: ['issue'],
+    stateFile: external,
+    lastRun: '2026-07-08T09:59:00.000Z',
+    env,
+  });
+  // Monitor C: registered, but its snapshot no longer exists.
+  registerMonitor({
+    repo: 'o/gone',
+    monitorId: 'retired',
+    entities: ['pr'],
+    stateFile: join(elsewhere, 'deleted.json'),
+    lastRun: '2026-07-08T08:00:00.000Z',
+    env,
+  });
+
+  const { monitors } = listMonitors(stateDir, { now: () => NOW, registryDir });
+  assert.deepEqual(
+    monitors.map((m) => [
+      m.repo,
+      m.monitorId,
+      m.lastRun,
+      m.prCount,
+      m.issueCount,
+      m.stale ?? false,
+    ]),
+    [
+      ['o/r', 'prs-5m', '2026-07-08T11:00:00.000Z', 1, 0, false],
+      ['o/other', 'issues', '2026-07-08T10:00:00.000Z', 0, 1, false],
+      ['o/gone', 'retired', '2026-07-08T08:00:00.000Z', null, null, true],
+    ],
+  );
 });

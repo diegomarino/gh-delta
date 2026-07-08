@@ -1,6 +1,9 @@
 // CLI contract tests: exit codes, snapshot safety, and user-facing detail output.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+
+// Tests must never leave breadcrumbs in the developer's real run registry.
+process.env.GH_DELTA_NO_REGISTRY = '1';
 import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1243,4 +1246,87 @@ test('list --format text reports an empty inventory and echoes the window', asyn
   assert.match(windowed.output, /No monitor snapshots ran in the last 1h\./);
   const bare = await runCommand(['list', '--state-dir', '/state', '--format', 'text'], d);
   assert.match(bare.output, /No monitor snapshots found\./);
+});
+
+test('a successful run leaves an idempotent registry breadcrumb', () => {
+  const d = deps([[basePr]]);
+  const registered = [];
+  d.registerMonitor = (entry) => registered.push(entry);
+  d.env = {};
+  const { code } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--entities', 'pr'],
+    d,
+  );
+  assert.equal(code, 0);
+  assert.equal(registered.length, 1);
+  assert.equal(registered[0].repo, 'o/r');
+  assert.equal(registered[0].monitorId, 'main');
+  assert.deepEqual(registered[0].entities, ['pr']);
+  assert.equal(registered[0].stateFile, '/tmp/x.json');
+  assert.equal(registered[0].lastRun, '2026-07-01T12:00:00Z');
+});
+
+test('--no-registry and GH_DELTA_NO_REGISTRY both skip the breadcrumb', () => {
+  for (const args of [
+    { argv: ['--no-registry'], env: {} },
+    { argv: [], env: { GH_DELTA_NO_REGISTRY: '1' } },
+  ]) {
+    const d = deps([[basePr]]);
+    d.registerMonitor = () => {
+      throw new Error('must not be called');
+    };
+    d.env = args.env;
+    const { code } = run(
+      ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', ...args.argv],
+      d,
+    );
+    assert.equal(code, 0);
+  }
+});
+
+test('a registry write failure never changes the run result', () => {
+  const d = deps([[basePr]]);
+  d.registerMonitor = () => {
+    throw new Error('EACCES: registry dir unwritable');
+  };
+  d.env = {};
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'],
+    d,
+  );
+  assert.equal(code, 0);
+  assert.equal(report.baseline, true);
+  assert.equal(d.writes, 1);
+});
+
+test('snapshots are self-describing: meta carries identity next to horizon', () => {
+  const d = deps([[basePr]]);
+  run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--entities', 'pr'],
+    d,
+  );
+  assert.deepEqual(d.stored.meta, {
+    horizon: '2026-07-01T12:00:00Z',
+    repo: 'o/r',
+    monitorId: 'main',
+    entities: ['pr'],
+  });
+});
+
+test('list without --state-dir consults the run registry; --state-dir narrows to a scan', () => {
+  const captured = [];
+  const d = {
+    now: () => '2026-07-08T12:00:00.000Z',
+    env: { GH_DELTA_REGISTRY_DIR: '/reg' },
+    listMonitors: (stateDir, options) => {
+      captured.push([stateDir, options.registryDir]);
+      return { monitors: [], skippedFiles: 0 };
+    },
+  };
+  const global = run(['list'], d);
+  assert.equal(global.report.registryDir, '/reg');
+  assert.equal(captured[0][1], '/reg');
+  const narrowed = run(['list', '--state-dir', '/state'], d);
+  assert.equal(narrowed.report.registryDir, null);
+  assert.deepEqual(captured[1], ['/state', null]);
 });

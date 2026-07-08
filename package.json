@@ -21,6 +21,9 @@
     "./outpost": {
       "import": "./lib/outpost.mjs"
     },
+    "./registry": {
+      "import": "./lib/registry.mjs"
+    },
     "./snapshot": {
       "import": "./lib/snapshot.mjs"
     },
