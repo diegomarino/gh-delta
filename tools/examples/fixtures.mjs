@@ -29,6 +29,7 @@ const pr42 = withId({
   entity: 'pr',
   number: 42,
   title: 'Add billing webhook',
+  headRefName: 'feature/billing-webhook',
   classes: ['ci-changed', 'review-changed'],
   from: {
     state: 'OPEN',

@@ -177,6 +177,7 @@ Success reports (exit `0` and `10`):
       "entity": "pr",
       "number": 42,
       "title": "Add widget",
+      "headRefName": "feature/add-widget",
       "classes": ["new-comments"],
       "from": { "state": "OPEN", "comments": 1 },
       "to": { "state": "OPEN", "comments": 3 },
@@ -239,6 +240,22 @@ Each delta:
 - `number` (number), `title` (string): GitHub identity. For `missing` /
   `still-missing` / `presumed-deleted` deltas `title` is the sentinel string
   `"(missing from current fetch)"`, not the real title.
+- `headRefName` (string): **PR deltas only** — the PR's head branch name,
+  contextual metadata symmetric with `title`. It is **not** a change signal:
+  renaming the branch alone never produces a delta. GitHub keeps `headRefName`
+  (a non-null `String!`) even after the branch is deleted at merge, so it is
+  effectively always a non-empty string on PR deltas that have a current object
+  (`new`, `first-seen`, `reappeared`, and normal-change classes) — a `merged`
+  delta still carries its (now-deleted) branch, so you can route on it. **Absent**
+  on `missing` / `still-missing` / `presumed-deleted` (no current object) and on
+  all issue deltas. Lets a consumer route or group by branch without a second
+  GitHub round-trip.
+
+  > Note: gh-delta does **not** signal branch deletion — deletion changes neither
+  > `headRefName` nor `headRefOid` (both retained by GitHub) and is not
+  > fingerprinted, so it produces no delta. The field is purely "which branch",
+  > never "does the branch still exist".
+
 - `classes` (string[]): non-empty set of [classes](#delta-classes).
 - `from`, `to`: entity [fingerprints](#fingerprint-fields), or `null`. `from` is
   `null` when `classes` includes `new` or `first-seen`; `to` is `null` when
@@ -418,6 +435,7 @@ sequenceDiagram
   "entity": "pr",
   "number": 42,
   "title": "Add widget",
+  "headRefName": "add-widget",
   "classes": ["new"],
   "state": "OPEN",
   "labels": [],
@@ -437,4 +455,8 @@ and identifies one delivery attempt. `gh-delta` does not provide reliable
 delivery, retries, an outbox, acknowledgement, or replay in `0.1`. Classes are
 sorted before they are joined into the ids, so semantic identity is independent
 of the order the classifier emitted them. PR payloads currently use an empty
-`labels` array because the PR fetch does not collect labels.
+`labels` array because the PR fetch does not collect labels. `headRefName` (the
+PR head branch name, retained by GitHub after the branch is deleted) mirrors the
+report delta exactly: present only on PR payloads that have a current object, and
+omitted from issue payloads and the missing lifecycle (`missing` /
+`still-missing` / `presumed-deleted`).

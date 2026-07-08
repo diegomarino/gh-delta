@@ -31,10 +31,13 @@ test('every example report covers exactly the frozen REPORT_FIELDS', () => {
   }
 });
 
-test('a fully enriched missing delta covers exactly the frozen DELTA_FIELDS', () => {
-  // --detail is the richest mode: it attaches summaryLine, line, and details.
-  // `missingTicks` only belongs to missing-lifecycle deltas, so use one here.
-  const delta = {
+test('fully enriched deltas jointly cover exactly the frozen DELTA_FIELDS', () => {
+  // No single delta carries every field: `missingTicks` is missing-lifecycle
+  // only (to === null, no current object), while `headRefName` is PR-only and
+  // only present when a current object exists (to !== null). They are mutually
+  // exclusive, so coverage is asserted over the union of a missing delta and a
+  // PR change delta. --detail is the richest mode (summaryLine, line, details).
+  const missing = {
     entity: 'pr',
     number: 42,
     title: '(missing from current fetch)',
@@ -43,13 +46,26 @@ test('a fully enriched missing delta covers exactly the frozen DELTA_FIELDS', ()
     from: { state: 'OPEN', missing: true, missingTicks: 1 },
     to: null,
   };
-  // `id` is attached at report assembly (with repo in scope), not by enrichDelta.
-  delta.id = deltaId(deltaIdentity('owner/repo', delta));
-  enrichDelta(delta, { summaryLine: true, legacyLine: true, details: true });
+  const change = {
+    entity: 'pr',
+    number: 7,
+    title: 'Add widget',
+    headRefName: 'feature/widget',
+    classes: ['new-comments'],
+    from: { state: 'OPEN', comments: 1 },
+    to: { state: 'OPEN', comments: 3 },
+  };
+  // `id` is attached at report assembly (with repo in scope), not by enrichDelta;
+  // attach it to both representative deltas so the union also covers `id`.
+  missing.id = deltaId(deltaIdentity('owner/repo', missing));
+  change.id = deltaId(deltaIdentity('owner/repo', change));
+  enrichDelta(missing, { summaryLine: true, legacyLine: true, details: true });
+  enrichDelta(change, { summaryLine: true, legacyLine: true, details: true });
+  const union = new Set([...keySet(missing), ...keySet(change)]);
   assert.deepEqual(
-    [...keySet(delta)].sort(),
+    [...union].sort(),
     [...DELTA_FIELDS].sort(),
-    'the detail fixture delta must exercise every contract delta field',
+    'the detail fixture deltas must jointly exercise every contract delta field',
   );
 });
 
@@ -65,6 +81,32 @@ test('every example delta carries the canonical content-addressed id', () => {
         deltaId(deltaIdentity(report.repo, delta)),
         `${name} #${delta.number} id must be the canonical hash of its identity`,
       );
+    }
+  }
+});
+
+test('PR example deltas carry headRefName; issue example deltas do not', () => {
+  // Guards the real fixtures fed to the cast/SVG renderers, so the shipped
+  // README artifacts cannot silently drift from the PR-only headRefName contract.
+  for (const [name, report] of Object.entries({ deltaReport, detailReport })) {
+    for (const delta of report.deltas) {
+      if (delta.entity === 'pr') {
+        assert.equal(
+          'headRefName' in delta,
+          true,
+          `${name} PR #${delta.number} must carry headRefName`,
+        );
+        assert.ok(
+          typeof delta.headRefName === 'string' || delta.headRefName === null,
+          `${name} PR #${delta.number} headRefName must be a string or null`,
+        );
+      } else {
+        assert.equal(
+          'headRefName' in delta,
+          false,
+          `${name} issue #${delta.number} must not carry headRefName`,
+        );
+      }
     }
   }
 });
