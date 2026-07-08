@@ -4,9 +4,13 @@ All notable changes to this package will be documented here.
 
 This project follows semantic versioning once published to npm.
 
-## 0.1.0 - Unreleased
+## 0.1.0 - 2026-07-08
 
 - Initial `gh-delta` detector CLI.
+- Classified first-observed closed/merged items as `first-seen` so a cold start
+  against a repo with history does not report them as newly created.
+- Validated snapshot `meta.horizon` and legacy `updatedAt` as ISO dates, failing
+  with exit 2 before fetching instead of computing a bogus incremental window.
 - Added one-shot JSON and text output through the single `gh-delta` CLI.
 - Added stable `--monitor-id` identity and monitor-scoped derived snapshot paths.
 - Added deterministic PR and issue delta classification.
