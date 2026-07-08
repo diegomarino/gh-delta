@@ -260,6 +260,11 @@ test('--help-json returns machine-readable help without fetching GitHub', () => 
   assert.equal(help.options.find((option) => option.name === '--monitor-id')?.required, false);
   assert.match(help.exitCodes.find((entry) => entry.code === 10)?.meaning ?? '', /Deltas found/);
   assert.deepEqual(help.output.formats, ['json', 'text']);
+  assert.deepEqual(help.stateConcurrency, {
+    sameStateFile: 'serialize',
+    overlapRisk: 'duplicate delta emission; last writer wins',
+    corruptionRisk: 'atomic writes prevent partial JSON snapshots',
+  });
 });
 
 test('--version returns package version without fetching GitHub', () => {

@@ -7,6 +7,7 @@
 // flagged (recommendation 6.1).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   REPORT_FIELDS,
   DELTA_FIELDS,
@@ -29,9 +30,18 @@ test('every example report covers exactly the frozen REPORT_FIELDS', () => {
   }
 });
 
-test('a fully enriched delta covers exactly the frozen DELTA_FIELDS', () => {
+test('a fully enriched missing delta covers exactly the frozen DELTA_FIELDS', () => {
   // --detail is the richest mode: it attaches summaryLine, line, and details.
-  const delta = clone(detailReport.deltas[0]);
+  // `missingTicks` only belongs to missing-lifecycle deltas, so use one here.
+  const delta = {
+    entity: 'pr',
+    number: 42,
+    title: '(missing from current fetch)',
+    classes: ['still-missing'],
+    missingTicks: 2,
+    from: { state: 'OPEN', missing: true, missingTicks: 1 },
+    to: null,
+  };
   enrichDelta(delta, { summaryLine: true, legacyLine: true, details: true });
   assert.deepEqual(
     [...keySet(delta)].sort(),
@@ -62,4 +72,16 @@ test('every emitted detail row stays within the frozen detail contract', () => {
       }
     }
   }
+});
+
+test('the GitHub Actions Slack example does not save corrupt snapshot state', () => {
+  const workflow = readFileSync(
+    new URL('../examples/github-actions-slack-digest/gh-delta-watch.yml', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(
+    workflow,
+    /name: Save snapshot state[\s\S]*if: \$\{\{ always\(\) && steps\.tick\.outputs\.code != '2' \}\}/,
+  );
 });

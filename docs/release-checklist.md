@@ -68,7 +68,7 @@ The package should contain exactly the files enumerated in `package.json#files`:
 
 - `gh-delta.mjs`;
 - `lib/*.mjs`;
-- `docs/architecture.md`, `docs/contract.md`, `docs/watch-loop-prompt.md`, `docs/release-checklist.md`;
+- `docs/architecture.md`, `docs/contract.md`, `docs/watch-loop-prompt.md`, `docs/release-checklist.md`, `docs/alternatives.md`, `docs/troubleshooting.md`;
 - `docs/img/` (the four generated SVGs: `demo.svg`, `usage.svg`, `text-output.svg`, `json-output.svg`);
 - `docs/entities-research/` (all real entity pages — `pr.md`, `issue.md`, `selectors.md`, etc., and the subtree `README.md`; **not** `_template.md`);
 - `README.md`;
@@ -81,6 +81,8 @@ It should not contain:
 
 - `test/`;
 - `.github/`;
+- `examples/` (source-repository documentation only; README links to the GitHub
+  copy);
 - `node_modules/`;
 - `coverage/`;
 - `state/`;

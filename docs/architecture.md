@@ -4,15 +4,21 @@
 state)` into a categorized delta report. It does not schedule itself, open
 browser sessions, merge pull requests, or send messages to workers.
 
-## Product boundaries (explicit)
+The exact public contract lives in [docs/contract.md](contract.md). This
+document explains the module boundaries, runtime flow, and rationale behind that
+contract without duplicating the canonical tables.
+
+## Product Boundaries
 
 `gh-delta` separates detection, delivery, and action:
 
 - Detection is authoritative for local comparison and exit-code signals.
-- Delivery is optional and best-effort (`--outpost-url`), warning-only on failure.
+- Delivery is optional and best-effort through `--outpost-url`.
 - Action planning and execution are always outside this package.
 
-Given identical input snapshot and fetch results, detection output is deterministic.
+Given identical input snapshot and fetch results, detection output is
+deterministic. Scheduling, retries around whole detector runs, queueing, and
+downstream decisions belong to the caller.
 
 ## Boundaries
 
@@ -31,21 +37,24 @@ flowchart LR
     Snap -. read/atomic write .-> FS[(snapshot file)]
 ```
 
-The public CLI is one one-shot command. `--format json` prints the structured
-report for programs. `--format text` prints an operator heartbeat and suggested
-actions for scheduled logs. Neither format creates schedules, timers,
-automations, or wake-ups.
+The public CLI is one one-shot command. JSON output is for programs; text output
+is for operator logs. Neither format creates schedules, timers, automations, or
+wake-ups.
 
-## Failure safety guarantees
+## Failure Safety
 
-- Snapshots are never updated on any error path. The exit code for each error
-  kind follows the taxonomy in [Exit Codes](contract.md#exit-codes).
-- Snapshot writes are atomic and only occur after a successful fetch+diff cycle.
-- Open-items fetch fails closed beyond 1 000 items (10 pages × 100) per family;
-  updated-items fetch fails closed beyond 3 000 items (30 pages × 100) per tick.
-  Per-item nested-pagination overflow is also a hard error.
-- Outpost transport errors are collected as warnings and never alter the detector
-  exit code.
+The design keeps failure modes conservative:
+
+- Argument and snapshot validation happen before writes.
+- Snapshots are not updated on error paths.
+- Snapshot writes are atomic for a single writer.
+- GitHub pagination overflow fails closed instead of silently truncating state.
+- Outpost transport failures are warnings and do not turn a successful detection
+  into a detector failure.
+
+The exact exit-code taxonomy and error report shape are specified in
+[Exit Codes](contract.md#exit-codes) and
+[Error Report Shape](contract.md#error-report-shape).
 
 ## Runtime Flow
 
@@ -60,34 +69,32 @@ process argv
   -> exit with the detector code
 ```
 
-Run control flow (argument validation through exit):
+Run control flow:
 
 ```mermaid
 flowchart TD
     A[argv] --> B{help / version?}
-    B -- yes --> B0[print doc → exit 0]
+    B -- yes --> B0[print doc and exit]
     B -- no --> C{strict parse ok?}
-    C -- no --> X2[exit 2 · config]
-    C -- yes --> D{--repo valid?}
+    C -- no --> X2[configuration error]
+    C -- yes --> D{repo and monitor valid?}
     D -- no --> X2
-    D -- yes --> E{"--monitor-id valid?<br/>(default host-hash if omitted)"}
+    D -- yes --> E{state flags valid?}
     E -- no --> X2
-    E -- yes --> F{state flags}
-    F -- both set --> X2
-    F -- neither --> G{temp dir owned by user?}
-    G -- no / mkdir fails --> X1[exit 1 · io]
-    G -- ok --> H
-    F -- one set --> H{entities · format · numeric flags valid?}
-    H -- no --> X2
-    H -- yes --> R{read snapshot}
-    R -- corrupt / bad shape --> X2s[exit 2 · snapshot]
-    R -- missing --> K[fetch GitHub]
-    R -- ok --> K
-    K -- gh error / page cap --> X1g[exit 1 · github]
-    K -- ok --> L[diff → write snapshot atomically]
-    L --> M{baseline or 0 deltas?}
-    M -- yes --> O0[exit 0]
-    M -- no --> O10[exit 10 → optional outpost POST per delta]
+    E -- yes --> F{read snapshot}
+    F -- corrupt / bad shape --> X2s[snapshot error]
+    F -- missing --> G[fetch GitHub]
+    F -- ok --> G
+    G -- gh error / overflow --> X1[transient error]
+    G -- ok --> H[diff]
+    H --> I[write snapshot atomically]
+    I --> J{deltas?}
+    J -- no --> K[exit no-delta / baseline]
+    J -- yes --> L[exit delta-found]
+    L --> M{outpost configured?}
+    M -- yes --> N[POST one payload per delta]
+    M -- no --> O[done]
+    N --> O
 ```
 
 Snapshot path selection:
@@ -97,25 +104,29 @@ validated args
   -> --state-file present
      -> use that exact path
   -> --state-dir present
-     -> derive <state-dir>/repo-<encoded repo>__monitor-<encoded monitor-id>__<entities>.json
+     -> derive a monitor-scoped path inside that directory
   -> neither present
-     -> derive <os.tmpdir()>/gh-delta-<encoded user>/repo-<encoded repo>__monitor-<encoded monitor-id>__<entities>.json
-     -> directory created with mode 0700 (per-user isolation on shared /tmp)
-     -> ownership guard on POSIX: uid mismatch → exit 1 (io)
+     -> derive a per-user path under the system temp directory
+     -> guard temp directory ownership on POSIX systems
 ```
 
 Outpost flow:
 
 ```text
 detector result
-  -> exit 0, 1, or 2
+  -> no deltas or error
      -> do not POST
-  -> exit 10 with --outpost-url
+  -> deltas with --outpost-url
      -> snapshot has already advanced
      -> POST one payload per delta
      -> collect delivery failures as warnings
-     -> keep detector exit code 10
+     -> keep the detector result authoritative
 ```
+
+Exact CLI flags, snapshot derivation rules, output fields, and outpost payloads
+are specified in [docs/contract.md](contract.md).
+
+## Module Responsibilities
 
 The core correctness logic is pure:
 
@@ -128,8 +139,8 @@ The impure edges are isolated:
 - `gh.mjs` shells out to `gh api graphql` for incremental GraphQL fetches.
 - `snapshot.mjs` performs filesystem I/O, derives monitor-scoped snapshot paths,
   and computes the incremental-fetch horizon cutoff.
-- `outpost.mjs` validates optional outpost URLs, builds schema v1 payloads, and
-  sends short-timeout HTTP POSTs.
+- `outpost.mjs` validates optional outpost URLs, builds payloads, and sends
+  short-timeout HTTP POSTs.
 - `text-output.mjs` formats heartbeat text and outpost warnings.
 - `version.mjs` reads package metadata for version output and help JSON.
 - `help.mjs` keeps human `--help` and machine-readable `--help-json` output in
@@ -143,24 +154,13 @@ The impure edges are isolated:
 
 ## Package Surface
 
-The npm package exposes one CLI and a small ESM import surface:
+The npm package exposes one CLI and a small explicit ESM import surface. The
+package root is intentionally not exported; supported programmatic imports use
+subpaths such as `gh-delta/detect` and `gh-delta/outpost`.
 
-- `gh-delta`: one-shot detector CLI.
-- `gh-delta/detect`: pure delta classification.
-- `gh-delta/fingerprint`: GitHub object fingerprint helpers.
-- `gh-delta/outpost`: outpost payload and delivery helpers.
-- `gh-delta/snapshot`: snapshot path/read/write helpers.
-- `gh-delta/args`: shared argument parsing helpers.
-- `gh-delta/version`: package metadata and version text helpers.
-- `gh-delta/contract`: runtime contract constants (`REPORT_SCHEMA_VERSION`,
-  `OUTPOST_SCHEMA_VERSION`), field catalogs (`REPORT_FIELDS`, `DELTA_FIELDS`,
-  `DELTA_DETAIL_FIELDS`, `DELTA_DETAIL_FIELDS_BY_CLASS`), delta classes, and
-  error kinds.
-
-The package root is intentionally not exported. `package.json#main` still points
-at `gh-delta.mjs` for metadata compatibility, but supported programmatic imports
-must use explicit subpaths. `lib/cli.mjs` remains an internal source module for
-the package bin and local tests, not a published package export.
+The canonical import list lives in
+[Programmatic API Surface](contract.md#programmatic-api-surface). Keeping it
+there avoids a second exports table drifting from `package.json`.
 
 Everything under `lib/` should stay dependency-free unless the added dependency
 materially improves correctness. The package currently has no runtime
@@ -172,194 +172,88 @@ dependencies.
 selector, interval, or execution id. Every scheduled fire for the same monitor
 should reuse the same `--monitor-id`.
 
-**Default derivation.** When `--monitor-id` is omitted, the CLI derives a
-per-machine default using a hashed hostname prefix; see [CLI](contract.md#cli)
-for the exact formula. Hashing serves two purposes: it keeps raw hostnames out
-of outpost payloads (where they would appear in `monitorId` and `eventId` fields),
-and it always produces a token that satisfies the monitor-id grammar regardless of
-hostname content. A hostname change — host rename, container rebuild, or CI runner
-with a per-job ephemeral hostname — yields a different hash and therefore a fresh
-baseline with no history.
+The repo slug is part of derived snapshot identity and outpost identity, so two
+monitors with the same monitor id but different repos remain independent.
 
-**Same id across repos is safe.** The repo slug is part of both the derived
-snapshot filename (`repo-<encoded>__monitor-<id>__<entities>.json`) and the
-outpost `eventId` (`gh-delta.delta.v1:<repo>:<monitorId>:...`). Two monitors with
-the same `--monitor-id` watching different repos never share a snapshot file or
-collide on `eventId`.
+The default monitor id is designed for zero-config local use. For CI, containers,
+renamed hosts, and durable automations, pass an explicit `--monitor-id` and
+state location so the watcher does not accidentally start a fresh baseline.
 
-With `--state-dir`, snapshot paths are derived from:
+Exact monitor-id grammar, default derivation, state-file behavior, and filename
+encoding are specified in [CLI](contract.md#cli) and
+[Snapshot Semantics](contract.md#snapshot-semantics).
 
-```text
-repo + monitor-id + entities
-```
+## GitHub Fetch Strategy
 
-Example:
-
-```text
-./state/repo-org%2Fapp__monitor-prs-5m__pr.json
-```
-
-When neither `--state-dir` nor `--state-file` is given, the default directory is:
-
-```text
-<os.tmpdir()>/gh-delta-<encoded user>/
-```
-
-and the snapshot path follows the same `repo-<encoded repo>__monitor-<encoded monitor-id>__<entities>.json`
-pattern inside it. This default is **ephemeral**: reboots or tmp cleanup silently
-re-seed the baseline. Scheduled or durable monitors must pass an explicit
-`--state-dir`.
-
-Filename segment encoding uses `encodeURIComponent` **with `_` additionally
-encoded as `%5F`** so that the `__` separator is unambiguous — derived names are
-injective for all valid CLI inputs. Library callers passing raw entity strings
-containing `__` to `snapshotPath` directly are outside this guarantee.
-
-`--state-file` bypasses path derivation for operators that need a fully explicit
-path. `--monitor-id` is still resolved (and defaults to the `host-` derivation
-when omitted) because reports and outpost event IDs use it.
-
-## GitHub Fetch Contract
-
-All fetches use `gh api graphql` with UPDATED_AT DESC pagination. There are no
+All fetches use `gh api graphql` with updated-at pagination. There are no
 `gh pr list` or `gh issue list` subprocess calls.
 
-**Incremental fetch strategy (per family: PR and issue):**
+Incremental fetch strategy per entity family:
 
 ```mermaid
 flowchart TD
-    A[fetch one family: PR or issue] --> C[Open-items phase: states=OPEN, UPDATED_AT DESC]
-    C --> D{"> 10 pages (1000 items)?"}
-    D -- yes --> E["exit 1: narrow scope / re-seed"]
-    D -- no --> F{prior snapshot exists?}
-    F -->|"no (baseline)"| Z[normalize + fingerprint]
-    F -- yes --> G["Updated-items phase: states=null (all), stop at horizon − 5 min"]
-    G --> H{"> 30 pages (3000 items)?"}
-    H -- yes --> E
-    H -- no --> I[merge — open-items phase wins on duplicate]
-    I --> J{nested sub-page overflow? CI / reviews / threads / labels}
-    J -- yes --> E
-    J -- no --> Z
+    A[fetch one family: PR or issue] --> B[open-items phase]
+    B --> C{open page cap exceeded?}
+    C -- yes --> X[fail closed]
+    C -- no --> D{prior snapshot exists?}
+    D -- no --> Z[normalize + fingerprint]
+    D -- yes --> E[updated-items phase from horizon overlap]
+    E --> F{updated page cap exceeded?}
+    F -- yes --> X
+    F -- no --> G[merge phases; open-items wins on duplicate]
+    G --> H{nested sub-page overflow?}
+    H -- yes --> X
+    H -- no --> Z
 ```
 
 Open-items results and updated-items results are merged: the open-items phase
-wins on duplicates (an open item appearing in both is only counted once from the
-open-items pass). The exact page-cap values and their exit codes are specified in
+wins on duplicates. Any nested pagination overflow is treated as incomplete
+state and fails closed. Exact page-cap values and exit behavior live in
 [Exit Codes](contract.md#exit-codes).
 
-**Fail-closed per-item nested pagination:** each PR node is checked for page
-overflow on `statusCheckRollup.contexts`, `latestReviews`, and `reviewThreads`.
-Each issue node is checked on `labels`. Any overflow is a hard error (exit `1`).
+Fingerprints track only the GitHub fields needed to detect the public delta
+classes. The class list and forward-compatibility policy live in
+[Delta Classes](contract.md#delta-classes).
 
-**Comment counts** come from GraphQL `totalCommentsCount` (PRs) and
-`comments { totalCount }` (issues) — exact integers with no cap or overflow flag.
+## Snapshot Persistence
 
-The PR fingerprint tracks:
+`snapshot.mjs` owns the local memory boundary. It reads the previous snapshot,
+provides the horizon used by incremental fetches, validates the next snapshot,
+and writes atomically beside the target before renaming into place.
 
-- state
-- updated timestamp
-- draft status
-- canonicalized CI rollup hash
-- review decision
-- latest review state hash
-- mergeability
-- exact comment total
-- review thread count
-- unresolved review thread count
-- head SHA
+Missing snapshots are treated as first runs. Invalid snapshots are permanent
+configuration problems, because silently replacing corrupt memory would erase the
+watcher's history.
 
-The issue fingerprint tracks:
-
-- state
-- updated timestamp
-- sorted labels
-- exact comment total
-
-## Snapshot Contract
-
-Snapshot JSON shape and field semantics are specified in
-[Snapshot Semantics](contract.md#snapshot-semantics). Internals below explain
-how `snapshot.mjs` manages the horizon and write guarantees.
-
-`meta.horizon` is stamped with the run timestamp on every successful write and
-used as the starting point for the incremental-fetch horizon (minus 5 minutes of
-overlap). Legacy snapshots without `meta` fall back to the newest `updatedAt`
-across stored fingerprints.
-
-Missing snapshots are treated as a first run (baseline). Corrupt snapshot JSON
-or an invalid shape is a permanent error: the command exits `2` and leaves the
-snapshot untouched. This prevents a corrupt file from silently erasing monitor
-memory.
-
-Write-side validation runs before the rename — a snapshot the reader would
-reject is never persisted. The temporary file is removed on rename failure to
-avoid leaving stray `.tmp` files.
-
-Writes are atomic for a single writer: the snapshot is written to a unique
-temporary file beside the target, then renamed into place. Do not run
-overlapping ticks against the same state file; use scheduler-level locking if
-overlap is possible.
+Do not run overlapping ticks against the same state file; use scheduler-level
+locking if overlap is possible. Atomic writes prevent partial JSON snapshots,
+but they do not make two concurrent detector passes a serialized workflow.
 
 Successful detections are at-most-once from the detector's perspective. The
 snapshot advances before an agent acts on deltas and before optional outpost
 delivery is attempted. Operators that need at-least-once action delivery should
-persist the detector output or add an external pending/ack queue.
+persist detector output or add an external pending/ack queue.
 
-## Outpost Contract
+Snapshot JSON shape and field semantics are specified in
+[Snapshot Semantics](contract.md#snapshot-semantics).
+
+## Outpost Edge
 
 `--outpost-url` is an optional edge on `gh-delta.mjs`. It is not part of
 `lib/detect.mjs`; the detector still only returns facts.
 
-The URL must be `http:` or `https:` and is validated before GitHub fetches begin.
-When the detector exits `10`, one schema v1 payload is POSTed per delta. No POST
-is attempted for exit `0`, `1`, or `2`.
+The outpost path is deliberately small: validate the endpoint, send one payload
+per delta after a successful detection, collect warnings, and leave the detector
+exit result unchanged. Authentication, retry policy, durable queues, endpoint
+filtering, dedupe, and action execution belong downstream.
 
-Outpost sends are deliberately minimal:
+The exact payload envelope and event identity semantics are specified in
+[Outpost Payload](contract.md#outpost-payload-schema-v1).
 
-- short timeout;
-- no retries;
-- no durable outbox;
-- no batching;
-- no HMAC or auth layer yet;
-- no logging of endpoint URLs, query strings, headers, or token material.
-
-Failures are warnings, not detector failures. A timeout, DNS failure, HTTP `4xx`,
-or HTTP `5xx` does not alter the detector exit code and does not cause another
-snapshot write.
-
-See [Outpost payload schema v1](contract.md#outpost-payload-schema-v1) for the full schema v1 envelope. `eventId` is deterministic from repo, monitor id, entity, number, and class list; `deliveryId` adds the detector timestamp for one delivery attempt. The external endpoint owns filtering, deduplication, and actions.
-
-## Error Contract
-
-The error kind → exit code mapping is defined in
-[Error Report Shape](contract.md#error-report-shape). In all error cases the
-snapshot is not written. This design prevents transient network or rate-limit
-failures (kind `github` or `io`) from erasing the previous known-good baseline,
-and permanent errors (kind `config` or `snapshot`) signal that human intervention
-is required before retrying.
-
-## Future Entity And Selector Research
+## Future Entity and Selector Research
 
 The public contract currently supports only `pr`, `issue`, and `pr,issue`.
 Research notes under `docs/entities-research/` inventory future entities and
 selector applicability. A selector such as `branch` must be validated per entity
 before it becomes public; for example, branch selectors can apply to commits or
 workflow runs, but not to issues.
-
-## Delta Classification
-
-Each changed object can emit one or more classes: see [Delta Classes](contract.md#delta-classes) for the full list.
-
-`updated` is the recall-over-precision fallback. It fires when the fingerprint
-changed but no more specific class matched.
-
-`missing` fires when an item the snapshot believes OPEN disappears from the
-fetch. Absent closed items are dormant memory, not a missing delta. The old
-fingerprint is retained so the watcher does not silently lose memory.
-
-`still-missing` fires on the second tick that the item remains absent. This lets
-agents distinguish first sighting from unresolved operational state.
-
-`presumed-deleted` fires on the third consecutive tick (terminal, emitted once).
-After that the item goes silent with memory intact: `missingTicks` increments but
-no delta is emitted. `reappeared` still fires if the item returns.

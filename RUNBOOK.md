@@ -183,6 +183,7 @@ developer polling loops or webhook-driven automation.
 | class                         | typical orchestrator action                                                                                                         |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `new` (PR)                    | a worker opened a PR; read it and queue review                                                                                      |
+| `first-seen`                  | first observed non-open item; inspect it before treating it as newly created                                                        |
 | `ci-changed`                  | CI green: consider merge path; CI red: nudge worker with the failure                                                                |
 | `review-changed`              | approved: merge candidate; changes requested: relay to worker                                                                       |
 | `became-mergeable`            | conflicts resolved; merge candidate                                                                                                 |
@@ -210,7 +211,9 @@ developer polling loops or webhook-driven automation.
   expose it to subagents.
 - Do not create another cron from inside a cron-owned tick.
 - Do not run overlapping ticks against the same state file. If your scheduler
-  can overlap jobs, add external locking or increase the interval.
+  can overlap jobs, add external locking or increase the interval. This rule is
+  also exposed in `gh-delta --help-json` as `stateConcurrency` for agent and
+  scheduler tooling.
 - If the command exits `1` with "exceeded N pages — narrow the monitor scope or
   re-seed the baseline", do exactly that before continuing. The tool fails closed
   rather than silently truncating. Open items are capped at 1 000 per family;

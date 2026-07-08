@@ -111,6 +111,7 @@ the array is not significant and not guaranteed stable.
 | Class                         | Applies to | Meaning                                                                                                                                                                                                                                                          |
 | ----------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `new`                         | pr, issue  | New issue or PR after the baseline. `from` is `null`.                                                                                                                                                                                                            |
+| `first-seen`                  | pr, issue  | First time this watcher observed a non-open item. It may predate the baseline; `from` is `null`, but consumers should not treat it as newly created.                                                                                                             |
 | `closed`                      | pr, issue  | Issue or PR was closed.                                                                                                                                                                                                                                          |
 | `reopened`                    | pr, issue  | Issue or PR was reopened (state returned to `OPEN`).                                                                                                                                                                                                             |
 | `new-comments`                | pr, issue  | Comment count increased.                                                                                                                                                                                                                                         |
@@ -230,8 +231,10 @@ Each delta:
   `"(missing from current fetch)"`, not the real title.
 - `classes` (string[]): non-empty set of [classes](#delta-classes).
 - `from`, `to`: entity [fingerprints](#fingerprint-fields), or `null`. `from` is
-  `null` when `classes` includes `new`; `to` is `null` when `classes` includes
-  `missing` or `still-missing`.
+  `null` when `classes` includes `new` or `first-seen`; `to` is `null` when
+  `classes` includes `missing`, `still-missing`, or `presumed-deleted`.
+- `missingTicks` (number): present on `missing`, `still-missing`, and
+  `presumed-deleted` deltas. It is the current consecutive absent tick.
 - `summaryLine` (string): present **only** with `--summary-line` or `--detail`.
   Human-readable; wording is not a stable machine contract.
 - `line` (string): present **only** with `--detail`. Backward-compatible alias of
@@ -354,7 +357,9 @@ stored fingerprints as the horizon.
 - **Do not run concurrent ticks against the same state file.** Writes are atomic
   (temp file + rename), which prevents corruption, but overlapping runs still
   race and one will clobber the other's result. Serialize ticks per
-  `(repo, monitor-id, entities)`.
+  `(repo, monitor-id, entities)`. The same rule is exposed in
+  `gh-delta --help-json` as `stateConcurrency` so agents and schedulers do not
+  need to parse Markdown to discover the overlap risk.
 
 ### schemaVersion policy
 

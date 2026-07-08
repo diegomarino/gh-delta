@@ -8,9 +8,24 @@ Pull requests are already part of the public `--entities` contract. This page
 tracks the broader data surface so future scope and filter decisions do not
 accidentally weaken the current missing-object and closed-state guarantees.
 
-## Fetch Surface
+## Current Implementation Fetch Surface
 
-Primary command(s):
+The detector's current implementation fetches PRs through `gh api graphql`, not
+through `gh pr list`. Keep this aligned with
+[`docs/architecture.md`](../architecture.md#github-fetch-contract).
+
+Current behavior:
+
+- open-items phase: GraphQL `UPDATED_AT` pagination for open PRs;
+- updated-items phase: GraphQL `UPDATED_AT` pagination across all PR states until
+  the prior snapshot horizon;
+- fail closed on page-cap overflow or nested connection overflow;
+- count review-thread state through GraphQL `reviewThreads`.
+
+## Historical GitHub CLI Field Discovery
+
+These commands were used to discover GitHub CLI JSON fields. They are research
+inputs, not the current detector fetch path.
 
 ```bash
 gh pr list -R <owner/repo> --state all --limit 500 --json <fields>
@@ -26,7 +41,8 @@ gh search prs --json <fields> -- <query>
 
 ## Discoverable JSON Fields
 
-Fields accepted by `gh pr list --json` and `gh pr view --json`:
+Fields accepted by `gh pr list --json` and `gh pr view --json` during field
+discovery:
 
 ```text
 additions
@@ -123,15 +139,13 @@ Fields to avoid or normalize:
 
 ## Pagination And Scope Notes
 
-Current behavior uses `--state all --limit 500` and fails closed when GitHub
-returns exactly 500 PRs. This is a correctness rule: filtering too early can make
-merged or closed PRs disappear and look like scope loss.
+Current behavior is GraphQL-only. It fails closed when page caps or nested
+connections would make the snapshot incomplete. This is a correctness rule:
+filtering too early can make merged or closed PRs disappear and look like scope
+loss.
 
-Current behavior also enriches open PRs through `gh api graphql --paginate
---slurp` to count `reviewThreads.totalCount` and unresolved threads via
-`reviewThreads.nodes[].isResolved`. It fails closed when a PR's nested
-`reviewThreads(first: 100)` connection has more pages because unresolved thread
-counts would otherwise be incomplete.
+Older research used `gh pr list --state all --limit 500`; keep that command in
+the historical field-discovery section only, not as current behavior.
 
 `gh search prs` is useful for research, but it is not an authoritative snapshot
 source for this detector until indexing, query, and missing-object semantics are

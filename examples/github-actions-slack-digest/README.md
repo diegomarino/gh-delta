@@ -16,7 +16,7 @@ npx gh-delta --format json --detail ── one deterministic tick
 jq digest ──> Slack incoming webhook ("gh-delta: 2 delta(s) in owner/repo …")
    │
    ▼
-actions/cache save (if: always())
+actions/cache save (skip exit 2)
 ```
 
 ## Install
@@ -39,6 +39,9 @@ actions/cache save (if: always())
   without hits. If the restore misses, the tick re-seeds a baseline and any
   deltas in the gap were never observed — the workflow surfaces that as a
   `::notice::` annotation instead of hiding it.
+- **Do not re-save corrupt state**: the cache save step still runs after normal
+  deltas and transient errors, but it skips exit `2` so a broken restored
+  snapshot is not persisted as the newest cache entry.
 - **Concurrency group**: two overlapping ticks would restore the same
   snapshot and both exit `10` for the same deltas — the group serializes them.
 

@@ -5,7 +5,6 @@ repo documentation — none ship in the npm package.
 
 | Example                                                     | Axis it demonstrates                         | Consumes                                         |
 | ----------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------ |
-| [orca-coordinator-relay](orca-coordinator-relay/)           | Local cron steering an agent in a TUI        | `--format text` + exit codes                     |
 | [github-actions-slack-digest](github-actions-slack-digest/) | Infra-owned scheduling in CI, chat digest    | `--format json --detail` + `actions/cache` state |
 | [outpost-ntfy-receiver](outpost-ntfy-receiver/)             | Push delivery to a phone                     | `--outpost-url` payload schema v1                |
 | [systemd-timer](systemd-timer/)                             | Init-system ops; exit taxonomy → unit states | `--format text` + `SuccessExitStatus`            |

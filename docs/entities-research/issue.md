@@ -8,9 +8,23 @@ Issues are already part of the public `--entities` contract. GitHub CLI exposes
 more issue fields than the current detector fingerprints, especially around
 issue hierarchy, blocking, and issue type.
 
-## Fetch Surface
+## Current Implementation Fetch Surface
 
-Primary command(s):
+The detector's current implementation fetches issues through `gh api graphql`,
+not through `gh issue list`. Keep this aligned with
+[`docs/architecture.md`](../architecture.md#github-fetch-contract).
+
+Current behavior:
+
+- open-items phase: GraphQL `UPDATED_AT` pagination for open issues;
+- updated-items phase: GraphQL `UPDATED_AT` pagination across all issue states
+  until the prior snapshot horizon;
+- fail closed on page-cap overflow or nested connection overflow.
+
+## Historical GitHub CLI Field Discovery
+
+These commands were used to discover GitHub CLI JSON fields. They are research
+inputs, not the current detector fetch path.
 
 ```bash
 gh issue list -R <owner/repo> --state all --limit 500 --json <fields>
@@ -25,7 +39,8 @@ gh search issues --json <fields> -- <query>
 
 ## Discoverable JSON Fields
 
-Fields accepted by `gh issue list --json` and `gh issue view --json`:
+Fields accepted by `gh issue list --json` and `gh issue view --json` during
+field discovery:
 
 ```text
 assignees
@@ -95,9 +110,12 @@ Fields to avoid or normalize:
 
 ## Pagination And Scope Notes
 
-Current behavior uses `--state all --limit 500` and fails closed when GitHub
-returns exactly 500 issues. This keeps closed issues observable and avoids
-silently erasing snapshot memory.
+Current behavior is GraphQL-only. It fails closed when page caps would make the
+snapshot incomplete. This keeps closed issues observable and avoids silently
+erasing snapshot memory.
+
+Older research used `gh issue list --state all --limit 500`; keep that command
+in the historical field-discovery section only, not as current behavior.
 
 `gh search issues` can express useful future filters, but search results are not
 equivalent to an authoritative repository issue snapshot.

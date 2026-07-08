@@ -75,7 +75,7 @@ jobs:
             | curl -sf -X POST -H 'Content-type: application/json' -d @- "$SLACK_WEBHOOK_URL"
 
       - name: Save snapshot state
-        if: always()
+        if: ${{ always() && steps.tick.outputs.code != '2' }}
         uses: actions/cache/save@v4
         with:
           path: .gh-delta-state

@@ -117,26 +117,20 @@ const baselineText = renderBaseline(baselineReport);
 const deltaText = renderText(deltaReport);
 const jsonColored = renderJson(detailReport);
 
-// demo.cast — animated hero: zero-config baseline, then a second tick with deltas.
+// demo.cast — local shell loop: zero-config baseline, then the next scheduled tick.
 const demo = cast({ width: 92, height: 22, title: 'gh-delta — quick demo' });
 demo
   .prompt()
-  .command('gh-delta --repo owner/repo')
+  .command('while :; do gh-delta --repo owner/repo; sleep 300; done')
   .enter()
   .out(`${GREY}… seeding baseline from GitHub${RESET}`, 0.8)
   .out('\r\x1b[2K', 0.6)
   .block(baselineText)
   .wait(1.4)
-  .prompt()
-  .type(`${GREY}# a few minutes later, two things changed on GitHub${RESET}`, 0.02)
-  .enter()
-  .prompt()
-  .command('gh-delta --repo owner/repo')
-  .enter()
+  .out(`${GREY}sleep 300  # in between, someone works on the repo${RESET}\r\n`, 0.4)
   .out(`${GREY}… fetching GitHub state${RESET}`, 0.8)
   .out('\r\x1b[2K', 0.6)
   .block(deltaText)
-  .prompt()
   // A no-op event 5s later extends the stream so the final frame is held ~5s
   // before the loop restarts (a bare `wait` moves the clock but emits no event,
   // so svg-term — which derives duration from the last event — would ignore it).
