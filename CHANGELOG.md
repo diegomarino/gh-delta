@@ -4,6 +4,13 @@ All notable changes to this package will be documented here.
 
 This project follows semantic versioning once published to npm.
 
+## [0.1.1](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.1.0...gh-delta-v0.1.1) (2026-07-08)
+
+
+### Bug Fixes
+
+* add operator suggestions for draft-ready and reopened deltas ([#1](https://github.com/diegomarino/gh-delta/issues/1)) ([8ae8f5d](https://github.com/diegomarino/gh-delta/commit/8ae8f5dcef6489691259aeaf2bfaa4b9b1ff9398))
+
 ## 0.1.0 - 2026-07-08
 
 - Initial `gh-delta` detector CLI.
