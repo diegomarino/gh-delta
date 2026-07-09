@@ -17,7 +17,7 @@ gh-delta --repo <owner/name> [--monitor-id <id>]
          [--summary-line] [--detail]
          [--outpost-url <url>]
          [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>]
-         [--gh-timeout-ms <ms>]
+         [--gh-timeout-ms <ms>] [--no-registry]
 ```
 
 - `--repo` is required.
@@ -55,11 +55,127 @@ gh-delta --repo <owner/name> [--monitor-id <id>]
   unlimited). Excess deltas are skipped with an outpost warning.
 - `--gh-timeout-ms` timeout in milliseconds for each `gh` subprocess call
   (default `60000`).
+- `--no-registry` skips the best-effort [run-registry](#run-registry) breadcrumb
+  this run would otherwise leave for `gh-delta list`. Equivalent to setting
+  `GH_DELTA_NO_REGISTRY=1`. It never affects the report, exit code, or snapshot.
 
 **Repeated flags:** the last value wins. **`--help`, `--help-json`, and
 `--version` take precedence over all validation** — an agent probing with
 `--help-json` receives the help document even when the rest of the command line
 is invalid.
+
+### gh-delta list
+
+```
+gh-delta list [--state-dir <dir>] [--since <duration>] [--format json|text]
+```
+
+Read-only inventory of the monitors that have run on this machine. `list` never
+contacts GitHub and never creates, updates, or deletes snapshots or registry
+entries, so it is safe to run at any time, including while monitors tick.
+
+- **Scope.** Without `--state-dir` the inventory is **global**: the
+  [run registry](#run-registry) — which every successful detector run feeds
+  unless opted out — merged with a scan of the per-user temp default location.
+  Monitors using any `--state-dir` or an explicit `--state-file` appear via
+  their registry entries. With `--state-dir`, the inventory narrows to a plain
+  scan of that directory and the registry is not consulted.
+- A scan identifies a snapshot two ways: the derived filename (encodes repo,
+  monitor id, and entities), or — for arbitrary filenames — the identity the
+  detector stamps inside the snapshot (`meta.repo`, `meta.monitorId`,
+  `meta.entities`; see [Snapshot Semantics](#snapshot-semantics)). Files
+  identified neither way are counted in `skippedFiles`.
+- A missing state directory or registry is an empty inventory (exit `0`), not
+  an error.
+- `--since` is optional. Grammar: a positive integer followed by one unit —
+  `s`, `m`, `h`, or `d` (e.g. `90s`, `15m`, `24h`, `7d`). Only monitors whose
+  `lastRun` falls inside the window are listed. Without it, every known monitor
+  is listed.
+- `--format` defaults to `json`; `text` is the operator/log mode.
+- `--help`, `--help-json`, and `--version` follow the same indestructible-help
+  precedence as the detector; `gh-delta list --help-json` documents this
+  subcommand.
+
+Success report (exit `0`; the shape is also available as `reportFields` /
+`monitorFields` in `gh-delta list --help-json` and as `LIST_REPORT_FIELDS` /
+`LIST_MONITOR_FIELDS` in `gh-delta/contract`):
+
+```json
+{
+  "schemaVersion": 1,
+  "command": "list",
+  "stateDir": "/tmp/gh-delta-user",
+  "registryDir": "/home/user/.local/state/gh-delta/registry",
+  "since": "24h",
+  "at": "2026-07-08T12:00:00.000Z",
+  "monitors": [
+    {
+      "repo": "owner/repo",
+      "monitorId": "prs-5m",
+      "entities": ["pr"],
+      "stateFile": "/srv/state/repo-owner%2Frepo__monitor-prs-5m__pr.json",
+      "lastRun": "2026-07-08T11:00:00.000Z",
+      "prCount": 12,
+      "issueCount": 0
+    }
+  ],
+  "skippedFiles": 0,
+  "summary": "1 monitor(s)"
+}
+```
+
+- `command` (string): always `"list"`; discriminates this report from a
+  detector report.
+- `registryDir` (string|null): the run-registry directory consulted, or `null`
+  when `--state-dir` narrowed the inventory to a scan.
+- `since` (string|null): the echoed `--since` value, or `null` when no window
+  was given.
+- `monitors` (array): sorted by `lastRun`, newest first. `lastRun` is the
+  snapshot's `meta.horizon` when readable; the registry `lastRun` or file mtime
+  otherwise (legacy or corrupt snapshots). A corrupt snapshot keeps its entry
+  with an `error` string and `null` counts instead of failing the listing. A
+  registered monitor whose snapshot file no longer exists keeps its entry with
+  `stale: true` — a retired monitor or cleaned state, reported rather than
+  hidden.
+- `skippedFiles` (number): directory or registry entries that could not be
+  identified as monitor snapshots or registry entries. They are counted, never
+  guessed at.
+- `summary` (string): human-readable only; do not parse it.
+
+Exit codes: `0` inventory produced (possibly empty), `1` transient error (state
+directory unreadable), `2` permanent error (invalid arguments). `list` never
+exits `10`. Error reports use the standard
+[error report shape](#error-report-shape).
+
+## Run Registry
+
+The registry is how `gh-delta list` sees monitors whose snapshots live outside
+any directory it could guess — an arbitrary `--state-dir` or an explicit
+`--state-file`. After every successful detector run (baseline, no-delta, or
+deltas), the CLI writes one small breadcrumb per monitor:
+
+- **Location:** `$GH_DELTA_REGISTRY_DIR` when set, otherwise
+  `$XDG_STATE_HOME/gh-delta/registry`, falling back to
+  `~/.local/state/gh-delta/registry`. Durable on purpose — unlike the temp-dir
+  snapshot default, a reboot must not erase the inventory.
+- **Shape:** one JSON file per monitor, keyed by a sha256 hash of the canonical
+  snapshot path (case-folded on Windows; see [Platform Notes](#platform-notes)), containing `registryVersion`, `repo`, `monitorId`, `entities`,
+  `stateFile`, and `lastRun` (the field catalog is `REGISTRY_ENTRY_FIELDS` in
+  `gh-delta/contract`). Re-registering the same monitor overwrites its own
+  file (temp file + atomic rename): idempotent, last-writer-wins, and
+  concurrent monitors never share a file — no locks.
+- **Best-effort:** a registry write failure is silent and never changes the
+  detector report, exit code, or snapshot. The registry is an **index, not
+  detector state**: deleting the directory is always safe; it rebuilds as
+  monitors run, and losing it never causes false deltas or re-baselines.
+- **Opt-out:** `--no-registry` per run, or `GH_DELTA_NO_REGISTRY=1` in the
+  environment (hermetic CI, ephemeral containers).
+- The detector never deletes registry entries. `gh-delta list` reports orphans
+  as `stale: true`; cleanup is a future explicit command.
+- **Programmatic use is unaffected:** the registry lives in the CLI layer.
+  Importing `gh-delta/detect`, `gh-delta/snapshot`, or any other subpath never
+  touches it. Orchestrators that want their embedded monitors to appear in
+  `gh-delta list` can opt in via `registerMonitor` from `gh-delta/registry`.
 
 ## Exit Codes
 
@@ -77,15 +193,17 @@ is invalid.
 The package publishes a small, explicit ESM surface. Imports must use explicit
 subpaths; the package root is intentionally not exported.
 
-| Export path            | Symbols                                                                                                                                                                   | Purpose                                       |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| `gh-delta/detect`      | `detectDeltas`                                                                                                                                                            | Pure delta classification engine              |
-| `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint`                                                                                                | Stable object fingerprint builders            |
-| `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`                                                                                                | Outpost payload and transport helpers         |
-| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`, `defaultStateDir`                                                                                                  | Snapshot path and persistence helpers         |
-| `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`, `canonicalEntityKey`                                                                                         | Shared argument parsing policies              |
-| `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                                                                                                                 | Package metadata and version output           |
-| `gh-delta/contract`    | `REPORT_SCHEMA_VERSION`, `OUTPOST_SCHEMA_VERSION`, `REPORT_FIELDS`, `DELTA_FIELDS`, `DELTA_DETAIL_FIELDS`, `DELTA_DETAIL_FIELDS_BY_CLASS`, `DELTA_CLASSES`, `ERROR_KINDS` | Runtime contract constants and field catalogs |
+| Export path            | Symbols                                                                                                                                                                                                                                         | Purpose                                       |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `gh-delta/detect`      | `detectDeltas`                                                                                                                                                                                                                                  | Pure delta classification engine              |
+| `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint`                                                                                                                                                                      | Stable object fingerprint builders            |
+| `gh-delta/list`        | `listMonitors`, `parseSnapshotFilename`, `parseSince`                                                                                                                                                                                           | Read-only monitor snapshot inventory          |
+| `gh-delta/registry`    | `registerMonitor`, `readRegistry`, `defaultRegistryDir`, `registryEntryPath`, `canonicalStateFileKey`                                                                                                                                           | Run-registry breadcrumbs for gh-delta list    |
+| `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`                                                                                                                                                                      | Outpost payload and transport helpers         |
+| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`, `defaultStateDir`                                                                                                                                                                        | Snapshot path and persistence helpers         |
+| `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`, `canonicalEntityKey`                                                                                                                                                               | Shared argument parsing policies              |
+| `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                                                                                                                                                                                       | Package metadata and version output           |
+| `gh-delta/contract`    | `REPORT_SCHEMA_VERSION`, `OUTPOST_SCHEMA_VERSION`, `REPORT_FIELDS`, `DELTA_FIELDS`, `DELTA_DETAIL_FIELDS`, `DELTA_DETAIL_FIELDS_BY_CLASS`, `DELTA_CLASSES`, `ERROR_KINDS`, `LIST_REPORT_FIELDS`, `LIST_MONITOR_FIELDS`, `REGISTRY_ENTRY_FIELDS` | Runtime contract constants and field catalogs |
 
 Behavioral notes for consumers:
 
@@ -349,7 +467,9 @@ Emitted with exit code `1` (transient) or `2` (permanent). It **does not** carry
 
 ## Snapshot Semantics
 
-The detector is stateless between runs except for the snapshot it owns.
+The detector is stateless between runs except for the snapshot it owns and
+the best-effort [run-registry](#run-registry) breadcrumb (an index for
+`gh-delta list`, never consulted by detection).
 
 **Incremental fetch contract:** open items are always fetched in full (the scope
 for missing detection). When a prior snapshot exists, `meta.horizon` (the
@@ -362,6 +482,14 @@ Snapshot shape: `{ "pr": object, "issue": object, "meta"?: object }`.
 `meta.horizon` is stamped with the run timestamp on every successful write.
 Legacy snapshots without `meta` fall back to the newest `updatedAt` across all
 stored fingerprints as the horizon.
+
+Snapshots are **self-describing** (additive; does not bump `schemaVersion`):
+every successful write also stamps `meta.repo`, `meta.monitorId`, and
+`meta.entities`, so identity travels in the data, not only in the derived
+filename. This is what lets `gh-delta list` recognize an explicit
+`--state-file` snapshot whose filename carries no identity. Legacy snapshots
+without these fields keep working; they are simply only discoverable through
+their derived filename or a registry entry.
 
 - The consumer supplies the snapshot **location**, never snapshot **data**.
   gh-delta reads it, diffs, and atomically rewrites it after a successful fetch.
@@ -395,6 +523,31 @@ removed. **Additive changes** (new optional fields on the report, a delta, or a
 fingerprint; new classes; new error kinds) **never bump `schemaVersion`.**
 Unknown classes or kinds mean "something changed, inspect", never an error.
 Assert `schemaVersion === 1` and handle unknown classes/kinds gracefully.
+
+## Platform Notes
+
+`gh-delta` targets Node >= 18 on any OS, but the guarantees above are
+POSIX-worded. CI exercises Linux only; macOS shares the POSIX semantics.
+On **Windows** the behavior degrades explicitly, never silently:
+
+- **Atomic writes.** Snapshot and registry writes go through a unique temp file
+  plus rename. The rename is guaranteed atomic on POSIX within one filesystem;
+  on Windows it is a best-effort `MoveFileEx`-style replace — safe against
+  partial JSON, but without the same atomicity guarantee under concurrent
+  writers. The "serialize ticks per monitor" rule matters more there.
+- **Permissions.** The `0700` modes on the temp-dir default and the registry
+  directory are ignored on Windows (ACLs come from the user profile), and the
+  temp-dir ownership guard (refusing a default dir owned by another uid) is
+  skipped — `process.getuid` does not exist on Windows.
+- **Locations.** The temp-dir default resolves under `%TEMP%`
+  (`os.tmpdir()`); the run registry lands at
+  `%USERPROFILE%\.local\state\gh-delta\registry` unless `XDG_STATE_HOME` or
+  `GH_DELTA_REGISTRY_DIR` overrides it. Both are echoed in reports
+  (`stateFile`, `registryDir`) — trust the echo, not the convention.
+- **Case-insensitive paths.** Registry entry keys and `gh-delta list` dedupe
+  keys case-fold the resolved snapshot path on Windows, so `C:\State\x.json`
+  and `c:\state\x.json` are one monitor, not two. On POSIX, paths that differ
+  by case are genuinely different files and are kept distinct.
 
 ## Outpost Payload (schema v1)
 
