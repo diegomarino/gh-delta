@@ -53,6 +53,19 @@ The first successful run should return a report with `"baseline": true` and exit
 `0`. That is normal. It seeds the snapshot so the first scheduled tick compares
 against known state instead of reporting every existing issue or PR as new.
 
+To audit which monitors already exist on a machine — before adding one, or when
+inheriting a host — run the read-only inventory:
+
+```bash
+gh-delta list --format text
+```
+
+It reports each monitor's repo, id, entities, and last run from the
+[run registry](docs/contract.md#run-registry) plus the temp default location,
+flags registered monitors whose snapshot is gone as `stale`, and never touches
+snapshots, so it is safe alongside live ticks. `--since 24h` shows only
+recently active monitors.
+
 ## Cron-Native Tick
 
 Each scheduled tick should run the detector and then stop. The scheduler already

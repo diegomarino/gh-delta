@@ -4,6 +4,9 @@
 // `from`+classes+missingTicks for the to-null missing lifecycle.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+
+// Tests must never leave breadcrumbs in the developer's real run registry.
+process.env.GH_DELTA_NO_REGISTRY = '1';
 import { run } from '../lib/cli.mjs';
 import { detectDeltas } from '../lib/detect.mjs';
 import { buildOutpostPayload } from '../lib/outpost.mjs';

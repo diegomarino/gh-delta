@@ -44,6 +44,9 @@ compares to related projects.
 - Node.js 18 or newer.
 - GitHub CLI (`gh`) installed and authenticated.
 - Read access to the repository being watched.
+- Any OS: Linux and macOS get the POSIX guarantees (and Linux is what CI
+  exercises); Windows works with documented caveats — see
+  [Platform Notes](docs/contract.md#platform-notes).
 
 To validate `gh` auth locally:
 
@@ -110,6 +113,11 @@ the [Usage Guide](docs/usage.md). For the exact CLI contract, use
   deltas. Error behavior is specified in [Exit Codes](docs/contract.md#exit-codes).
 - `--format json` is the machine contract. `--format text` is an operator log
   format.
+- `gh-delta list` is a read-only inventory of the monitors that have run on
+  this machine — which repo, monitor id, and entities, when each last ran, and
+  whether its snapshot is healthy. Every successful run leaves a best-effort
+  registry breadcrumb (opt out with `--no-registry`) so `list` sees monitors in
+  any state location. It never contacts GitHub and never touches snapshots.
 
 Exact CLI flags, report fields, delta classes, snapshot semantics, and outpost
 payloads live in [docs/contract.md](docs/contract.md).
