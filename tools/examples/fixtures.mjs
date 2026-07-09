@@ -23,8 +23,10 @@ const AT = '2026-07-01T12:05:00.000Z';
 const AT_BASELINE = '2026-07-01T12:00:00.000Z';
 
 // The PR #42 delta: a single item that exercises three distinct detail field
-// groups (opaque `ci`, `review`, and label add/remove) so `--detail` is shown
-// off in one place.
+// groups (`ci`, `review`, and label add/remove) so `--detail` is shown off in
+// one place. The fingerprints deliberately omit the ciChecks/reviewSummary
+// summaries, so the ci/reviews details render the `opaque: true` fallback (the
+// output of a first tick over a pre-summary snapshot).
 const pr42 = withId({
   entity: 'pr',
   number: 42,

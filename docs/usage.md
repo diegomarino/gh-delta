@@ -219,8 +219,11 @@ No GitHub deltas since the last snapshot.
 ```
 
 JSON output carries the machine-readable report. Use `--summary-line` for a
-human display sentence and `--detail` for structured class-level explanations.
-The exact JSON shape is specified in [Report Shape](contract.md#report-shape).
+human display sentence and `--detail` for structured class-level explanations —
+for `ci-changed` and `review-changed`, the details name the exact checks and
+reviews that changed (`added`/`removed`/`changed`), so an agent can act without
+re-querying GitHub. The exact JSON shape is specified in
+[Report Shape](contract.md#report-shape).
 
 `gh-delta --help-json` prints machine-readable help for agents and other tooling.
 It is the right source for generated CLIs, prompts, and monitors that need the

@@ -196,7 +196,7 @@ subpaths; the package root is intentionally not exported.
 | Export path            | Symbols                                                                                                                                                                                                                                         | Purpose                                       |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
 | `gh-delta/detect`      | `detectDeltas`                                                                                                                                                                                                                                  | Pure delta classification engine              |
-| `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint`                                                                                                                                                                      | Stable object fingerprint builders            |
+| `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint`, `summarizeCiRollup`, `summarizeReviews`                                                                                                                             | Stable object fingerprint builders            |
 | `gh-delta/list`        | `listMonitors`, `parseSnapshotFilename`, `parseSince`                                                                                                                                                                                           | Read-only monitor snapshot inventory          |
 | `gh-delta/registry`    | `registerMonitor`, `readRegistry`, `defaultRegistryDir`, `registryEntryPath`, `canonicalStateFileKey`                                                                                                                                           | Run-registry breadcrumbs for gh-delta list    |
 | `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`                                                                                                                                                                      | Outpost payload and transport helpers         |
@@ -395,10 +395,39 @@ Detail entries use `class` to name the class being explained. Common shapes:
 - label transition: `{ "class": "relabeled", "field": "labels", "added": ["urgent"], "removed": [] }`;
 - presence transition: `{ "class": "missing", "field": "presence", "from": "present", "to": "missing", "missingTicks": 1 }`.
 
-Some details are intentionally partial. `ci-changed` currently reports the
-opaque CI digest transition (`opaque: true`) because the snapshot stores a stable
-rollup hash, not every check/status row. `review-changed` may include both a
-readable `review` transition and an opaque latest-reviews digest transition.
+`ci-changed` and `review-changed` details name the exact entries that changed
+when both fingerprint sides carry the persisted normalized summaries
+(`ciChecks` / `reviewSummary`, stored in every snapshot since they were
+introduced). The digest transition keeps its `from`/`to` values and gains
+`added`, `removed`, and `changed` arrays:
+
+```json
+{
+  "class": "ci-changed",
+  "field": "ci",
+  "from": "a1b2c3d4e5f6",
+  "to": "0f9e8d7c6b5a",
+  "added": [{ "name": "lint", "status": "IN_PROGRESS", "conclusion": "" }],
+  "removed": [],
+  "changed": [
+    {
+      "name": "build",
+      "from": { "status": "COMPLETED", "conclusion": "FAILURE" },
+      "to": { "status": "COMPLETED", "conclusion": "SUCCESS" }
+    }
+  ]
+}
+```
+
+`review-changed` follows the same shape on `field: "reviews"` with entries keyed
+by `author` (`{ author, state, submittedAt, commit }`), and may also include a
+readable `review` (review decision) transition. When a detail **cannot** name
+the change — the `from` side comes from a snapshot written before summaries were
+persisted, either side repeats a key (two rollup rows sharing one check name),
+or the digests differ in a way the summary does not explain — it falls back to
+marking the digest transition `opaque: true` with no named arrays.
+Consumers should treat `opaque: true` as "re-query GitHub if you need
+specifics" and its absence as "the named breakdown is authoritative."
 The public field catalogs are also available without parsing Markdown through
 `gh-delta/contract` and `gh-delta --help-json`.
 
@@ -415,21 +444,23 @@ consumers must tolerate new keys and must not assume a closed shape.
 
 PR fingerprint:
 
-| Field                     | Readable?   | Notes                                                                                         |
-| ------------------------- | ----------- | --------------------------------------------------------------------------------------------- |
-| `state`                   | yes         | `OPEN` \| `CLOSED` \| `MERGED`.                                                               |
-| `updatedAt`               | yes         | ISO-8601.                                                                                     |
-| `isDraft`                 | yes         | boolean.                                                                                      |
-| `mergeable`               | yes         | `MERGEABLE` \| `CONFLICTING` \| `UNKNOWN`.                                                    |
-| `review`                  | yes         | GitHub `reviewDecision` (e.g. `APPROVED`, `REVIEW_REQUIRED`, `""`).                           |
-| `comments`                | yes         | exact integer total from GraphQL `totalCommentsCount`.                                        |
-| `reviewThreads`           | yes         | integer count of PR review threads.                                                           |
-| `unresolvedReviewThreads` | yes         | integer count of unresolved PR review threads.                                                |
-| `ci`                      | **opaque**  | sha1 digest of the CI rollup. Observe inequality only; never parse.                           |
-| `reviews`                 | **opaque**  | sha1 digest of latest reviews. Observe inequality only; never parse.                          |
-| `head`                    | opaque-ish  | head ref OID (git SHA). Treat as a change indicator; every push changes it.                   |
-| `missing`                 | bookkeeping | boolean; present on fingerprints stored for missing items. Not part of the change comparison. |
-| `missingTicks`            | bookkeeping | number; consecutive ticks an item has been absent. Present alongside `missing: true`.         |
+| Field                     | Readable?   | Notes                                                                                                                                                                                                             |
+| ------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `state`                   | yes         | `OPEN` \| `CLOSED` \| `MERGED`.                                                                                                                                                                                   |
+| `updatedAt`               | yes         | ISO-8601.                                                                                                                                                                                                         |
+| `isDraft`                 | yes         | boolean.                                                                                                                                                                                                          |
+| `mergeable`               | yes         | `MERGEABLE` \| `CONFLICTING` \| `UNKNOWN`.                                                                                                                                                                        |
+| `review`                  | yes         | GitHub `reviewDecision` (e.g. `APPROVED`, `REVIEW_REQUIRED`, `""`).                                                                                                                                               |
+| `comments`                | yes         | exact integer total from GraphQL `totalCommentsCount`.                                                                                                                                                            |
+| `reviewThreads`           | yes         | integer count of PR review threads.                                                                                                                                                                               |
+| `unresolvedReviewThreads` | yes         | integer count of unresolved PR review threads.                                                                                                                                                                    |
+| `ci`                      | **opaque**  | sha1 digest of the CI rollup. Observe inequality only; never parse.                                                                                                                                               |
+| `ciChecks`                | yes         | normalized CI rollup: sorted `{name, status, conclusion}` rows behind the `ci` digest. Absent from snapshots written before it was introduced. Not part of the change comparison or the delta id.                 |
+| `reviews`                 | **opaque**  | sha1 digest of latest reviews. Observe inequality only; never parse.                                                                                                                                              |
+| `reviewSummary`           | yes         | compact latest-review rows: sorted `{author, state, submittedAt, commit}` behind the `reviews` digest. Absent from snapshots written before it was introduced. Not part of the change comparison or the delta id. |
+| `head`                    | opaque-ish  | head ref OID (git SHA). Treat as a change indicator; every push changes it.                                                                                                                                       |
+| `missing`                 | bookkeeping | boolean; present on fingerprints stored for missing items. Not part of the change comparison.                                                                                                                     |
+| `missingTicks`            | bookkeeping | number; consecutive ticks an item has been absent. Present alongside `missing: true`.                                                                                                                             |
 
 Issue fingerprint: `state`, `updatedAt`, `labels` (string[], sorted),
 `comments` (exact integer total from GraphQL `totalCount`).
