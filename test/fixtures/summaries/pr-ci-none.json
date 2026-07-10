@@ -1,0 +1,64 @@
+{
+  "data": {
+    "repository": {
+      "items": {
+        "nodes": [
+          {
+            "number": 64097,
+            "title": "Add benchmarks for node only mode and mock timers.",
+            "state": "OPEN",
+            "updatedAt": "2026-07-10T18:03:01Z",
+            "isDraft": false,
+            "mergeable": "MERGEABLE",
+            "reviewDecision": "APPROVED",
+            "totalCommentsCount": 6,
+            "headRefOid": "e5623a838c21279f883d88a2c6f6e34fe136ef4c",
+            "headRefName": "benchmark-test-runner-only-mock-timers",
+            "commits": {
+              "nodes": [
+                {
+                  "commit": {
+                    "statusCheckRollup": null
+                  }
+                }
+              ]
+            },
+            "latestReviews": {
+              "nodes": [
+                {
+                  "id": "PRR_kwDOAZ7xs88AAAABFpW--Q",
+                  "submittedAt": "2026-07-10T18:03:01Z",
+                  "state": "APPROVED",
+                  "author": {
+                    "login": "avivkeller"
+                  },
+                  "commit": {
+                    "oid": "e5623a838c21279f883d88a2c6f6e34fe136ef4c"
+                  }
+                }
+              ],
+              "pageInfo": {
+                "hasNextPage": false
+              }
+            },
+            "reviewThreads": {
+              "totalCount": 1,
+              "nodes": [
+                {
+                  "isResolved": false
+                }
+              ],
+              "pageInfo": {
+                "hasNextPage": false
+              }
+            }
+          }
+        ],
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        }
+      }
+    }
+  }
+}

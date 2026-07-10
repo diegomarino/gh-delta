@@ -1,0 +1,260 @@
+{
+  "data": {
+    "repository": {
+      "items": {
+        "nodes": [
+          {
+            "number": 63949,
+            "title": "crypto: support loading private keys through STORE loaders",
+            "state": "OPEN",
+            "updatedAt": "2026-07-10T21:31:28Z",
+            "isDraft": false,
+            "mergeable": "MERGEABLE",
+            "reviewDecision": "REVIEW_REQUIRED",
+            "totalCommentsCount": 6,
+            "headRefOid": "70d8d79a6e65b268cc0419aa591f15c79a646f62",
+            "headRefName": "keyobject-stores",
+            "commits": {
+              "nodes": [
+                {
+                  "commit": {
+                    "statusCheckRollup": {
+                      "contexts": {
+                        "nodes": [
+                          {
+                            "__typename": "CheckRun",
+                            "name": "build-tarball",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "coverage-linux",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "coverage-windows",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "lint-commit-message",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "lint-addon-docs",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "test-quic",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "test-linux (ubuntu-24.04)",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "Build slim tarball",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "build-docs",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "test-macOS",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "test-linux (ubuntu-24.04-arm)",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "test-tarball-linux",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "lint-cpp",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "x86_64-linux: with shared libraries / build",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "x86_64-darwin: with shared libraries / build",
+                            "status": "IN_PROGRESS",
+                            "conclusion": null
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "aarch64-darwin: with shared libraries / build",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "format-cpp",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "aarch64-linux: Cache V8 build",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "lint-js-and-md",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "aarch64-linux: with shared boringssl-0.20260526.0 / build",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "aarch64-linux: with shared openssl-1.1.1w / build",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "aarch64-linux: with shared openssl-3.0.21 / build",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "aarch64-linux: with shared openssl-3.5.7 / build",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "aarch64-linux: with shared openssl-3.6.2 / build",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "aarch64-linux: with shared openssl-4.0.1 / build",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "lint-nix",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "lint-py",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "lint-yaml",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "lint-sh",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "lint-codeowners",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "lint-pr-url",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "lint-readme",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          }
+                        ],
+                        "pageInfo": {
+                          "hasNextPage": false
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            "latestReviews": {
+              "nodes": [
+                {
+                  "id": "PRR_kwDOAZ7xs88AAAABE_bnGQ",
+                  "submittedAt": "2026-07-04T16:14:43Z",
+                  "state": "APPROVED",
+                  "author": {
+                    "login": "jasnell"
+                  },
+                  "commit": {
+                    "oid": "6f3d2cb58bed46180b82e006afa6270c7c5661b4"
+                  }
+                }
+              ],
+              "pageInfo": {
+                "hasNextPage": false
+              }
+            },
+            "reviewThreads": {
+              "totalCount": 0,
+              "nodes": [],
+              "pageInfo": {
+                "hasNextPage": false
+              }
+            }
+          }
+        ],
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        }
+      }
+    }
+  }
+}
