@@ -1,0 +1,90 @@
+{
+  "data": {
+    "repository": {
+      "items": {
+        "nodes": [
+          {
+            "number": 12,
+            "title": "feat: name the exact checks and reviews behind ci-changed/review-changed details",
+            "state": "MERGED",
+            "updatedAt": "2026-07-09T14:36:50Z",
+            "isDraft": false,
+            "mergeable": "UNKNOWN",
+            "reviewDecision": null,
+            "totalCommentsCount": 3,
+            "headRefOid": "27c7dac8d6a7d8ad99c7e51d91fec41217ab0b4a",
+            "headRefName": "claude/opaque-check-digest-todos-06xc35",
+            "commits": {
+              "nodes": [
+                {
+                  "commit": {
+                    "statusCheckRollup": {
+                      "contexts": {
+                        "nodes": [
+                          {
+                            "__typename": "CheckRun",
+                            "name": "Node 18.x",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "Node 20.x",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "Node 22.x",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          }
+                        ],
+                        "pageInfo": {
+                          "hasNextPage": false
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            "latestReviews": {
+              "nodes": [
+                {
+                  "id": "PRR_kwDOTRska88AAAABFaaEmA",
+                  "submittedAt": "2026-07-08T21:53:40Z",
+                  "state": "COMMENTED",
+                  "author": {
+                    "login": "chatgpt-codex-connector"
+                  },
+                  "commit": {
+                    "oid": "10b172304b0cf86a08ae604fd598ac3190177edc"
+                  }
+                }
+              ],
+              "pageInfo": {
+                "hasNextPage": false
+              }
+            },
+            "reviewThreads": {
+              "totalCount": 1,
+              "nodes": [
+                {
+                  "isResolved": true
+                }
+              ],
+              "pageInfo": {
+                "hasNextPage": false
+              }
+            }
+          }
+        ],
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        }
+      }
+    }
+  }
+}

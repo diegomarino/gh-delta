@@ -347,6 +347,104 @@ test('pre-summary snapshots upgrade without phantom deltas and persist summaries
   assert.deepEqual(d.stored.pr['42'].reviewSummary, []);
 });
 
+const SUMMARIES_ARGS = [
+  '--repo',
+  'o/r',
+  '--monitor-id',
+  'main',
+  '--state-file',
+  '/tmp/x.json',
+  '--summaries',
+];
+
+test('--summaries acceptance: posting a successful status makes summary.ciRollup green', () => {
+  // A PR with zero checks, re-observed after a successful commit status lands on
+  // the head: a ci-changed delta whose semantic summary reports the CI as green.
+  const before = { ...basePr, statusCheckRollup: [] };
+  const after = {
+    ...basePr,
+    updatedAt: '2026-07-01T11:00:00Z',
+    statusCheckRollup: [{ context: 'ci/deploy', state: 'SUCCESS' }],
+  };
+  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const { code, report } = run(SUMMARIES_ARGS, d);
+  assert.equal(code, 10);
+  const delta = report.deltas[0];
+  assert.ok(delta.classes.includes('ci-changed'), 'the status transition is a ci-changed delta');
+  assert.deepEqual(delta.summary, {
+    ciRollup: 'green',
+    reviewDecision: 'review_required',
+    mergeable: 'unknown',
+    state: 'open',
+    isDraft: false,
+    unresolvedReviewThreads: 0,
+    headSha: 'sha1',
+  });
+});
+
+test('--summaries acceptance: a PR that lost its checks reports ciRollup none, not green', () => {
+  const before = { ...basePr, statusCheckRollup: [{ context: 'ci/deploy', state: 'SUCCESS' }] };
+  const after = { ...basePr, updatedAt: '2026-07-01T11:00:00Z', statusCheckRollup: [] };
+  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const { code, report } = run(SUMMARIES_ARGS, d);
+  assert.equal(code, 10);
+  const delta = report.deltas[0];
+  assert.ok(delta.classes.includes('ci-changed'));
+  assert.equal(delta.summary.ciRollup, 'none');
+});
+
+test('--summaries is purely additive: delta.id and every other field are byte-identical', () => {
+  const before = { ...basePr, statusCheckRollup: [] };
+  const after = {
+    ...basePr,
+    updatedAt: '2026-07-01T11:00:00Z',
+    statusCheckRollup: [{ context: 'ci/deploy', state: 'SUCCESS' }],
+  };
+  const seed = () => ({ pr: { 42: prFingerprint(before) }, issue: {} });
+  const baseArgs = ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'];
+  const withFlag = run([...baseArgs, '--summaries'], deps([[after]], { existing: seed() })).report
+    .deltas[0];
+  const without = run(baseArgs, deps([[after]], { existing: seed() })).report.deltas[0];
+  // The opaque fingerprints already sit in `to`; the only difference the flag makes
+  // is the extra sibling `summary` key. Same content-addressed id, same everything else.
+  assert.equal(withFlag.id, without.id);
+  assert.equal('summary' in without, false, 'without the flag there is no summary field');
+  const { summary, ...withFlagRest } = withFlag;
+  assert.ok(summary, 'the flag adds a summary');
+  assert.deepEqual(withFlagRest, without);
+});
+
+test('--help-json documents the summary schema well enough to build a validator', () => {
+  const d = {
+    fetchPRs: () => {
+      throw new Error('should not fetch');
+    },
+    fetchIssues: () => {
+      throw new Error('should not fetch');
+    },
+    now: () => '2026-07-01T12:00:00Z',
+  };
+  const { code, report } = run(['--help-json'], d);
+  assert.equal(code, 0);
+  const help = JSON.parse(report);
+  assert.ok(help.output.deltaFields.includes('summary'), 'deltaFields advertises summary');
+  assert.deepEqual(help.output.deltaSummaryFields, [
+    'ciRollup',
+    'reviewDecision',
+    'mergeable',
+    'state',
+    'isDraft',
+    'unresolvedReviewThreads',
+    'headSha',
+  ]);
+  assert.deepEqual(help.output.deltaSummaryEnums.ciRollup, ['green', 'failed', 'pending', 'none']);
+  assert.deepEqual(help.output.deltaSummaryEnums.mergeable, [
+    'mergeable',
+    'conflicting',
+    'unknown',
+  ]);
+});
+
 test('--help returns usage text without fetching GitHub', () => {
   const d = {
     fetchPRs: () => {

@@ -1,0 +1,206 @@
+{
+  "data": {
+    "repository": {
+      "items": {
+        "nodes": [
+          {
+            "number": 36863,
+            "title": "[compiler] Unskip lone surrogate string fixture",
+            "state": "OPEN",
+            "updatedAt": "2026-07-10T18:36:11Z",
+            "isDraft": false,
+            "mergeable": "MERGEABLE",
+            "reviewDecision": "REVIEW_REQUIRED",
+            "totalCommentsCount": 0,
+            "headRefOid": "b3504a075f080f0a82b1288153b71feff40cbe69",
+            "headRefName": "preserve-lone-surrogate-string-tests",
+            "commits": {
+              "nodes": [
+                {
+                  "commit": {
+                    "statusCheckRollup": {
+                      "contexts": {
+                        "nodes": [
+                          {
+                            "__typename": "CheckRun",
+                            "name": "Tests",
+                            "status": "COMPLETED",
+                            "conclusion": "FAILURE"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "check_access",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "Test playground",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "Discover yarn workspaces",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "check_access",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "Run prettier",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "check_maintainer",
+                            "status": "COMPLETED",
+                            "conclusion": "SKIPPED"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "check_maintainer",
+                            "status": "COMPLETED",
+                            "conclusion": "SKIPPED"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "Lint babel-plugin-react-compiler",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "Run eslint",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "notify",
+                            "status": "COMPLETED",
+                            "conclusion": "SKIPPED"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "label",
+                            "status": "COMPLETED",
+                            "conclusion": "SKIPPED"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "Jest babel-plugin-react-compiler",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "Check license",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "Test eslint-plugin-react-compiler",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "Test print warnings",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "Test make-read-only-util",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "Test babel-plugin-react-compiler-rust",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "Test react-mcp-server",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "Test snap",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "Test react-compiler-runtime",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "Test react-compiler-healthcheck",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "Test babel-plugin-react-compiler",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "Test react-forgive",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          },
+                          {
+                            "__typename": "CheckRun",
+                            "name": "Meta CLA Check",
+                            "status": "COMPLETED",
+                            "conclusion": "SUCCESS"
+                          }
+                        ],
+                        "pageInfo": {
+                          "hasNextPage": false
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            "latestReviews": {
+              "nodes": [],
+              "pageInfo": {
+                "hasNextPage": false
+              }
+            },
+            "reviewThreads": {
+              "totalCount": 0,
+              "nodes": [],
+              "pageInfo": {
+                "hasNextPage": false
+              }
+            }
+          }
+        ],
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        }
+      }
+    }
+  }
+}

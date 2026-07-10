@@ -147,6 +147,35 @@ The endpoint owns filtering, deduplication by `eventId`, and any downstream
 action. Do not put secrets in the outpost URL. If authentication is added later,
 headers or tokens must not be printed in logs.
 
+## Semantic Summaries
+
+Add `--summaries` to attach a normalized, typed `summary` object to every PR
+delta that has a current object. It is derived from the same single observation
+as the opaque fingerprints — no second GitHub call — and is a sibling of `to`, so
+the content-addressed `delta.id` and every existing field stay byte-identical
+whether or not the flag is set. Fields, enum domains, and honesty semantics
+(`ciRollup: none` for zero checks, `mergeable: unknown` for not-yet-computed) are
+specified in [Delta Summary schema](docs/contract.md#delta-summary-schema).
+
+Live acceptance check (proves the load-bearing `ciRollup` end to end against real
+GitHub, using a scratch PR you own):
+
+```bash
+STATE=$(mktemp -d)
+REPO=you/scratch          # a repo with NO required checks on the PR's base
+PR=1                      # an open PR whose head has no commit status yet
+
+# 1. Seed a baseline while the PR has zero checks.
+gh-delta --repo "$REPO" --monitor-id acc --state-dir "$STATE" --entities pr --summaries
+
+# 2. Post a successful commit status on the PR head and re-run.
+HEAD=$(gh pr view "$PR" --repo "$REPO" --json headRefOid -q .headRefOid)
+gh api "repos/$REPO/statuses/$HEAD" -f state=success -f context=acceptance >/dev/null
+gh-delta --repo "$REPO" --monitor-id acc --state-dir "$STATE" --entities pr --summaries \
+  | jq '.deltas[] | select(.classes | index("ci-changed")) | .summary.ciRollup'
+# expect: "green"   (and a fresh baseline against the zero-check PR reports "none")
+```
+
 ## Scheduler Choices
 
 ### Plain Cron Or Equivalent

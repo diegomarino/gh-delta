@@ -59,8 +59,10 @@ test('fully enriched deltas jointly cover exactly the frozen DELTA_FIELDS', () =
   // attach it to both representative deltas so the union also covers `id`.
   missing.id = deltaId(deltaIdentity('owner/repo', missing));
   change.id = deltaId(deltaIdentity('owner/repo', change));
-  enrichDelta(missing, { summaryLine: true, legacyLine: true, details: true });
-  enrichDelta(change, { summaryLine: true, legacyLine: true, details: true });
+  // `summaries: true` on the PR change delta (which has a to-state) adds `summary`;
+  // the missing delta (to === null) correctly gets none, so the union covers it.
+  enrichDelta(missing, { summaryLine: true, legacyLine: true, details: true, summaries: true });
+  enrichDelta(change, { summaryLine: true, legacyLine: true, details: true, summaries: true });
   const union = new Set([...keySet(missing), ...keySet(change)]);
   assert.deepEqual(
     [...union].sort(),

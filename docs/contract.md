@@ -14,7 +14,7 @@ form of this document is available at `gh-delta --help-json`.
 gh-delta --repo <owner/name> [--monitor-id <id>]
          [--state-file <path> | --state-dir <dir>]
          [--entities pr,issue] [--format json|text]
-         [--summary-line] [--detail]
+         [--summary-line] [--detail] [--summaries]
          [--outpost-url <url>]
          [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>]
          [--gh-timeout-ms <ms>] [--no-registry]
@@ -46,6 +46,11 @@ gh-delta --repo <owner/name> [--monitor-id <id>]
 - `--detail` adds structured `details` to each delta, also adds `summaryLine`,
   and keeps the backward-compatible `line` alias. Consumers should prefer
   `summaryLine` for the human line and `details` / `classes` for decisions.
+- `--summaries` adds a normalized, typed `summary` object to each PR delta that
+  has a current object — the semantic state (`ciRollup`, `reviewDecision`,
+  `mergeable`, …) read from the same observation as the opaque fingerprints, with
+  no second GitHub call. Additive and off by default; see
+  [Delta Summary schema](#delta-summary-schema).
 - `--outpost-url` is optional at-most-once HTTP delivery; see
   [Outpost Payload](#outpost-payload-schema-v1). It does not affect the JSON
   report, exit code, or snapshot.
@@ -387,6 +392,10 @@ Each delta:
 - `details` (array): present **only** with `--detail`. Structured explanation of
   the selected `classes`. Entries are additive; tolerate new fields and new
   detail shapes.
+- `summary` (object): present **only** with `--summaries`, and **only** on PR
+  deltas that have an observed `to` state. A normalized, typed semantic view of
+  the current PR state — see [Delta Summary schema](#delta-summary-schema). It is
+  a sibling of `to`, not nested inside it, so it never affects `id`.
 
 Detail entries use `class` to name the class being explained. Common shapes:
 
@@ -434,6 +443,54 @@ The public field catalogs are also available without parsing Markdown through
 **Ordering:** within a report, PR deltas precede issue deltas; within each family
 the order follows the GitHub fetch result. Do not rely on positional access
 (`deltas[0]`) or on a stable within-family order across GitHub API changes.
+
+### Delta Summary schema
+
+Added by `--summaries`. The `from`/`to` [fingerprints](#fingerprint-fields) are
+opaque digests built for change _detection_; they cannot answer "is CI green?" or
+"what did reviewers decide?" without a second GitHub call. The `summary` object
+answers those from the **same single observation** that produced the fingerprints
+(no extra fetch). It is present only on PR deltas with an observed `to` state
+(absent on issue deltas and the missing lifecycle) and is a **sibling of `to`**,
+so `id` and every pre-existing field are byte-identical with or without the flag.
+It is an optional **hint**: a fail-closed consumer may re-derive authoritative
+facts itself.
+
+```json
+{
+  "ciRollup": "green",
+  "reviewDecision": "approved",
+  "mergeable": "mergeable",
+  "state": "open",
+  "isDraft": false,
+  "unresolvedReviewThreads": 0,
+  "headSha": "9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c"
+}
+```
+
+Every field is a total function of the observed `to` state; the shape is fixed
+(no field is ever omitted when `summary` is present).
+
+| Field                     | Type    | Domain / Notes                                                                                                                                                                                                                          |
+| ------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ciRollup`                | enum    | `green` \| `failed` \| `pending` \| `none`. Rolled up from the CI checks with precedence `failed > pending > green`. **`none` means zero checks ran** — never conflated with `green`, so a fail-closed gate decides what "no CI" means. |
+| `reviewDecision`          | enum    | `approved` \| `changes_requested` \| `review_required` \| `none`. Normalized from GitHub `reviewDecision`. `none` covers both "no review-required rule" and "required but none submitted yet" — GitHub does not distinguish these here. |
+| `mergeable`               | enum    | `mergeable` \| `conflicting` \| `unknown`. `unknown` = GitHub has not finished recomputing mergeability (common right after a base-branch change). Deliberately **not** a boolean, so `conflicting` and "not computed" stay distinct.   |
+| `state`                   | enum    | `open` \| `closed` \| `merged`. Lowercased PR state.                                                                                                                                                                                    |
+| `isDraft`                 | boolean | Draft status, as a real boolean.                                                                                                                                                                                                        |
+| `unresolvedReviewThreads` | integer | Non-negative count of unresolved review threads (same value as the `to` fingerprint's field).                                                                                                                                           |
+| `headSha`                 | string  | The head commit SHA (git OID), under an unambiguous name. Empty string `""` if unobserved.                                                                                                                                              |
+
+The field set and enum domains are also emitted machine-readably under
+`output.deltaSummaryFields` and `output.deltaSummaryEnums` in `gh-delta --help-json`,
+and are importable as `DELTA_SUMMARY_FIELDS` / `DELTA_SUMMARY_ENUMS` from
+`gh-delta/contract` — enough to generate a Zod or JSON-Schema validator without
+parsing this document. `summary` is additive and does **not** bump `schemaVersion`
+(see [schemaVersion policy](#schemaversion-policy)).
+
+When `--summaries` and `--outpost-url` are combined, the same `summary` object is
+mirrored onto the [outpost payload](#outpost-payload-schema-v1) so webhook
+consumers see the identical field.
 
 ### Fingerprint fields (`from` / `to`)
 
@@ -644,3 +701,9 @@ PR head branch name, retained by GitHub after the branch is deleted) mirrors the
 report delta exactly: present only on PR payloads that have a current object, and
 omitted from issue payloads and the missing lifecycle (`missing` /
 `still-missing` / `presumed-deleted`).
+
+When the detector runs with `--summaries`, PR payloads also carry the normalized
+[`summary`](#delta-summary-schema) object, mirrored from the report delta, so a
+webhook receiver reads the same semantic state (`ciRollup`, `reviewDecision`,
+`mergeable`, …) as a consumer of the JSON report. It is omitted when `--summaries`
+is not set and on payloads without a current object.

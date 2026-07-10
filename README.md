@@ -141,6 +141,41 @@ when it also needs structured class-level explanations. The full report shape is
 specified in [Report Shape](docs/contract.md#report-shape), and practical output
 examples are in [docs/usage.md](docs/usage.md#output).
 
+### Semantic summaries (`--summaries`)
+
+The per-delta `from`/`to` fingerprints are opaque digests tuned for change
+_detection_ — correct for "did CI change?" but useless for "is CI green?". Pass
+`--summaries` to add a normalized, typed `summary` object to every PR delta that
+has an observed `to` state. It is derived from the **same single observation**
+that produced the fingerprints (no second GitHub fetch), and is a **sibling** of
+`to`, so the content-addressed `delta.id` and every existing field stay
+byte-identical whether or not the flag is set. Consumers may treat it as a hint
+and still re-derive authoritative facts themselves.
+
+```jsonc
+"summary": {
+  // 'none' means ZERO checks ran — never conflated with 'green'. Fail-closed
+  // consumers decide what "no CI" means. Precedence is failed > pending > green.
+  "ciRollup": "green" | "failed" | "pending" | "none",
+  // 'none' also covers "no review-required rule" and "required but none submitted
+  // yet"; GitHub does not distinguish these without a branch-protection fetch.
+  "reviewDecision": "approved" | "changes_requested" | "review_required" | "none",
+  // 'unknown' = GitHub has not finished recomputing mergeability (kept honest,
+  // never collapsed to a boolean).
+  "mergeable": "mergeable" | "conflicting" | "unknown",
+  "state": "open" | "closed" | "merged",
+  "isDraft": true,                    // boolean
+  "unresolvedReviewThreads": 0,       // non-negative integer
+  "headSha": "<head commit SHA, or '' if unobserved>"
+}
+```
+
+Issue deltas and the missing lifecycle (`to` is null) carry no `summary`. The
+field set and enum domains are also emitted machine-readably under
+`output.deltaSummaryFields` / `output.deltaSummaryEnums` in `--help-json`, and the
+authoritative schema lives in
+[Delta Summary schema](docs/contract.md#delta-summary-schema).
+
 ## Watch Loops and Outposts
 
 See [RUNBOOK.md](RUNBOOK.md) for timer-driven loop patterns. The recommended
