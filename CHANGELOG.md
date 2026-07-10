@@ -4,6 +4,15 @@ All notable changes to this package will be documented here.
 
 This project follows semantic versioning once published to npm.
 
+## [0.3.0](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.2.0...gh-delta-v0.3.0) (2026-07-10)
+
+
+### Features
+
+* add optional --summaries semantic layer for PR deltas ([#14](https://github.com/diegomarino/gh-delta/issues/14)) ([c1e7aa1](https://github.com/diegomarino/gh-delta/commit/c1e7aa156da5a6e3c19439b37d29efb05a60bb2b))
+* **cli:** gh-delta list — read-only inventory of every local monitor ([#11](https://github.com/diegomarino/gh-delta/issues/11)) ([0f757da](https://github.com/diegomarino/gh-delta/commit/0f757da68599ba6f2b5571e0cca35b36eec40cb8))
+* name the exact checks and reviews behind ci-changed/review-changed details ([#12](https://github.com/diegomarino/gh-delta/issues/12)) ([d948d3e](https://github.com/diegomarino/gh-delta/commit/d948d3e6718b0252feb1b6ea427eb48fe2a88d12))
+
 ## [0.2.0](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.1.1...gh-delta-v0.2.0) (2026-07-08)
 
 
