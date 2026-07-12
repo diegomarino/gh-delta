@@ -56,6 +56,13 @@ const issue17 = withId({
   to: { state: 'OPEN', labels: ['backend', 'worker'] },
 });
 
+// lib/cli.mjs never puts a `warnings` key on the base report object (see
+// run()); it is only spliced in by runCommand() when outpost delivery
+// returned at least one non-empty warning. A live run therefore *omits*
+// `warnings` entirely on the common path these fixtures depict, so the
+// fixtures must omit it too (fixes audit finding F10.1, the "impossible
+// warnings key").
+
 /** Run 1 — zero-config baseline seed. */
 export const baselineReport = Object.freeze({
   schemaVersion: 1,
@@ -67,7 +74,6 @@ export const baselineReport = Object.freeze({
   at: AT_BASELINE,
   deltas: [],
   summary: 'baseline established: 1 PRs, 1 issues',
-  warnings: [],
 });
 
 /** Run 2 — second tick, two deltas, text output. */
@@ -81,19 +87,21 @@ export const deltaReport = Object.freeze({
   at: AT,
   deltas: [pr42, issue17],
   summary: '2 delta(s)',
-  warnings: [],
 });
 
+// `entities` matches the flag-free `gh-delta --repo owner/repo --format json
+// --detail` command rendered in generate-cast.mjs (no `--entities` flag) and
+// the `__pr-issue` segment of STATE_FILE (fixes audit finding F10.2, the
+// "impossible --entities echo").
 /** Run 3 — the same PR #42 tick, `--format json --detail`. */
 export const detailReport = Object.freeze({
   schemaVersion: 1,
   baseline: false,
   repo: REPO,
   monitorId: MONITOR,
-  entities: ['pr'],
+  entities: ['pr', 'issue'],
   stateFile: STATE_FILE,
   at: AT,
   deltas: [pr42],
   summary: '1 delta(s)',
-  warnings: [],
 });

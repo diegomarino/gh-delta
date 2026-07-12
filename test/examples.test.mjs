@@ -21,13 +21,29 @@ import { baselineReport, deltaReport, detailReport } from '../tools/examples/fix
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const keySet = (obj) => new Set(Object.keys(obj));
 
-test('every example report covers exactly the frozen REPORT_FIELDS', () => {
+test('every example report covers exactly the frozen REPORT_FIELDS, minus the omit-when-empty ones', () => {
+  // lib/cli.mjs's run() never puts `warnings` on the base report object; it is
+  // only spliced in by runCommand() when outpost delivery returned at least
+  // one warning (see the `!result.warnings?.length` guard there). A live run
+  // on the common path these fixtures depict therefore omits `warnings`
+  // entirely, so the frozen field list minus that key is what a real report
+  // covers here — asserting the raw REPORT_FIELDS set would require a key no
+  // live run actually emits (audit finding F10.1).
+  const OMIT_WHEN_EMPTY = new Set(['warnings']);
+  const expected = [...REPORT_FIELDS].filter((field) => !OMIT_WHEN_EMPTY.has(field));
   for (const [name, report] of Object.entries({ baselineReport, deltaReport, detailReport })) {
     assert.deepEqual(
       [...keySet(report)].sort(),
-      [...REPORT_FIELDS].sort(),
-      `${name} must exercise exactly the contract report fields`,
+      [...expected].sort(),
+      `${name} must exercise exactly the contract report fields a live run would populate`,
     );
+    for (const field of OMIT_WHEN_EMPTY) {
+      assert.equal(
+        field in report,
+        false,
+        `${name} must omit "${field}" the way a live run does when it is empty`,
+      );
+    }
   }
 });
 
@@ -135,6 +151,28 @@ test('every emitted detail row stays within the frozen detail contract', () => {
       }
     }
   }
+});
+
+test('the detail report is internally consistent: flag-free command, entities, and stateFile agree', () => {
+  // The `--format json --detail` cast in tools/examples/generate-cast.mjs
+  // renders `detailReport` behind the literal command below, which carries no
+  // `--entities` flag. A flag-free command defaults to monitoring both
+  // entities, so the echoed `entities` must be `["pr", "issue"]` — matching
+  // both the command and the `__pr-issue` segment of the state file name —
+  // rather than the narrower `["pr"]` a `--entities pr` run would echo
+  // (fixes audit finding F10.2, the "impossible --entities echo").
+  const command = 'gh-delta --repo owner/repo --format json --detail';
+  assert.equal(command.includes('--entities'), false, 'the rendered command must stay flag-free');
+  assert.deepEqual(
+    detailReport.entities,
+    ['pr', 'issue'],
+    'a flag-free command must echo both entities, matching the __pr-issue state file',
+  );
+  assert.match(
+    detailReport.stateFile,
+    /__pr-issue\.json$/,
+    'stateFile must carry the __pr-issue segment that matches entities: ["pr", "issue"]',
+  );
 });
 
 test('the GitHub Actions Slack example does not save corrupt snapshot state', () => {
