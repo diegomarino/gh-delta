@@ -60,7 +60,11 @@ You have two ways to secure a non-localhost deployment — pick at least one:
      otherwise.
 
    ```bash
-   OUTPOST_SECRET=$(openssl rand -hex 32) NTFY_TOPIC=my-gh-deltas HOST=0.0.0.0 node receiver.mjs &
+   # Export the secret first so BOTH the receiver and the sender below see it.
+   # (A command-prefix `OUTPOST_SECRET=... node receiver.mjs` would scope it to
+   # the receiver only, leaving the sender's $OUTPOST_SECRET empty -> 401.)
+   export OUTPOST_SECRET=$(openssl rand -hex 32)
+   NTFY_TOPIC=my-gh-deltas HOST=0.0.0.0 node receiver.mjs &
    gh-delta --repo owner/repo --monitor-id push --state-dir ./state \
      --outpost-url "http://receiver.example.com:8787/?secret=$OUTPOST_SECRET"
    ```
