@@ -4,6 +4,23 @@ All notable changes to this package will be documented here.
 
 This project follows semantic versioning.
 
+## [0.3.1](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.3.0...gh-delta-v0.3.1) (2026-07-12)
+
+
+### Bug Fixes
+
+* pass gh GraphQL variables as raw string fields ([2a0be9b](https://github.com/diegomarino/gh-delta/commit/2a0be9b9a96c8a3de20f83e081448576c9a2e1a8))
+* terminal-safe text output and clearer gh-delta list behavior ([056aebd](https://github.com/diegomarino/gh-delta/commit/056aebd6d5ea8db5ba573bc186523e5001d83108))
+
+
+### Documentation
+
+* complete delta-class coverage and scheduler provenance ([3ee690f](https://github.com/diegomarino/gh-delta/commit/3ee690fd3e793f978bc476a330b5086b26189485))
+* correct contract and architecture reference gaps ([066f80c](https://github.com/diegomarino/gh-delta/commit/066f80cf4e13b02e0cec041c04d2455c9e95b7fb))
+* document the release process and fix the package inventory ([25ff347](https://github.com/diegomarino/gh-delta/commit/25ff34748eec9709aaa8a01762c2ffa67088ce9a))
+* fix research anchors, add refresh policy and a docs index ([ca4f673](https://github.com/diegomarino/gh-delta/commit/ca4f67378a32589f3a87e3fa5402771da9cb2d00))
+* use present-tense npm install framing ([69a13b0](https://github.com/diegomarino/gh-delta/commit/69a13b06a4ff4a274afa3b47a759c74561797a3f))
+
 ## [0.3.0](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.2.0...gh-delta-v0.3.0) (2026-07-10)
 
 
