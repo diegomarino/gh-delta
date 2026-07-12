@@ -66,7 +66,7 @@ Minimal zero-config invocation:
 gh-delta --repo owner/repo
 ```
 
-Install from npm once published:
+Install from npm:
 
 ```bash
 npm install --global gh-delta

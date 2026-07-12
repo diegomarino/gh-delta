@@ -12,7 +12,7 @@ accidentally weaken the current missing-object and closed-state guarantees.
 
 The detector's current implementation fetches PRs through `gh api graphql`, not
 through `gh pr list`. Keep this aligned with
-[`docs/architecture.md`](../architecture.md#github-fetch-contract).
+[`docs/architecture.md`](../architecture.md#github-fetch-strategy).
 
 Current behavior:
 

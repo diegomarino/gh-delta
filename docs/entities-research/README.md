@@ -21,6 +21,16 @@ Do not add public selectors such as `--filter`, `--query`, `--label`,
 research notes alone. Promote an entity only after its identity, pagination,
 permissions, fingerprint, and truncation behavior have been verified.
 
+## Refresh Policy
+
+This subtree ships inside the npm tarball as reference material, not as a
+runtime dependency. Its field lists reflect a point-in-time snapshot of the
+GitHub CLI and GraphQL schema and will drift out of date. Before promoting an
+entity out of this directory, or relying on one of these pages' field lists
+for implementation work, re-run field discovery against the live GitHub
+GraphQL schema and `gh <command> --json` output, then bump that page's "Last
+verified" date.
+
 ## Verification Sources
 
 - Context7 resolved the GitHub CLI manual as `/websites/cli_github_manual`.

@@ -4,9 +4,10 @@ Canonical, machine-facing contract for `gh-delta`. Other docs link here; do not
 duplicate these tables elsewhere (the one exception is the self-contained prompt
 in `docs/watch-loop-prompt.md`).
 
-This contract is stable for the `0.1` line. `report.schemaVersion` identifies the
-report shape at runtime (see [Report Shape](#report-shape)). The machine-readable
-form of this document is available at `gh-delta --help-json`.
+This contract is stable while `report.schemaVersion === 1`. `report.schemaVersion`
+identifies the report shape at runtime (see [Report Shape](#report-shape)); a
+breaking change bumps it (see [schemaVersion policy](#schemaversion-policy)). The
+machine-readable form of this document is available at `gh-delta --help-json`.
 
 ## CLI
 
@@ -198,17 +199,17 @@ deltas), the CLI writes one small breadcrumb per monitor:
 The package publishes a small, explicit ESM surface. Imports must use explicit
 subpaths; the package root is intentionally not exported.
 
-| Export path            | Symbols                                                                                                                                                                                                                                         | Purpose                                       |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| `gh-delta/detect`      | `detectDeltas`                                                                                                                                                                                                                                  | Pure delta classification engine              |
-| `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint`, `summarizeCiRollup`, `summarizeReviews`                                                                                                                             | Stable object fingerprint builders            |
-| `gh-delta/list`        | `listMonitors`, `parseSnapshotFilename`, `parseSince`                                                                                                                                                                                           | Read-only monitor snapshot inventory          |
-| `gh-delta/registry`    | `registerMonitor`, `readRegistry`, `defaultRegistryDir`, `registryEntryPath`, `canonicalStateFileKey`                                                                                                                                           | Run-registry breadcrumbs for gh-delta list    |
-| `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`                                                                                                                                                                      | Outpost payload and transport helpers         |
-| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`, `defaultStateDir`                                                                                                                                                                        | Snapshot path and persistence helpers         |
-| `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`, `canonicalEntityKey`                                                                                                                                                               | Shared argument parsing policies              |
-| `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                                                                                                                                                                                       | Package metadata and version output           |
-| `gh-delta/contract`    | `REPORT_SCHEMA_VERSION`, `OUTPOST_SCHEMA_VERSION`, `REPORT_FIELDS`, `DELTA_FIELDS`, `DELTA_DETAIL_FIELDS`, `DELTA_DETAIL_FIELDS_BY_CLASS`, `DELTA_CLASSES`, `ERROR_KINDS`, `LIST_REPORT_FIELDS`, `LIST_MONITOR_FIELDS`, `REGISTRY_ENTRY_FIELDS` | Runtime contract constants and field catalogs |
+| Export path            | Symbols                                                                                                                                                                                                                                                                                        | Purpose                                                 |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `gh-delta/detect`      | `detectDeltas`                                                                                                                                                                                                                                                                                 | Pure delta classification engine                        |
+| `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint`, `summarizeCiRollup`, `summarizeReviews`, `comparableFingerprint`, `stableValue`, `deltaIdentity`, `deltaId`                                                                                                        | Stable object fingerprint builders and delta-id hashing |
+| `gh-delta/list`        | `listMonitors`, `parseSnapshotFilename`, `parseSince`                                                                                                                                                                                                                                          | Read-only monitor snapshot inventory                    |
+| `gh-delta/registry`    | `registerMonitor`, `readRegistry`, `defaultRegistryDir`, `registryEntryPath`, `canonicalStateFileKey`, `REGISTRY_VERSION`                                                                                                                                                                      | Run-registry breadcrumbs for gh-delta list              |
+| `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`                                                                                                                                                                                                                     | Outpost payload and transport helpers                   |
+| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`, `defaultStateDir`, `horizonCutoff`                                                                                                                                                                                                      | Snapshot path and persistence helpers                   |
+| `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`, `canonicalEntityKey`, `defaultMonitorId`                                                                                                                                                                                          | Shared argument parsing policies                        |
+| `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                                                                                                                                                                                                                                      | Package metadata and version output                     |
+| `gh-delta/contract`    | `REPORT_SCHEMA_VERSION`, `OUTPOST_SCHEMA_VERSION`, `REPORT_FIELDS`, `DELTA_FIELDS`, `DELTA_DETAIL_FIELDS`, `DELTA_DETAIL_FIELDS_BY_CLASS`, `DELTA_CLASSES`, `ERROR_KINDS`, `LIST_REPORT_FIELDS`, `LIST_MONITOR_FIELDS`, `REGISTRY_ENTRY_FIELDS`, `DELTA_SUMMARY_FIELDS`, `DELTA_SUMMARY_ENUMS` | Runtime contract constants and field catalogs           |
 
 Behavioral notes for consumers:
 
@@ -219,6 +220,24 @@ Behavioral notes for consumers:
 - `readSnapshot` throws on malformed JSON; callers should treat this as
   recoverable only via explicit snapshot reset.
 - `snapshotPath` is deterministic and scoped by repo, monitor-id, and entity set.
+- `horizonCutoff` derives the incremental-fetch cutoff from a prior snapshot
+  (`meta.horizon` minus the overlap, or the newest fingerprint `updatedAt` for
+  legacy snapshots without `meta`); a `null` snapshot yields `null` (open-items-
+  only fetch).
+- `comparableFingerprint` strips bookkeeping and detail-only keys
+  (`missing`, `missingTicks`, `commentsOverflow`, `ciChecks`, `reviewSummary`)
+  from a stored fingerprint before it is compared or hashed into a delta id.
+- `stableValue` recursively key-sorts an object so GitHub's field ordering never
+  changes a fingerprint hash or a delta `id`.
+- `deltaIdentity` builds the `{ repo, entity, number, to }` (or, when `to` is
+  `null`, `{ repo, entity, number, from, classes, missingTicks }`) object that
+  `deltaId` hashes into the content-addressed `id` on every delta.
+- `deltaId` returns the full 64-character sha256 hex of a canonicalized delta
+  identity; pair it with `deltaIdentity` at the report-assembly layer.
+- `defaultMonitorId` derives the zero-config `--monitor-id` default (`host-` +
+  the first 12 hex characters of the sha1 of `os.hostname()`).
+- `REGISTRY_VERSION` is the integer schema version stamped into every
+  run-registry breadcrumb file.
 
 The exit code is the primary machine signal. Branch on it before reading stdout:
 codes `1` and `2` produce an [error report](#error-report-shape) with no
@@ -226,7 +245,7 @@ codes `1` and `2` produce an [error report](#error-report-shape) with no
 
 ## Delta Classes
 
-Closed set for the `0.1` line. Every delta carries at least one class; `classes`
+Closed set while `report.schemaVersion === 1`. Every delta carries at least one class; `classes`
 is **never empty** (`updated` is the catch-all). `classes` is a **set** — several
 can co-occur on one delta (e.g. `ci-changed` + `review-changed`). Order within
 the array is not significant and not guaranteed stable.
@@ -380,7 +399,7 @@ Each delta:
   > never "does the branch still exist".
 
 - `classes` (string[]): non-empty set of [classes](#delta-classes).
-- `from`, `to`: entity [fingerprints](#fingerprint-fields), or `null`. `from` is
+- `from`, `to`: entity [fingerprints](#fingerprint-fields-from--to), or `null`. `from` is
   `null` when `classes` includes `new` or `first-seen`; `to` is `null` when
   `classes` includes `missing`, `still-missing`, or `presumed-deleted`.
 - `missingTicks` (number): present on `missing`, `still-missing`, and
@@ -446,7 +465,7 @@ the order follows the GitHub fetch result. Do not rely on positional access
 
 ### Delta Summary schema
 
-Added by `--summaries`. The `from`/`to` [fingerprints](#fingerprint-fields) are
+Added by `--summaries`. The `from`/`to` [fingerprints](#fingerprint-fields-from--to) are
 opaque digests built for change _detection_; they cannot answer "is CI green?" or
 "what did reviewers decide?" without a second GitHub call. The `summary` object
 answers those from the **same single observation** that produced the fingerprints
@@ -546,9 +565,9 @@ Emitted with exit code `1` (transient) or `2` (permanent). It **does not** carry
 
 - `schemaVersion` (number), `error` (string), `at` (string): always present.
 - `kind` (string): one of `config`, `snapshot`, `github`, `io`. This is a closed
-  set for `0.1` but forward-compatible like classes — treat unknown values as
-  "something changed, inspect". `config` and `snapshot` kinds map to exit `2`;
-  `github` and `io` kinds map to exit `1`.
+  set while `report.schemaVersion === 1`, but forward-compatible like classes —
+  treat unknown values as "something changed, inspect". `config` and `snapshot`
+  kinds map to exit `2`; `github` and `io` kinds map to exit `1`.
 - `repo`, `monitorId` (string): present once the corresponding flag has been
   parsed (absent for errors raised before that, e.g. an unknown option). `error`
   strings are human-readable and not a stable enum.
@@ -565,6 +584,23 @@ timestamp of the previous run) minus a 5-minute overlap is used as a cutoff:
 all-states items updated since that cutoff are also fetched to observe closed,
 merged, and relabeled transitions. Absent closed items are dormant memory, not a
 missing delta — only items the snapshot believes OPEN can vanish.
+
+### Fetch limits (page caps)
+
+Each GraphQL page returns `PAGE_SIZE = 100` items. Per entity family (`pr` or
+`issue`), per tick:
+
+- **Open-items phase:** capped at 10 pages (`MAX_OPEN_PAGES`) — **1000 open
+  items** per family.
+- **Updated-items phase:** capped at 30 pages (`MAX_UPDATED_PAGES`) — **3000
+  updated items** per family per tick.
+
+Exceeding either cap — or a nested sub-page overflow (e.g. the CI-check rollup
+page inside a PR node) — is treated as incomplete state and **fails closed**
+(exit `1`); it never silently truncates and reports partial data. A repository
+family with more than 1000 currently-open items, or with more than 3000 items
+updated since the last horizon, needs a shorter tick interval or a narrower
+`--entities` selection to stay under these caps.
 
 Snapshot shape: `{ "pr": object, "issue": object, "meta"?: object }`.
 `meta.horizon` is stamped with the run timestamp on every successful write.
@@ -603,6 +639,14 @@ their derived filename or a registry entry.
   `(repo, monitor-id, entities)`. The same rule is exposed in
   `gh-delta --help-json` as `stateConcurrency` so agents and schedulers do not
   need to parse Markdown to discover the overlap risk.
+- **Downgrade caveat.** Snapshots are forward-written, not version-negotiated:
+  rolling back to gh-delta 0.2.0 over a snapshot last written by 0.3.0 fires a
+  bounded burst of spurious `updated` deltas — one per open PR — on the first
+  tick after the downgrade, because 0.2.0's `comparableFingerprint` does not
+  tolerate the newer persisted keys (e.g. `ciChecks`, `reviewSummary`). The
+  burst is self-correcting: the next tick re-establishes a clean baseline under
+  the older binary. Prefer not to downgrade a monitor across a snapshot; if you
+  must, expect and discard that one-time burst.
 
 ### schemaVersion policy
 
@@ -693,7 +737,8 @@ same observed change reported by several monitors. `eventId` is stable for the
 semantic delta **within a monitor** (it includes `monitorId`) and is the
 receiver's per-monitor dedupe key. `deliveryId` includes the detector timestamp
 and identifies one delivery attempt. `gh-delta` does not provide reliable
-delivery, retries, an outbox, acknowledgement, or replay in `0.1`. Classes are
+delivery, retries, an outbox, acknowledgement, or replay while
+`report.schemaVersion === 1`. Classes are
 sorted before they are joined into the ids, so semantic identity is independent
 of the order the classifier emitted them. PR payloads currently use an empty
 `labels` array because the PR fetch does not collect labels. `headRefName` (the

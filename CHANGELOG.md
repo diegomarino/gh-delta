@@ -2,7 +2,7 @@
 
 All notable changes to this package will be documented here.
 
-This project follows semantic versioning once published to npm.
+This project follows semantic versioning.
 
 ## [0.3.0](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.2.0...gh-delta-v0.3.0) (2026-07-10)
 

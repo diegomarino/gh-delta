@@ -48,6 +48,7 @@ actions/cache save (skip exit 2)
 ## Requirements
 
 Nothing to install: `node`, `npx`, `gh`, and `jq` are preinstalled on
-`ubuntu-latest` runners. `npx gh-delta` resolves once the package is published
-to npm; until then, check out gh-delta in the workflow and call
-`node <checkout>/gh-delta.mjs` instead.
+`ubuntu-latest` runners. `npx gh-delta` resolves the published package
+directly, as used in the workflow above. Checking out gh-delta and calling
+`node <checkout>/gh-delta.mjs` instead remains a valid alternative, e.g. for
+pinning to an unreleased commit.

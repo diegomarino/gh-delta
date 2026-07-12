@@ -12,7 +12,7 @@ issue hierarchy, blocking, and issue type.
 
 The detector's current implementation fetches issues through `gh api graphql`,
 not through `gh issue list`. Keep this aligned with
-[`docs/architecture.md`](../architecture.md#github-fetch-contract).
+[`docs/architecture.md`](../architecture.md#github-fetch-strategy).
 
 Current behavior:
 
