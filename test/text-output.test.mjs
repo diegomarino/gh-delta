@@ -1,7 +1,7 @@
 // Text formatter tests: operator-facing output stays readable without a second bin.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatTextOutput } from '../lib/text-output.mjs';
+import { formatTextOutput, formatListTextOutput } from '../lib/text-output.mjs';
 import { DELTA_CLASSES } from '../lib/contract.mjs';
 
 const issueDelta = {
@@ -145,6 +145,99 @@ test('error text output reports snapshot-preserving failure', () => {
   assert.match(output, /gh: API rate limit exceeded/);
   assert.match(output, /Snapshot was not updated/);
   assert.match(output, /The next scheduled tick should retry/);
+});
+
+test('text output neutralizes terminal control sequences in GitHub-derived titles', () => {
+  // An attacker who can open an issue/PR controls the title. A raw OSC/BEL could
+  // rewrite the operator's terminal title, and an embedded newline could forge a
+  // line that looks like a second, genuine delta. Both must be neutralized.
+  const output = formatTextOutput({
+    code: 10,
+    report: {
+      baseline: false,
+      repo: 'owner/repo',
+      monitorId: 'watch',
+      at: '2026-07-01T10:05:00.000Z',
+      deltas: [
+        {
+          entity: 'pr',
+          number: 1,
+          title: 'pwn\x1b]0;hijacked\x07\nowner/repo | 99 delta(s)',
+          classes: ['new'],
+        },
+      ],
+    },
+    now: () => '2026-07-01T10:05:00.000Z',
+  });
+
+  // Only the structural \n / \t the renderer adds itself may remain as controls.
+  for (const ch of output) {
+    const code = ch.codePointAt(0);
+    if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) {
+      assert.ok(
+        ch === '\n' || ch === '\t',
+        `control byte 0x${code.toString(16)} leaked into text output`,
+      );
+    }
+  }
+  assert.ok(!output.includes('\x1b'), 'ESC must never reach the terminal');
+  assert.ok(!output.includes('\x07'), 'BEL must never reach the terminal');
+
+  // The attacker's newline must not forge a separate delta line: the crafted
+  // "99 delta(s)" text collapses onto the same rendered label line as the title.
+  const forged = output.split('\n').find((l) => l.includes('99 delta(s)'));
+  assert.ok(
+    forged.includes('pwn'),
+    'the forged fragment must stay inside the sanitized title line',
+  );
+});
+
+test('list text output prints the snapshot path so identical monitors are distinguishable', () => {
+  const monitor = (stateFile) => ({
+    repo: 'o/r',
+    monitorId: 'watch',
+    entities: ['pr', 'issue'],
+    lastRun: '2026-07-01T09:00:00.000Z',
+    prCount: 1,
+    issueCount: 0,
+    stateFile,
+  });
+  const output = formatListTextOutput({
+    report: {
+      command: 'list',
+      at: '2026-07-01T10:00:00.000Z',
+      stateDir: '/state',
+      registryDir: null,
+      since: null,
+      skippedFiles: 0,
+      monitors: [monitor('/state/a.json'), monitor('/state/b.json')],
+    },
+  });
+
+  assert.match(output, /file: \/state\/a\.json/);
+  assert.match(output, /file: \/state\/b\.json/);
+  const monitorLines = output.split('\n').filter((l) => l.includes('o/r'));
+  assert.notEqual(
+    monitorLines[0],
+    monitorLines[1],
+    'monitors sharing repo + monitorId + entities must render as distinct lines',
+  );
+});
+
+test('list error text output avoids snapshot/delta vocabulary', () => {
+  const output = formatListTextOutput({
+    report: {
+      command: 'list',
+      error: '--since must be a positive integer followed by s, m, h, or d',
+      kind: 'config',
+      at: '2026-07-01T10:00:00.000Z',
+    },
+  });
+
+  assert.match(output, /list error/);
+  assert.match(output, /gh-delta list error: --since must be/);
+  assert.doesNotMatch(output, /delta\(s\)/);
+  assert.doesNotMatch(output, /[Ss]napshot/);
 });
 
 test('permanent error text output tells operator to fix before retrying', () => {
