@@ -4,6 +4,7 @@ import { defineConfig } from 'eslint/config';
 
 const nodeGlobals = {
   AbortController: 'readonly',
+  Buffer: 'readonly',
   clearTimeout: 'readonly',
   console: 'readonly',
   globalThis: 'readonly',
