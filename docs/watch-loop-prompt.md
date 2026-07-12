@@ -44,13 +44,18 @@ Run the GitHub delta detector for `<owner/name>` and act on what it reports.
 
 3. Delta class -> action:
    - new (PR): a worker opened a PR. Read it; queue it for review.
+   - first-seen: first observed non-open item. Inspect it before treating it as
+     newly created.
    - ci-changed: CI green -> move toward merge. CI red -> nudge the worker with
      the failure.
    - review-changed: APPROVED -> merge candidate. CHANGES_REQUESTED -> relay the
      changes to the worker.
    - became-mergeable: conflicts resolved -> merge candidate.
+   - draft-ready: PR left draft and is ready for review. Queue it for review or
+     dispatch.
    - merged / closed: a slice is done. Advance the build order or sync the spawn
      base.
+   - reopened: item reopened. Re-enter it into the active work queue.
    - new-comments: read the PR/issue threads; fold in any review comments before
      merging.
    - unresolved-threads-added: unresolved PR review threads appeared. Read and

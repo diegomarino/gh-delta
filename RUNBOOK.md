@@ -142,10 +142,10 @@ Payloads use schema v1: see [Outpost payload schema v1](docs/contract.md#outpost
 
 Outpost is best-effort notification. `eventId` is the semantic dedupe key and
 `deliveryId` identifies one delivery attempt. `gh-delta` does not provide
-reliable delivery, retries, an outbox, acknowledgement, or replay in `0.1`.
-The endpoint owns filtering, deduplication by `eventId`, and any downstream
-action. Do not put secrets in the outpost URL. If authentication is added later,
-headers or tokens must not be printed in logs.
+reliable delivery, retries, an outbox, acknowledgement, or replay while
+`report.schemaVersion === 1`. The endpoint owns filtering, deduplication by
+`eventId`, and any downstream action. Do not put secrets in the outpost URL. If
+authentication is added later, headers or tokens must not be printed in logs.
 
 ## Semantic Summaries
 
@@ -177,6 +177,10 @@ gh-delta --repo "$REPO" --monitor-id acc --state-dir "$STATE" --entities pr --su
 ```
 
 ## Scheduler Choices
+
+The scheduler-specific claims below (Claude Code, Codex, and ChatGPT behavior)
+were verified against vendor docs on 2026-07-12. Re-verify before relying on
+them if this section is significantly older than the vendor's current release.
 
 ### Plain Cron Or Equivalent
 
@@ -229,7 +233,9 @@ developer polling loops or webhook-driven automation.
 | `ci-changed`                  | CI green: consider merge path; CI red: nudge worker with the failure (with `--format json --detail`, the delta's `ci` detail names the exact checks that changed) |
 | `review-changed`              | approved: merge candidate; changes requested: relay to worker (with `--format json --detail`, the `reviews` detail names the reviewers and state transitions)     |
 | `became-mergeable`            | conflicts resolved; merge candidate                                                                                                                               |
+| `draft-ready`                 | PR left draft and is ready for review; queue it for review or dispatch                                                                                            |
 | `merged` / `closed`           | slice done; advance build order or sync spawn base                                                                                                                |
+| `reopened`                    | item reopened; re-enter it into the active work queue                                                                                                             |
 | `new-comments`                | read PR threads; fold review comments before merge                                                                                                                |
 | `unresolved-threads-added`    | unresolved review threads appeared; resolve before merge                                                                                                          |
 | `unresolved-threads-resolved` | review threads resolved; re-check CI and review state                                                                                                             |
