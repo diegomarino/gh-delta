@@ -31,7 +31,6 @@ unless it materially improves correctness.
   - [docs/contract.md](docs/contract.md)
 - If release logic changes, update:
   - [docs/release-checklist.md](docs/release-checklist.md)
-  - [docs/go-public-runbook.md](docs/go-public-runbook.md)
 
 ## Commit Convention
 
@@ -57,9 +56,9 @@ The scope is optional: `feat(cli): add --format flag`.
 ## Releases
 
 Releases are automated via release-please; see
-[`docs/go-public-runbook.md`](docs/go-public-runbook.md) for the full
-release process. Never hand-edit `CHANGELOG.md` or the `version` field in
-`package.json`; release-please owns both.
+[`docs/release-checklist.md`](docs/release-checklist.md#release-process) for
+the full release process. Never hand-edit `CHANGELOG.md` or the `version`
+field in `package.json`; release-please owns both.
 
 ## Entity Research
 
