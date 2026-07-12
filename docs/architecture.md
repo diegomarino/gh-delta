@@ -220,8 +220,9 @@ flowchart TD
 
 Open-items results and updated-items results are merged: the open-items phase
 wins on duplicates. Any nested pagination overflow is treated as incomplete
-state and fails closed. Exact page-cap values and exit behavior live in
-[Exit Codes](contract.md#exit-codes).
+state and fails closed. Exact page-cap values live in
+[Fetch limits (page caps)](contract.md#fetch-limits-page-caps); the resulting
+exit behavior is specified in [Exit Codes](contract.md#exit-codes).
 
 Fingerprints track only the GitHub fields needed to detect the public delta
 classes. The class list and forward-compatibility policy live in
