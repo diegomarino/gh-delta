@@ -143,7 +143,14 @@ async function forward(payload) {
 
 const server = createServer((req, res) => {
   if (req.method !== 'POST') return respond(res, 405, { error: 'POST only' });
-  const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
+  // req.headers.host is client-controlled; a malformed value makes new URL()
+  // throw synchronously, which would crash the process on an exposed bind.
+  let url;
+  try {
+    url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
+  } catch {
+    return respond(res, 400, { error: 'invalid request URL or Host header' });
+  }
   if (!isAuthorized(req, url)) return respond(res, 401, { error: 'unauthorized' });
   let body = '';
   req.setEncoding('utf8');
