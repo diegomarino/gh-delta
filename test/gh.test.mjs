@@ -173,6 +173,34 @@ test('the PR query requests headRefName and normalizePr carries it (defensively 
   assert.equal(missingName[0].headRefName, null);
 });
 
+test('GraphQL variables are passed as raw -f fields so literal-looking slugs stay strings', () => {
+  // Regression: -F applies gh's magic type coercion, so an all-digit or boolean
+  // slug like `2048` becomes an integer that GitHub rejects for the String!
+  // variable, failing every tick. Every variable here must go out as `-f`.
+  let captured = [];
+  const exec = (_cmd, args) => {
+    captured = args;
+    return page([prNode()]);
+  };
+  fetchPRs('gabrielecirulli/2048', { exec, horizonCutoff: null });
+
+  assert.ok(!captured.includes('-F'), 'no GraphQL variable may use gh -F (type coercion)');
+  assert.ok(
+    !captured.includes('--field'),
+    'no GraphQL variable may use gh --field (type coercion)',
+  );
+
+  const nameIdx = captured.indexOf('name=2048');
+  assert.ok(nameIdx > 0, 'expected the repo name to be passed as a variable');
+  assert.equal(captured[nameIdx - 1], '-f', 'name=2048 must be preceded by -f, never -F');
+
+  const ownerIdx = captured.indexOf('owner=gabrielecirulli');
+  assert.equal(captured[ownerIdx - 1], '-f', 'owner must be passed as a raw -f field');
+
+  const statesIdx = captured.indexOf('states[]=OPEN');
+  assert.equal(captured[statesIdx - 1], '-f', 'array variables must also use -f');
+});
+
 test('normalizePr filters null elements from statusCheckRollup contexts nodes', () => {
   const nodeWithNullContext = prNode({
     commits: {
