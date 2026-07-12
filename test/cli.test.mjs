@@ -993,7 +993,25 @@ test('--help wins over unknown flags and invalid outpost URLs', () => {
 
 test('duplicate --outpost-url uses last-wins like every other flag', async () => {
   const { runWithOutpost } = await import('../lib/cli.mjs');
-  const d = deps([[]]);
+  const existing = {
+    pr: {
+      42: {
+        state: 'OPEN',
+        updatedAt: '2026-07-01T10:00:00Z',
+        isDraft: false,
+        ci: 'da39a3ee5e6b',
+        review: 'REVIEW_REQUIRED',
+        reviews: 'da39a3ee5e6b',
+        mergeable: 'UNKNOWN',
+        comments: 0,
+        head: 'sha1',
+      },
+    },
+    issue: {},
+  };
+  const d = deps([[{ ...basePr, totalCommentsCount: 2, updatedAt: '2026-07-01T11:00:00Z' }]], {
+    existing,
+  });
   const posts = [];
   d.outpostFetch = async (url) => {
     posts.push(url);
@@ -1014,7 +1032,11 @@ test('duplicate --outpost-url uses last-wins like every other flag', async () =>
     ],
     d,
   );
-  assert.equal(code, 0); // baseline, no posts — but parsing must not error
+  assert.equal(code, 10); // a real delta fired, and it was delivered
+  assert.ok(posts.length > 0);
+  // validateOutpostUrl normalizes via `new URL(...).href`, which appends a
+  // trailing slash to a bare-origin URL; match on origin to stay robust to that.
+  assert.ok(posts.every((url) => new URL(url).origin === 'https://second.example'));
 });
 
 test('error kinds map to exit codes: config/snapshot=2, github/io=1', () => {
@@ -1477,6 +1499,18 @@ test('list --format text reports an empty inventory and echoes the window', asyn
   assert.match(bare.output, /No monitor snapshots found\./);
 });
 
+test('list errors in text mode do not borrow snapshot/delta vocabulary', async () => {
+  const d = deps([[basePr]]);
+  const { output, code } = await runCommand(
+    ['list', '--state-dir', '/state', '--since', 'yesterday', '--format', 'text'],
+    d,
+  );
+  assert.equal(code, 2);
+  assert.match(output, /gh-delta list error: --since must be/);
+  assert.doesNotMatch(output, /delta\(s\)/);
+  assert.doesNotMatch(output, /[Ss]napshot was not updated/);
+});
+
 test('a successful run leaves an idempotent registry breadcrumb', () => {
   const d = deps([[basePr]]);
   const registered = [];
@@ -1510,6 +1544,28 @@ test('--no-registry and GH_DELTA_NO_REGISTRY both skip the breadcrumb', () => {
       d,
     );
     assert.equal(code, 0);
+  }
+});
+
+test('GH_DELTA_NO_REGISTRY only disables the breadcrumb for values that mean "on"', () => {
+  // Regression: a plain truthiness test made GH_DELTA_NO_REGISTRY=0 (meaning
+  // "registry ON" to a wrapper author) silently skip registration. `0`, `false`,
+  // and empty are now treated as unset so the breadcrumb is still written.
+  for (const value of ['0', 'false', 'FALSE', '', '  ']) {
+    const d = deps([[basePr]]);
+    const registered = [];
+    d.registerMonitor = (entry) => registered.push(entry);
+    d.env = { GH_DELTA_NO_REGISTRY: value };
+    const { code } = run(
+      ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--entities', 'pr'],
+      d,
+    );
+    assert.equal(code, 0);
+    assert.equal(
+      registered.length,
+      1,
+      `GH_DELTA_NO_REGISTRY=${JSON.stringify(value)} must still register`,
+    );
   }
 });
 
