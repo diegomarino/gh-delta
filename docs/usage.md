@@ -7,7 +7,7 @@ to the contract or run `gh-delta --help-json`.
 
 ## Install and Run
 
-Install globally once published:
+Install globally:
 
 ```bash
 npm install --global gh-delta
