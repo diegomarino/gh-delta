@@ -945,6 +945,32 @@ test('gh-delta rejects invalid --outpost-url before fetching GitHub', async () =
   assert.match(report.error, /--outpost-url must use http: or https:/);
 });
 
+test('config validation precedes repo derivation: an invalid --outpost-url short-circuits before resolveRepo runs', () => {
+  const d = {
+    fetchPRs: () => {
+      throw new Error('should not fetch');
+    },
+    fetchIssues: () => {
+      throw new Error('should not fetch');
+    },
+    now: () => '2026-07-01T12:00:00Z',
+    resolveRepo: () => {
+      throw new Error('resolver must not run');
+    },
+  };
+  // --repo is deliberately omitted: resolveRepo would normally run and could
+  // shell out to `gh` (network). An invalid --outpost-url is a deterministic,
+  // repo-independent config error and must be reported before any GitHub
+  // access is attempted.
+  const { code, report } = run(
+    ['--state-file', '/tmp/x.json', '--outpost-url', 'file:///tmp/outpost.json'],
+    d,
+  );
+  assert.equal(code, 2);
+  assert.equal(report.kind, 'config');
+  assert.match(report.error, /--outpost-url must use http: or https:/);
+});
+
 test('outpost eventId is order-independent across class permutations', async () => {
   const { buildOutpostPayload } = await import('../lib/outpost.mjs');
   const report = { repo: 'o/r', monitorId: 'main', at: '2026-07-01T12:00:00Z' };
