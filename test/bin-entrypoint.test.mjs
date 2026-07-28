@@ -19,7 +19,7 @@ test('gh-delta starts when invoked through an npm-style bin symlink', () => {
     encoding: 'utf8',
   });
 
-  assert.match(output, /^Usage:\n {2}gh-delta --repo/);
+  assert.match(output, /^Usage:\n {2}gh-delta \[--repo/);
   assert.doesNotMatch(output, /gh-delta-tick/);
 });
 

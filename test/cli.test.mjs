@@ -479,7 +479,7 @@ test('--help-json returns machine-readable help without fetching GitHub', () => 
   const help = JSON.parse(report);
   assert.equal(help.helpSchemaVersion, 1);
   assert.equal(help.command, 'gh-delta');
-  assert.match(help.usage, /^gh-delta --repo/);
+  assert.match(help.usage, /^gh-delta \[--repo/);
   assert.match(help.usage, /\[--summary-line\]/);
   assert.match(help.usage, /\[--detail\]/);
   assert.ok(help.options.some((option) => option.name === '--monitor-id'));
@@ -489,7 +489,7 @@ test('--help-json returns machine-readable help without fetching GitHub', () => 
   assert.ok(help.options.some((option) => option.name === '--help-json'));
   assert.ok(help.options.some((option) => option.name === '--version'));
   assert.equal(help.version, packageJson.version);
-  assert.equal(help.options.find((option) => option.name === '--repo')?.required, true);
+  assert.equal(help.options.find((option) => option.name === '--repo')?.required, false);
   assert.equal(help.options.find((option) => option.name === '--monitor-id')?.required, false);
   assert.match(help.exitCodes.find((entry) => entry.code === 10)?.meaning ?? '', /Deltas found/);
   assert.deepEqual(help.output.formats, ['json', 'text']);
