@@ -1698,3 +1698,38 @@ test('divergence warning from derivation rides on the run result', () => {
   assert.equal(res.warnings.length, 1);
   assert.match(res.warnings[0], /acme\/proj/);
 });
+
+test('derivation divergence warning appears in JSON report.warnings', async () => {
+  const out = await runCommand(
+    ['--state-file', '/tmp/x.json', '--no-registry'],
+    baseDeps({
+      resolveRepo: () => ({
+        status: 'found',
+        repo: 'me/fork',
+        source: 'git-remote',
+        warnings: [
+          'monitoring origin (me/fork); upstream resolves to a different repo (acme/proj) — pass --repo to choose explicitly',
+        ],
+      }),
+    }),
+  );
+  const report = JSON.parse(out.output);
+  assert.ok(report.warnings?.some((w) => /acme\/proj/.test(w)));
+});
+
+test('derivation divergence warning appears in text output', async () => {
+  const out = await runCommand(
+    ['--state-file', '/tmp/x.json', '--no-registry', '--format', 'text'],
+    baseDeps({
+      resolveRepo: () => ({
+        status: 'found',
+        repo: 'me/fork',
+        source: 'git-remote',
+        warnings: [
+          'monitoring origin (me/fork); upstream resolves to a different repo (acme/proj) — pass --repo to choose explicitly',
+        ],
+      }),
+    }),
+  );
+  assert.match(out.output, /acme\/proj/);
+});
