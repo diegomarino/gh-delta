@@ -28,6 +28,40 @@ test('first run establishes a baseline with no deltas', () => {
   assert.ok(r.snapshot.pr['42']);
 });
 
+test('a mergeStateStatus-only transition (CLEAN->BEHIND) emits an updated delta', () => {
+  // The P1 scenario: base branch advances, PR goes CLEAN->BEHIND with no other
+  // change (still OPEN, still MERGEABLE, same head/updatedAt). It must surface, or
+  // a consumer stays at a stale "ready to merge".
+  const base = detectDeltas(null, { pr: [pr({ mergeStateStatus: 'CLEAN' })], issue: [] });
+  const r = detectDeltas(base.snapshot, {
+    pr: [pr({ mergeStateStatus: 'BEHIND' })],
+    issue: [],
+  });
+  assert.equal(r.deltas.length, 1);
+  assert.deepEqual(r.deltas[0].classes, ['updated']);
+  assert.equal(r.deltas[0].to.mergeStateStatus, 'BEHIND');
+});
+
+test('an unchanged mergeStateStatus does not emit a delta', () => {
+  const base = detectDeltas(null, { pr: [pr({ mergeStateStatus: 'CLEAN' })], issue: [] });
+  const r = detectDeltas(base.snapshot, {
+    pr: [pr({ mergeStateStatus: 'CLEAN' })],
+    issue: [],
+  });
+  assert.deepEqual(r.deltas, []);
+});
+
+test('a snapshot predating mergeStateStatus does not burst on first observation', () => {
+  // Upgrade case (Codex P1): an older stored fingerprint lacks the field. Its
+  // first appearance must NOT be read as a change, or every open PR emits a
+  // spurious `updated` on the first post-upgrade tick.
+  const base = detectDeltas(null, { pr: [pr({ mergeStateStatus: 'CLEAN' })], issue: [] });
+  const legacy = { ...base.snapshot };
+  delete legacy.pr['42'].mergeStateStatus; // simulate a pre-field snapshot
+  const r = detectDeltas(legacy, { pr: [pr({ mergeStateStatus: 'CLEAN' })], issue: [] });
+  assert.deepEqual(r.deltas, []);
+});
+
 test('baseline-state is a registered closed-set class with a detail field map', () => {
   assert.ok(DELTA_CLASSES.includes('baseline-state'));
   assert.deepEqual(DELTA_DETAIL_FIELDS_BY_CLASS['baseline-state'], ['presence', 'state']);

@@ -401,6 +401,19 @@ test('--summaries surfaces mergeStateStatus behind for an up-to-date-required br
   assert.equal(report.deltas[0].summary.mergeStateStatus, 'behind');
 });
 
+test('a mergeStateStatus-only transition fires an updated delta end-to-end', () => {
+  // Base branch advanced: the same PR goes CLEAN -> BEHIND with nothing else
+  // changed. gh-delta must emit a delta (exit 10) carrying the new summary, or a
+  // consumer never re-evaluates merge readiness.
+  const before = { ...basePr, mergeStateStatus: 'CLEAN' };
+  const after = { ...basePr, mergeStateStatus: 'BEHIND' };
+  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const { code, report } = run(SUMMARIES_ARGS, d);
+  assert.equal(code, 10);
+  assert.deepEqual(report.deltas[0].classes, ['updated']);
+  assert.equal(report.deltas[0].summary.mergeStateStatus, 'behind');
+});
+
 const BASELINE_EMIT_ARGS = [
   '--repo',
   'o/r',

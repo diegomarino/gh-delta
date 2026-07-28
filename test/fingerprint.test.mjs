@@ -94,7 +94,11 @@ test('comparableFingerprint drops the detail-only summaries', () => {
   assert.deepEqual(comparableFingerprint(legacy), comparable);
 });
 
-test('prFingerprint stores mergeStateStatus but comparableFingerprint strips it', () => {
+test('prFingerprint stores mergeStateStatus and comparableFingerprint keeps it (a compared field)', () => {
+  // Unlike ciChecks/reviewSummary (detail mirrors of a compared digest),
+  // mergeStateStatus has no compared counterpart, so it must participate in
+  // comparison itself — otherwise a CLEAN->BEHIND-only transition is invisible.
+  // It is treated like `mergeable`: part of the change comparison and the id.
   const fp = prFingerprint({
     state: 'OPEN',
     updatedAt: '2026-07-01T10:00:00Z',
@@ -103,21 +107,7 @@ test('prFingerprint stores mergeStateStatus but comparableFingerprint strips it'
     latestReviews: [],
   });
   assert.equal(fp.mergeStateStatus, 'BLOCKED');
-  assert.equal('mergeStateStatus' in comparableFingerprint(fp), false);
-});
-
-test('a snapshot gaining mergeStateStatus does not compare as changed', () => {
-  // Mirrors the ciChecks/reviewSummary upgrade guarantee: an older snapshot that
-  // predates the field must diff to zero against a current one carrying it.
-  const withField = prFingerprint({
-    state: 'OPEN',
-    updatedAt: '2026-07-01T10:00:00Z',
-    mergeStateStatus: 'CLEAN',
-    statusCheckRollup: [],
-    latestReviews: [],
-  });
-  const { mergeStateStatus: _dropped, ...legacy } = withField;
-  assert.deepEqual(comparableFingerprint(legacy), comparableFingerprint(withField));
+  assert.equal(comparableFingerprint(fp).mergeStateStatus, 'BLOCKED');
 });
 
 test('hashReviews is order-independent and reflects state', () => {
