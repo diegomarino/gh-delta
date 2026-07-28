@@ -168,6 +168,11 @@ and still re-derive authoritative facts themselves.
   // 'unknown' = GitHub has not finished recomputing mergeability (kept honest,
   // never collapsed to a boolean).
   "mergeable": "mergeable" | "conflicting" | "unknown",
+  // GitHub's mergeStateStatus from the same observation. 'unknown' = not reported;
+  // fail-closed, treated like mergeable: unknown. A PR can be mergeable yet 'behind'
+  // its base or 'blocked' by a protection rule, so this is NOT folded into mergeable.
+  "mergeStateStatus":
+    "behind" | "blocked" | "clean" | "dirty" | "draft" | "has_hooks" | "unstable" | "unknown",
   "state": "open" | "closed" | "merged",
   "isDraft": true,                    // boolean
   "unresolvedReviewThreads": 0,       // non-negative integer
