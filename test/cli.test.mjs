@@ -75,6 +75,7 @@ test('first run returns code 0 (baseline) and writes the snapshot', () => {
 
 test('error reports carry schemaVersion and omit deltas', () => {
   const d = deps([[basePr]]);
+  d.resolveRepo = () => ({ status: 'declined' });
   const { code, report } = run(['--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
   assert.equal(code, 2);
   assert.equal(report.schemaVersion, 1);
@@ -523,6 +524,7 @@ test('missing --repo returns code 2 before fetching', () => {
       throw new Error('should not fetch');
     },
     now: () => '2026-07-01T12:00:00Z',
+    resolveRepo: () => ({ status: 'declined' }),
   };
   const { code, report } = run(['--state-file', '/tmp/x.json'], d);
   assert.equal(code, 2);
@@ -1614,4 +1616,85 @@ test('list without --state-dir consults the run registry; --state-dir narrows to
   const narrowed = run(['list', '--state-dir', '/state'], d);
   assert.equal(narrowed.report.registryDir, null);
   assert.deepEqual(captured[1], ['/state', null]);
+});
+
+// Minimal deps that let run() reach the report without touching disk/network.
+const baseDeps = (over = {}) => ({
+  fetchPRs: () => ({}),
+  fetchIssues: () => ({}),
+  readSnapshot: () => null,
+  writeSnapshotAtomic: () => {},
+  registerMonitor: () => {},
+  now: () => '2026-07-28T00:00:00.000Z',
+  env: { GH_DELTA_NO_REGISTRY: '1' },
+  ...over,
+});
+
+test('explicit --repo never calls resolveRepo and reports repoSource:flag', () => {
+  let called = false;
+  const res = run(
+    ['--repo', 'owner/repo', '--state-file', '/tmp/x.json', '--no-registry'],
+    baseDeps({
+      resolveRepo: () => {
+        called = true;
+        return { status: 'declined' };
+      },
+    }),
+  );
+  assert.equal(called, false);
+  assert.equal(res.report.repoSource, 'flag');
+  assert.equal(res.report.repo, 'owner/repo');
+});
+
+test('absent --repo uses the derived repo and its source', () => {
+  const res = run(
+    ['--state-file', '/tmp/x.json', '--no-registry'],
+    baseDeps({
+      resolveRepo: () => ({
+        status: 'found',
+        repo: 'Acme/Proj',
+        source: 'git-remote',
+        warnings: [],
+      }),
+    }),
+  );
+  assert.equal(res.report.repo, 'acme/proj'); // validateRepo lowercased it
+  assert.equal(res.report.repoSource, 'git-remote');
+});
+
+test('derivation declined -> config error, exit 2', () => {
+  const res = run(
+    ['--state-file', '/tmp/x.json', '--no-registry'],
+    baseDeps({ resolveRepo: () => ({ status: 'declined' }) }),
+  );
+  assert.equal(res.code, 2);
+  assert.equal(res.report.kind, 'config');
+  assert.match(res.report.error, /could not derive/);
+});
+
+test('derivation failed transiently -> github error, exit 1', () => {
+  const res = run(
+    ['--state-file', '/tmp/x.json', '--no-registry'],
+    baseDeps({ resolveRepo: () => ({ status: 'failed', reason: 'timed out after 60000ms' }) }),
+  );
+  assert.equal(res.code, 1);
+  assert.equal(res.report.kind, 'github');
+});
+
+test('divergence warning from derivation rides on the run result', () => {
+  const res = run(
+    ['--state-file', '/tmp/x.json', '--no-registry'],
+    baseDeps({
+      resolveRepo: () => ({
+        status: 'found',
+        repo: 'me/fork',
+        source: 'git-remote',
+        warnings: [
+          'monitoring origin (me/fork); upstream resolves to a different repo (acme/proj) — pass --repo to choose explicitly',
+        ],
+      }),
+    }),
+  );
+  assert.equal(res.warnings.length, 1);
+  assert.match(res.warnings[0], /acme\/proj/);
 });
