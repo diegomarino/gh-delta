@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { detectDeltas } from '../lib/detect.mjs';
+import { DELTA_CLASSES, DELTA_DETAIL_FIELDS_BY_CLASS } from '../lib/contract.mjs';
 
 const pr = (over = {}) => ({
   number: 42,
@@ -25,6 +26,51 @@ test('first run establishes a baseline with no deltas', () => {
   assert.equal(r.baseline, true);
   assert.deepEqual(r.deltas, []);
   assert.ok(r.snapshot.pr['42']);
+});
+
+test('baseline-state is a registered closed-set class with a detail field map', () => {
+  assert.ok(DELTA_CLASSES.includes('baseline-state'));
+  assert.deepEqual(DELTA_DETAIL_FIELDS_BY_CLASS['baseline-state'], ['presence', 'state']);
+});
+
+test('baseline with emitBaselineState off stays empty (byte-identical default)', () => {
+  const r = detectDeltas(null, { pr: [pr()], issue: [] });
+  assert.equal(r.baseline, true);
+  assert.deepEqual(r.deltas, []);
+});
+
+test('baseline with emitBaselineState on emits one baseline-state delta per open item', () => {
+  const r = detectDeltas(null, { pr: [pr()], issue: [] }, { emitBaselineState: true });
+  assert.equal(r.baseline, true);
+  assert.equal(r.deltas.length, 1);
+  const d = r.deltas[0];
+  assert.deepEqual(d.classes, ['baseline-state']);
+  assert.equal(d.from, null);
+  assert.equal(d.to.state, 'OPEN');
+  assert.equal(d.entity, 'pr');
+  assert.equal(d.number, 42);
+});
+
+test('baseline-state covers both PR and issue open items within entities', () => {
+  const issue = {
+    number: 7,
+    title: 'bug',
+    state: 'OPEN',
+    updatedAt: '2026-07-01T10:00:00Z',
+    labels: [],
+    comments: 0,
+  };
+  const r = detectDeltas(null, { pr: [pr()], issue: [issue] }, { emitBaselineState: true });
+  const entities = r.deltas.map((d) => d.entity).sort();
+  assert.deepEqual(entities, ['issue', 'pr']);
+  assert.ok(r.deltas.every((d) => d.classes[0] === 'baseline-state'));
+});
+
+test('emitBaselineState is inert on a non-baseline run', () => {
+  const base = detectDeltas(null, { pr: [pr()], issue: [] });
+  const r = detectDeltas(base.snapshot, { pr: [pr()], issue: [] }, { emitBaselineState: true });
+  assert.equal(r.baseline, false);
+  assert.deepEqual(r.deltas, []);
 });
 
 test('a brand-new PR after baseline emits `new`', () => {
