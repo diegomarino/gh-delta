@@ -376,11 +376,106 @@ test('--summaries acceptance: posting a successful status makes summary.ciRollup
     ciRollup: 'green',
     reviewDecision: 'review_required',
     mergeable: 'unknown',
+    mergeStateStatus: 'unknown',
     state: 'open',
     isDraft: false,
     unresolvedReviewThreads: 0,
     headSha: 'sha1',
   });
+});
+
+test('--summaries surfaces mergeStateStatus behind for an up-to-date-required branch', () => {
+  // A PR that GitHub reports mergeable yet BEHIND its base (repos requiring the
+  // branch be up to date): the summary must expose that distinctly so a consumer
+  // does not emit a false "ready to merge".
+  const before = { ...basePr, statusCheckRollup: [] };
+  const after = {
+    ...basePr,
+    updatedAt: '2026-07-01T11:00:00Z',
+    mergeStateStatus: 'BEHIND',
+    statusCheckRollup: [{ context: 'ci/deploy', state: 'SUCCESS' }],
+  };
+  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const { code, report } = run(SUMMARIES_ARGS, d);
+  assert.equal(code, 10);
+  assert.equal(report.deltas[0].summary.mergeStateStatus, 'behind');
+});
+
+test('a mergeStateStatus-only transition fires an updated delta end-to-end', () => {
+  // Base branch advanced: the same PR goes CLEAN -> BEHIND with nothing else
+  // changed. gh-delta must emit a delta (exit 10) carrying the new summary, or a
+  // consumer never re-evaluates merge readiness.
+  const before = { ...basePr, mergeStateStatus: 'CLEAN' };
+  const after = { ...basePr, mergeStateStatus: 'BEHIND' };
+  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const { code, report } = run(SUMMARIES_ARGS, d);
+  assert.equal(code, 10);
+  assert.deepEqual(report.deltas[0].classes, ['updated']);
+  assert.equal(report.deltas[0].summary.mergeStateStatus, 'behind');
+});
+
+const BASELINE_EMIT_ARGS = [
+  '--repo',
+  'o/r',
+  '--monitor-id',
+  'main',
+  '--state-file',
+  '/tmp/x.json',
+  '--baseline-emit-state',
+];
+
+test('--baseline-emit-state off: baseline stays exit 0 with empty deltas', () => {
+  const d = deps([[basePr]]);
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'],
+    d,
+  );
+  assert.equal(code, 0);
+  assert.equal(report.baseline, true);
+  assert.deepEqual(report.deltas, []);
+});
+
+test('--baseline-emit-state on: baseline exits 10 with baseline:true and non-empty deltas', () => {
+  const d = deps([[basePr]]);
+  const { code, report } = run(BASELINE_EMIT_ARGS, d);
+  assert.equal(code, 10);
+  assert.equal(report.baseline, true);
+  assert.equal(report.deltas.length, 1);
+  const delta = report.deltas[0];
+  assert.deepEqual(delta.classes, ['baseline-state']);
+  assert.equal(delta.from, null);
+  assert.equal(delta.to.state, 'OPEN');
+  assert.match(delta.id, /^[0-9a-f]{64}$/);
+});
+
+test('--baseline-emit-state ids are stable across a re-baseline over unchanged state', () => {
+  // Fresh state both times (readSnapshot returns null), same observed PR: the
+  // content-addressed id must match so idempotent consumers dedupe for free.
+  const first = run(BASELINE_EMIT_ARGS, deps([[basePr]]));
+  const second = run(BASELINE_EMIT_ARGS, deps([[basePr]]));
+  assert.equal(first.report.deltas[0].id, second.report.deltas[0].id);
+});
+
+test('--baseline-emit-state composes with --summaries (PR baseline-state carries a summary)', () => {
+  const d = deps([[basePr]]);
+  const { code, report } = run([...BASELINE_EMIT_ARGS, '--summaries'], d);
+  assert.equal(code, 10);
+  const delta = report.deltas[0];
+  assert.equal(delta.classes[0], 'baseline-state');
+  assert.equal(delta.summary.state, 'open');
+  assert.equal(delta.summary.mergeStateStatus, 'unknown');
+});
+
+test('--help-json advertises --baseline-emit-state', () => {
+  const d = {
+    fetchPRs: () => {
+      throw new Error('should not fetch');
+    },
+    now: () => '2026-07-01T12:00:00Z',
+  };
+  const { report } = run(['--help-json'], d);
+  const help = JSON.parse(report);
+  assert.ok(help.options.some((o) => o.name === '--baseline-emit-state'));
 });
 
 test('--summaries acceptance: a PR that lost its checks reports ciRollup none, not green', () => {
@@ -433,6 +528,7 @@ test('--help-json documents the summary schema well enough to build a validator'
     'ciRollup',
     'reviewDecision',
     'mergeable',
+    'mergeStateStatus',
     'state',
     'isDraft',
     'unresolvedReviewThreads',
@@ -442,6 +538,16 @@ test('--help-json documents the summary schema well enough to build a validator'
   assert.deepEqual(help.output.deltaSummaryEnums.mergeable, [
     'mergeable',
     'conflicting',
+    'unknown',
+  ]);
+  assert.deepEqual(help.output.deltaSummaryEnums.mergeStateStatus, [
+    'behind',
+    'blocked',
+    'clean',
+    'dirty',
+    'draft',
+    'has_hooks',
+    'unstable',
     'unknown',
   ]);
 });

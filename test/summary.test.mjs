@@ -14,6 +14,7 @@ import {
   deriveCiRollup,
   normalizeReviewDecision,
   normalizeMergeable,
+  normalizeMergeStateStatus,
   normalizePrState,
   prSummary,
   deltaSummary,
@@ -121,6 +122,21 @@ test('normalizeMergeable keeps UNKNOWN honest', () => {
   assert.equal(normalizeMergeable(undefined), 'unknown');
 });
 
+test('normalizeMergeStateStatus maps the GraphQL enum and defaults to unknown', () => {
+  assert.equal(normalizeMergeStateStatus('BEHIND'), 'behind');
+  assert.equal(normalizeMergeStateStatus('BLOCKED'), 'blocked');
+  assert.equal(normalizeMergeStateStatus('CLEAN'), 'clean');
+  assert.equal(normalizeMergeStateStatus('DIRTY'), 'dirty');
+  assert.equal(normalizeMergeStateStatus('DRAFT'), 'draft');
+  assert.equal(normalizeMergeStateStatus('HAS_HOOKS'), 'has_hooks');
+  assert.equal(normalizeMergeStateStatus('UNSTABLE'), 'unstable');
+  assert.equal(normalizeMergeStateStatus('UNKNOWN'), 'unknown');
+  assert.equal(normalizeMergeStateStatus(''), 'unknown');
+  assert.equal(normalizeMergeStateStatus(null), 'unknown');
+  assert.equal(normalizeMergeStateStatus(undefined), 'unknown');
+  assert.equal(normalizeMergeStateStatus('SOMETHING_NEW'), 'unknown');
+});
+
 test('normalizePrState lowercases the three PR states', () => {
   assert.equal(normalizePrState('OPEN'), 'open');
   assert.equal(normalizePrState('CLOSED'), 'closed');
@@ -141,6 +157,7 @@ test('prSummary normalizes types and names headSha unambiguously', () => {
     ciChecks: [{ name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' }],
     review: 'APPROVED',
     mergeable: 'MERGEABLE',
+    mergeStateStatus: 'CLEAN',
     unresolvedReviewThreads: 0,
     head: 'a'.repeat(40),
   });
@@ -148,6 +165,7 @@ test('prSummary normalizes types and names headSha unambiguously', () => {
     ciRollup: 'green',
     reviewDecision: 'approved',
     mergeable: 'mergeable',
+    mergeStateStatus: 'clean',
     state: 'open',
     isDraft: false,
     unresolvedReviewThreads: 0,
@@ -173,6 +191,14 @@ test('real fixture: a PR with zero checks yields ciRollup none (the empty-rollup
   // 'da39a3ee5e6b' is the frozen digest of an empty rollup (see fingerprint.test).
   assert.equal(canonicalizeCiRollup(row.statusCheckRollup), 'da39a3ee5e6b');
   assert.equal(prSummary(fp).ciRollup, 'none');
+});
+
+test('real fixture: an older recording without mergeStateStatus yields unknown (fail-closed)', () => {
+  // The captured payloads predate the field (the query did not request it), so the
+  // summary must default to unknown — the same "not computed" signal as
+  // mergeable: unknown — rather than inventing a merge-readiness verdict.
+  const fp = prFingerprint(fixtureRow('green'));
+  assert.equal(prSummary(fp).mergeStateStatus, 'unknown');
 });
 
 test('real fixture: an all-SUCCESS PR yields ciRollup green', () => {

@@ -168,6 +168,11 @@ and still re-derive authoritative facts themselves.
   // 'unknown' = GitHub has not finished recomputing mergeability (kept honest,
   // never collapsed to a boolean).
   "mergeable": "mergeable" | "conflicting" | "unknown",
+  // GitHub's mergeStateStatus from the same observation. 'unknown' = not reported;
+  // fail-closed, treated like mergeable: unknown. A PR can be mergeable yet 'behind'
+  // its base or 'blocked' by a protection rule, so this is NOT folded into mergeable.
+  "mergeStateStatus":
+    "behind" | "blocked" | "clean" | "dirty" | "draft" | "has_hooks" | "unstable" | "unknown",
   "state": "open" | "closed" | "merged",
   "isDraft": true,                    // boolean
   "unresolvedReviewThreads": 0,       // non-negative integer
@@ -180,6 +185,17 @@ field set and enum domains are also emitted machine-readably under
 `output.deltaSummaryFields` / `output.deltaSummaryEnums` in `--help-json`, and the
 authoritative schema lives in
 [Delta Summary schema](docs/contract.md#delta-summary-schema).
+
+### Baseline state emission (`--baseline-emit-state`)
+
+By default the first run seeds a baseline silently (`deltas: []`), so a PR that is
+_already_ stuck — in merge conflict or blocked on CI at seed time — stays invisible
+until it changes again. Pass `--baseline-emit-state` to emit one synthetic
+`baseline-state` delta per tracked open item on that first run instead; the run then
+exits `10` with `baseline: true` and a non-empty `deltas` array. The delta ids are
+content-addressed and stable across re-baselining, so idempotent consumers dedupe
+them for free. Off by default — existing behavior is byte-identical. Do not treat a
+`baseline-state` delta as newly created.
 
 ## Watch Loops and Outposts
 

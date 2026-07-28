@@ -231,3 +231,25 @@ test('normalizePr filters null elements from statusCheckRollup contexts nodes', 
     { __typename: 'CheckRun', name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' },
   ]);
 });
+
+test('the PR query requests mergeStateStatus and normalizePr defaults it to UNKNOWN if absent', () => {
+  let sentQuery = '';
+  const exec = (_cmd, args) => {
+    sentQuery = args.find((a) => a.startsWith('query=')) ?? '';
+    return page([prNode()]); // prNode() omits mergeStateStatus
+  };
+  const rows = fetchPRs('o/r', { exec, horizonCutoff: null });
+  assert.ok(
+    sentQuery.includes('mergeStateStatus'),
+    'PR GraphQL selection must request mergeStateStatus',
+  );
+  assert.equal(rows[0].mergeStateStatus, 'UNKNOWN');
+});
+
+test('normalizePr passes through a present mergeStateStatus verbatim', () => {
+  const rows = fetchPRs('o/r', {
+    exec: () => page([prNode({ mergeStateStatus: 'BEHIND' })]),
+    horizonCutoff: null,
+  });
+  assert.equal(rows[0].mergeStateStatus, 'BEHIND');
+});
