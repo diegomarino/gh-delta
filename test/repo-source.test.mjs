@@ -38,3 +38,96 @@ test('parseRemoteUrl declines anything that is not exactly two path segments', (
   assert.equal(parseRemoteUrl('not a url'), null);
   assert.equal(parseRemoteUrl(''), null);
 });
+
+// append to test/repo-source.test.mjs
+import { resolveRepoFromGit } from '../lib/repo-source.mjs';
+
+// Fake exec: map `${cmd} ${args.join(' ')}` -> string to return, Error to throw.
+const fakeExec = (table) => (cmd, args) => {
+  const key = `${cmd} ${args.join(' ')}`;
+  if (!(key in table)) throw new Error(`unexpected exec: ${key}`);
+  const v = table[key];
+  if (v instanceof Error) throw v;
+  return v;
+};
+const timeoutErr = () => Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' });
+const noRemote = () => new Error('fatal: No such remote');
+
+test('origin on github.com resolves to git-remote source', () => {
+  const exec = fakeExec({
+    'git remote get-url origin': 'git@github.com:Owner/Repo.git',
+    'git remote get-url upstream': noRemote(),
+  });
+  assert.deepEqual(resolveRepoFromGit({ exec }),
+    { status: 'found', repo: 'Owner/Repo', source: 'git-remote', warnings: [] });
+});
+
+test('origin absent falls back to upstream', () => {
+  const exec = fakeExec({
+    'git remote get-url origin': noRemote(),
+    'git remote get-url upstream': 'https://github.com/acme/proj.git',
+  });
+  assert.deepEqual(resolveRepoFromGit({ exec }),
+    { status: 'found', repo: 'acme/proj', source: 'git-remote', warnings: [] });
+});
+
+test('origin and upstream diverge -> origin wins, warning emitted', () => {
+  const exec = fakeExec({
+    'git remote get-url origin': 'git@github.com:me/fork.git',
+    'git remote get-url upstream': 'git@github.com:acme/proj.git',
+  });
+  const r = resolveRepoFromGit({ exec });
+  assert.equal(r.repo, 'me/fork');
+  assert.equal(r.warnings.length, 1);
+  assert.match(r.warnings[0], /me\/fork/);
+  assert.match(r.warnings[0], /acme\/proj/);
+});
+
+test('non-github origin declines git parsing and falls to gh', () => {
+  const exec = fakeExec({
+    'git remote get-url origin': 'git@gitlab.com:me/proj.git',
+    'git remote get-url upstream': noRemote(),
+    'gh repo view --json nameWithOwner -q .nameWithOwner': 'ent/proj\n',
+  });
+  assert.deepEqual(resolveRepoFromGit({ exec }),
+    { status: 'found', repo: 'ent/proj', source: 'gh', warnings: [] });
+});
+
+test('no git remotes and gh says not-a-repo -> declined', () => {
+  const exec = fakeExec({
+    'git remote get-url origin': noRemote(),
+    'git remote get-url upstream': noRemote(),
+    'gh repo view --json nameWithOwner -q .nameWithOwner': new Error('no repo'),
+  });
+  assert.deepEqual(resolveRepoFromGit({ exec }), { status: 'declined' });
+});
+
+test('gh timeout during fallback -> failed, not declined', () => {
+  const exec = fakeExec({
+    'git remote get-url origin': noRemote(),
+    'git remote get-url upstream': noRemote(),
+    'gh repo view --json nameWithOwner -q .nameWithOwner': timeoutErr(),
+  });
+  assert.equal(resolveRepoFromGit({ exec }).status, 'failed');
+});
+
+test('gh fallback receives the configured ghTimeoutMs', () => {
+  let seen;
+  const exec = (cmd, args, opts) => {
+    if (cmd === 'git') throw noRemote();
+    seen = opts?.timeoutMs;
+    return 'ent/proj';
+  };
+  resolveRepoFromGit({ exec, ghTimeoutMs: 12345 });
+  assert.equal(seen, 12345);
+});
+
+test('a credentialed declined URL never leaks into the result', () => {
+  const exec = fakeExec({
+    'git remote get-url origin': 'https://user:s3cr3t@gitlab.com/me/proj.git',
+    'git remote get-url upstream': noRemote(),
+    'gh repo view --json nameWithOwner -q .nameWithOwner': new Error('no repo'),
+  });
+  assert.deepEqual(resolveRepoFromGit({ exec }), { status: 'declined' });
+  // (no warnings/reason string exists here to carry the token)
+});
