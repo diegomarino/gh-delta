@@ -93,8 +93,9 @@ test('origin and upstream diverge -> origin wins, warning emitted', () => {
   const r = resolveRepoFromGit({ exec });
   assert.equal(r.repo, 'me/fork');
   assert.equal(r.warnings.length, 1);
-  assert.match(r.warnings[0], /me\/fork/);
-  assert.match(r.warnings[0], /acme\/proj/);
+  assert.equal(r.warnings[0].label, 'repo');
+  assert.match(r.warnings[0].reason, /me\/fork/);
+  assert.match(r.warnings[0].reason, /acme\/proj/);
 });
 
 test('non-github origin declines git parsing and falls to gh', () => {

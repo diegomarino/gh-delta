@@ -1690,13 +1690,17 @@ test('divergence warning from derivation rides on the run result', () => {
         repo: 'me/fork',
         source: 'git-remote',
         warnings: [
-          'monitoring origin (me/fork); upstream resolves to a different repo (acme/proj) — pass --repo to choose explicitly',
+          {
+            label: 'repo',
+            reason:
+              'monitoring origin (me/fork); upstream resolves to a different repo (acme/proj) — pass --repo to choose explicitly',
+          },
         ],
       }),
     }),
   );
   assert.equal(res.warnings.length, 1);
-  assert.match(res.warnings[0], /acme\/proj/);
+  assert.match(res.warnings[0].reason, /acme\/proj/);
 });
 
 test('derivation divergence warning appears in JSON report.warnings', async () => {
@@ -1708,13 +1712,17 @@ test('derivation divergence warning appears in JSON report.warnings', async () =
         repo: 'me/fork',
         source: 'git-remote',
         warnings: [
-          'monitoring origin (me/fork); upstream resolves to a different repo (acme/proj) — pass --repo to choose explicitly',
+          {
+            label: 'repo',
+            reason:
+              'monitoring origin (me/fork); upstream resolves to a different repo (acme/proj) — pass --repo to choose explicitly',
+          },
         ],
       }),
     }),
   );
   const report = JSON.parse(out.output);
-  assert.ok(report.warnings?.some((w) => /acme\/proj/.test(w)));
+  assert.ok(report.warnings?.some((w) => /acme\/proj/.test(w.reason)));
 });
 
 test('derivation divergence warning appears in text output', async () => {
@@ -1726,7 +1734,11 @@ test('derivation divergence warning appears in text output', async () => {
         repo: 'me/fork',
         source: 'git-remote',
         warnings: [
-          'monitoring origin (me/fork); upstream resolves to a different repo (acme/proj) — pass --repo to choose explicitly',
+          {
+            label: 'repo',
+            reason:
+              'monitoring origin (me/fork); upstream resolves to a different repo (acme/proj) — pass --repo to choose explicitly',
+          },
         ],
       }),
     }),
