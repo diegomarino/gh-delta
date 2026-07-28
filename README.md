@@ -66,6 +66,11 @@ Minimal zero-config invocation:
 gh-delta --repo owner/repo
 ```
 
+`--repo` is optional inside a GitHub checkout: `gh-delta` derives `owner/name`
+from the current directory's git remote (`origin`, then `upstream`) when the
+flag is omitted, so `gh-delta` with no flags works from a clone. See
+[Zero-config repo](docs/usage.md#zero-config-repo) for details.
+
 Install from npm:
 
 ```bash

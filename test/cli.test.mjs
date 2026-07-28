@@ -75,6 +75,7 @@ test('first run returns code 0 (baseline) and writes the snapshot', () => {
 
 test('error reports carry schemaVersion and omit deltas', () => {
   const d = deps([[basePr]]);
+  d.resolveRepo = () => ({ status: 'declined' });
   const { code, report } = run(['--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
   assert.equal(code, 2);
   assert.equal(report.schemaVersion, 1);
@@ -478,7 +479,7 @@ test('--help-json returns machine-readable help without fetching GitHub', () => 
   const help = JSON.parse(report);
   assert.equal(help.helpSchemaVersion, 1);
   assert.equal(help.command, 'gh-delta');
-  assert.match(help.usage, /^gh-delta --repo/);
+  assert.match(help.usage, /^gh-delta \[--repo/);
   assert.match(help.usage, /\[--summary-line\]/);
   assert.match(help.usage, /\[--detail\]/);
   assert.ok(help.options.some((option) => option.name === '--monitor-id'));
@@ -488,7 +489,7 @@ test('--help-json returns machine-readable help without fetching GitHub', () => 
   assert.ok(help.options.some((option) => option.name === '--help-json'));
   assert.ok(help.options.some((option) => option.name === '--version'));
   assert.equal(help.version, packageJson.version);
-  assert.equal(help.options.find((option) => option.name === '--repo')?.required, true);
+  assert.equal(help.options.find((option) => option.name === '--repo')?.required, false);
   assert.equal(help.options.find((option) => option.name === '--monitor-id')?.required, false);
   assert.match(help.exitCodes.find((entry) => entry.code === 10)?.meaning ?? '', /Deltas found/);
   assert.deepEqual(help.output.formats, ['json', 'text']);
@@ -523,6 +524,7 @@ test('missing --repo returns code 2 before fetching', () => {
       throw new Error('should not fetch');
     },
     now: () => '2026-07-01T12:00:00Z',
+    resolveRepo: () => ({ status: 'declined' }),
   };
   const { code, report } = run(['--state-file', '/tmp/x.json'], d);
   assert.equal(code, 2);
@@ -940,6 +942,32 @@ test('gh-delta rejects invalid --outpost-url before fetching GitHub', async () =
 
   assert.equal(code, 2);
   assert.equal(fetches, 0);
+  assert.match(report.error, /--outpost-url must use http: or https:/);
+});
+
+test('config validation precedes repo derivation: an invalid --outpost-url short-circuits before resolveRepo runs', () => {
+  const d = {
+    fetchPRs: () => {
+      throw new Error('should not fetch');
+    },
+    fetchIssues: () => {
+      throw new Error('should not fetch');
+    },
+    now: () => '2026-07-01T12:00:00Z',
+    resolveRepo: () => {
+      throw new Error('resolver must not run');
+    },
+  };
+  // --repo is deliberately omitted: resolveRepo would normally run and could
+  // shell out to `gh` (network). An invalid --outpost-url is a deterministic,
+  // repo-independent config error and must be reported before any GitHub
+  // access is attempted.
+  const { code, report } = run(
+    ['--state-file', '/tmp/x.json', '--outpost-url', 'file:///tmp/outpost.json'],
+    d,
+  );
+  assert.equal(code, 2);
+  assert.equal(report.kind, 'config');
   assert.match(report.error, /--outpost-url must use http: or https:/);
 });
 
@@ -1614,4 +1642,132 @@ test('list without --state-dir consults the run registry; --state-dir narrows to
   const narrowed = run(['list', '--state-dir', '/state'], d);
   assert.equal(narrowed.report.registryDir, null);
   assert.deepEqual(captured[1], ['/state', null]);
+});
+
+// Minimal deps that let run() reach the report without touching disk/network.
+const baseDeps = (over = {}) => ({
+  fetchPRs: () => ({}),
+  fetchIssues: () => ({}),
+  readSnapshot: () => null,
+  writeSnapshotAtomic: () => {},
+  registerMonitor: () => {},
+  now: () => '2026-07-28T00:00:00.000Z',
+  env: { GH_DELTA_NO_REGISTRY: '1' },
+  ...over,
+});
+
+test('explicit --repo never calls resolveRepo and reports repoSource:flag', () => {
+  let called = false;
+  const res = run(
+    ['--repo', 'owner/repo', '--state-file', '/tmp/x.json', '--no-registry'],
+    baseDeps({
+      resolveRepo: () => {
+        called = true;
+        return { status: 'declined' };
+      },
+    }),
+  );
+  assert.equal(called, false);
+  assert.equal(res.report.repoSource, 'flag');
+  assert.equal(res.report.repo, 'owner/repo');
+});
+
+test('absent --repo uses the derived repo and its source', () => {
+  const res = run(
+    ['--state-file', '/tmp/x.json', '--no-registry'],
+    baseDeps({
+      resolveRepo: () => ({
+        status: 'found',
+        repo: 'Acme/Proj',
+        source: 'git-remote',
+        warnings: [],
+      }),
+    }),
+  );
+  assert.equal(res.report.repo, 'acme/proj'); // validateRepo lowercased it
+  assert.equal(res.report.repoSource, 'git-remote');
+});
+
+test('derivation declined -> config error, exit 2', () => {
+  const res = run(
+    ['--state-file', '/tmp/x.json', '--no-registry'],
+    baseDeps({ resolveRepo: () => ({ status: 'declined' }) }),
+  );
+  assert.equal(res.code, 2);
+  assert.equal(res.report.kind, 'config');
+  assert.match(res.report.error, /could not derive/);
+});
+
+test('derivation failed transiently -> github error, exit 1', () => {
+  const res = run(
+    ['--state-file', '/tmp/x.json', '--no-registry'],
+    baseDeps({ resolveRepo: () => ({ status: 'failed', reason: 'timed out after 60000ms' }) }),
+  );
+  assert.equal(res.code, 1);
+  assert.equal(res.report.kind, 'github');
+});
+
+test('divergence warning from derivation rides on the run result', () => {
+  const res = run(
+    ['--state-file', '/tmp/x.json', '--no-registry'],
+    baseDeps({
+      resolveRepo: () => ({
+        status: 'found',
+        repo: 'me/fork',
+        source: 'git-remote',
+        warnings: [
+          {
+            label: 'repo',
+            reason:
+              'monitoring origin (me/fork); upstream resolves to a different repo (acme/proj) — pass --repo to choose explicitly',
+          },
+        ],
+      }),
+    }),
+  );
+  assert.equal(res.warnings.length, 1);
+  assert.match(res.warnings[0].reason, /acme\/proj/);
+});
+
+test('derivation divergence warning appears in JSON report.warnings', async () => {
+  const out = await runCommand(
+    ['--state-file', '/tmp/x.json', '--no-registry'],
+    baseDeps({
+      resolveRepo: () => ({
+        status: 'found',
+        repo: 'me/fork',
+        source: 'git-remote',
+        warnings: [
+          {
+            label: 'repo',
+            reason:
+              'monitoring origin (me/fork); upstream resolves to a different repo (acme/proj) — pass --repo to choose explicitly',
+          },
+        ],
+      }),
+    }),
+  );
+  const report = JSON.parse(out.output);
+  assert.ok(report.warnings?.some((w) => /acme\/proj/.test(w.reason)));
+});
+
+test('derivation divergence warning appears in text output', async () => {
+  const out = await runCommand(
+    ['--state-file', '/tmp/x.json', '--no-registry', '--format', 'text'],
+    baseDeps({
+      resolveRepo: () => ({
+        status: 'found',
+        repo: 'me/fork',
+        source: 'git-remote',
+        warnings: [
+          {
+            label: 'repo',
+            reason:
+              'monitoring origin (me/fork); upstream resolves to a different repo (acme/proj) — pass --repo to choose explicitly',
+          },
+        ],
+      }),
+    }),
+  );
+  assert.match(out.output, /acme\/proj/);
 });

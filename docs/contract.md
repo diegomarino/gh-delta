@@ -12,7 +12,7 @@ machine-readable form of this document is available at `gh-delta --help-json`.
 ## CLI
 
 ```
-gh-delta --repo <owner/name> [--monitor-id <id>]
+gh-delta [--repo <owner/name>] [--monitor-id <id>]
          [--state-file <path> | --state-dir <dir>]
          [--entities pr,issue] [--format json|text]
          [--summary-line] [--detail] [--summaries]
@@ -21,14 +21,38 @@ gh-delta --repo <owner/name> [--monitor-id <id>]
          [--gh-timeout-ms <ms>] [--no-registry]
 ```
 
-- `--repo` is required.
+- `--repo` is **optional**. An explicit value always wins. When omitted,
+  `owner/name` is derived from the current directory's git remotes, tried in
+  this precedence order:
+  1. `origin`, parsed from `git remote get-url origin` — github.com only.
+  2. `upstream`, parsed from `git remote get-url upstream` — github.com only.
+  3. `gh repo view --json nameWithOwner` — a fallback that covers GitHub
+     Enterprise hosts and SSH-config host aliases the URL parser cannot
+     identify by hostname alone.
+  4. None of the above resolve a repo: the run **declines** with a `config`
+     error (exit `2`).
+
+  When `origin` and `upstream` both resolve but to **different** repos,
+  `origin` is used and a `warnings` entry (`label: "repo"`) names the repo that
+  was set aside; pass `--repo` explicitly to choose the other one. The
+  resolved source is echoed on success reports as `repoSource` (`"flag"` |
+  `"git-remote"` | `"gh"`) — see [Report Shape](#report-shape).
+
+  **Exit-code note:** a `gh` **timeout while deriving** `--repo` (step 3 above)
+  is a `github` error (exit `1`, transient — retry next tick), distinct from
+  "no repo derivable" (steps 1–4 all declined), which is a `config` error
+  (exit `2`, permanent). This mirrors the general transient/permanent split in
+  [Exit Codes](#exit-codes).
+
 - `--monitor-id` is optional. Default: `host-` + the first 12 hex characters of
   the sha1 of `os.hostname()` — stable per machine and always grammar-valid. A
   hostname change (host rename, container, or CI runner with a per-job hostname)
-  yields a new id and a fresh baseline. The minimal zero-config invocation is
-  `gh-delta --repo <owner/name>`.
+  yields a new id and a fresh baseline. Inside a GitHub checkout, the minimal
+  zero-config invocation is `gh-delta` with no flags at all; `--repo` remains
+  available for other cwds or to pin an explicit repo.
 - `--repo` must be `owner/name`. **Canonicalized to lowercase** — snapshot paths,
-  report echoes, and outpost event IDs always use the lowercased form.
+  report echoes, and outpost event IDs always use the lowercased form. This
+  applies whether `--repo` was passed explicitly or derived.
 - `--monitor-id` must start with a letter or number and contain only letters,
   numbers, dot, underscore, or dash.
 - `--state-file` and `--state-dir` are mutually exclusive and **optional**. When
@@ -309,6 +333,7 @@ Success reports (exit `0` and `10`):
   "schemaVersion": 1,
   "baseline": false,
   "repo": "owner/repo",
+  "repoSource": "flag",
   "monitorId": "prs-5m",
   "entities": ["pr"],
   "stateFile": "/tmp/gh-delta-user/repo-owner%2Frepo__monitor-prs-5m__pr.json",
@@ -349,6 +374,11 @@ Field guarantees:
   `deltas` is always `[]` even though every tracked object is new — a baseline
   seeds memory, it does not report. Handle it distinctly from "no deltas."
 - `repo`, `monitorId` (string): echo the flags.
+- `repoSource` (`"flag"` | `"git-remote"` | `"gh"`): how `--repo` was resolved
+  — `"flag"` when passed explicitly, `"git-remote"` when derived from the
+  `origin` or `upstream` git remote, `"gh"` when derived through the
+  `gh repo view` fallback. Always present on success reports; see the `--repo`
+  bullet in [CLI](#cli) for the full precedence and error behavior.
 - `entities` (string[]): the selected families, always in canonical order
   `["pr", "issue"]` regardless of the `--entities` input order.
 - `stateFile` (string): the resolved snapshot path — useful when the temp-dir
@@ -361,9 +391,13 @@ Field guarantees:
   "N delta(s)").
 - `deltas` (array): see below. Empty on baseline and on no-change runs.
 - `warnings` (`{ label: string, reason: string }[]`): **optional; present only in JSON format when outpost
-  delivery produced warnings** (e.g. a POST timed out or returned an error).
-  Omitted entirely when there are no warnings. Does not appear in text output
-  (warnings are printed inline there). Does not affect the exit code.
+  delivery or `--repo` derivation produced warnings** — an outpost POST that
+  timed out or returned an error, or `origin`/`upstream` resolving to
+  different repos while deriving `--repo` (`label: "repo"`; see the `--repo`
+  bullet in [CLI](#cli)). Omitted entirely when there are no warnings. Does
+  not appear in text output as a `warnings` array — each entry is instead
+  printed inline as `warning [<label>]: <reason>`. Does not affect the exit
+  code.
 
 Each delta:
 
@@ -555,7 +589,7 @@ Emitted with exit code `1` (transient) or `2` (permanent). It **does not** carry
 ```json
 {
   "schemaVersion": 1,
-  "error": "missing required --repo <owner/name>",
+  "error": "--entities must include pr, issue, or both; got \"prs\"",
   "kind": "config",
   "repo": "owner/repo",
   "monitorId": "prs-5m",
@@ -567,7 +601,11 @@ Emitted with exit code `1` (transient) or `2` (permanent). It **does not** carry
 - `kind` (string): one of `config`, `snapshot`, `github`, `io`. This is a closed
   set while `report.schemaVersion === 1`, but forward-compatible like classes —
   treat unknown values as "something changed, inspect". `config` and `snapshot`
-  kinds map to exit `2`; `github` and `io` kinds map to exit `1`.
+  kinds map to exit `2`; `github` and `io` kinds map to exit `1`. This is where
+  `--repo` derivation errors land too: no repo derivable from git remotes or
+  `gh` is `kind: "config"` (exit `2`, permanent); a `gh` timeout while deriving
+  `--repo` is `kind: "github"` (exit `1`, transient) — see the `--repo` bullet
+  in [CLI](#cli).
 - `repo`, `monitorId` (string): present once the corresponding flag has been
   parsed (absent for errors raised before that, e.g. an unknown option). `error`
   strings are human-readable and not a stable enum.
