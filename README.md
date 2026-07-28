@@ -186,6 +186,17 @@ field set and enum domains are also emitted machine-readably under
 authoritative schema lives in
 [Delta Summary schema](docs/contract.md#delta-summary-schema).
 
+### Baseline state emission (`--baseline-emit-state`)
+
+By default the first run seeds a baseline silently (`deltas: []`), so a PR that is
+_already_ stuck — in merge conflict or blocked on CI at seed time — stays invisible
+until it changes again. Pass `--baseline-emit-state` to emit one synthetic
+`baseline-state` delta per tracked open item on that first run instead; the run then
+exits `10` with `baseline: true` and a non-empty `deltas` array. The delta ids are
+content-addressed and stable across re-baselining, so idempotent consumers dedupe
+them for free. Off by default — existing behavior is byte-identical. Do not treat a
+`baseline-state` delta as newly created.
+
 ## Watch Loops and Outposts
 
 See [RUNBOOK.md](RUNBOOK.md) for timer-driven loop patterns. The recommended

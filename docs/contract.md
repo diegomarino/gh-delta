@@ -15,7 +15,7 @@ machine-readable form of this document is available at `gh-delta --help-json`.
 gh-delta [--repo <owner/name>] [--monitor-id <id>]
          [--state-file <path> | --state-dir <dir>]
          [--entities pr,issue] [--format json|text]
-         [--summary-line] [--detail] [--summaries]
+         [--summary-line] [--detail] [--summaries] [--baseline-emit-state]
          [--outpost-url <url>]
          [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>]
          [--gh-timeout-ms <ms>] [--no-registry]
@@ -76,6 +76,13 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
   `mergeable`, …) read from the same observation as the opaque fingerprints, with
   no second GitHub call. Additive and off by default; see
   [Delta Summary schema](#delta-summary-schema).
+- `--baseline-emit-state` is optional and off by default. On the run that seeds a
+  baseline, it emits one synthetic `baseline-state` delta per tracked OPEN item
+  (`from: null`, `to`: the observed fingerprint) so state that already existed at
+  baseline is visible instead of silent until the item next changes. The run then
+  exits `10` with `baseline: true` and a non-empty `deltas` array; ids are stable
+  across re-baselining. Without the flag, baseline behavior is byte-identical. See
+  the [`baseline-state`](#delta-classes) class and [Exit Codes](#exit-codes).
 - `--outpost-url` is optional at-most-once HTTP delivery; see
   [Outpost Payload](#outpost-payload-schema-v1). It does not affect the JSON
   report, exit code, or snapshot.
@@ -210,7 +217,10 @@ deltas), the CLI writes one small breadcrumb per monitor:
 ## Exit Codes
 
 - `0`: baseline established or no deltas.
-- `10`: deltas found.
+- `10`: deltas found. Also emitted when `--baseline-emit-state` seeds a baseline
+  that observes at least one tracked open item: the report then carries
+  `baseline: true` **and** a non-empty `deltas` array of `baseline-state` deltas.
+  Watchers that chain on exit `10` feed this baseline report like any other.
 - `1`: **transient error** — GitHub CLI, network, timeout, or snapshot write
   failure. The snapshot is not updated; the next scheduled tick should retry
   automatically.
@@ -275,27 +285,28 @@ is **never empty** (`updated` is the catch-all). `classes` is a **set** — seve
 can co-occur on one delta (e.g. `ci-changed` + `review-changed`). Order within
 the array is not significant and not guaranteed stable.
 
-| Class                         | Applies to | Meaning                                                                                                                                                                                                                                                          |
-| ----------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `new`                         | pr, issue  | New issue or PR after the baseline. `from` is `null`.                                                                                                                                                                                                            |
-| `first-seen`                  | pr, issue  | First time this watcher observed a non-open item. It may predate the baseline; `from` is `null`, but consumers should not treat it as newly created.                                                                                                             |
-| `closed`                      | pr, issue  | Issue or PR was closed.                                                                                                                                                                                                                                          |
-| `reopened`                    | pr, issue  | Issue or PR was reopened (state returned to `OPEN`).                                                                                                                                                                                                             |
-| `new-comments`                | pr, issue  | Comment count increased.                                                                                                                                                                                                                                         |
-| `updated`                     | pr, issue  | Fingerprint changed with no more specific class. A PR-branch push alone (head SHA change) surfaces here.                                                                                                                                                         |
-| `missing`                     | pr, issue  | An item the snapshot believes OPEN vanished from the fetch. Check pagination, permissions, or scope before trusting it. Absent closed items are dormant memory, not a missing delta. `to` is `null`.                                                             |
-| `still-missing`               | pr, issue  | An already-missing open item is still absent (tick 2). Unresolved operational state, not a fresh delta. `to` is `null`.                                                                                                                                          |
-| `presumed-deleted`            | pr, issue  | Absent for 3 consecutive ticks; treated as deleted, transferred, or converted. Emitted once; the object then goes silent but stays in memory (`missingTicks` counter in the stored fingerprint). `reappeared` still fires if the object returns. `to` is `null`. |
-| `reappeared`                  | pr, issue  | An object previously marked `missing` returned to the fetch. It may co-occur with other classes if the fingerprint also changed.                                                                                                                                 |
-| `merged`                      | pr only    | PR was merged.                                                                                                                                                                                                                                                   |
-| `draft-ready`                 | pr only    | PR moved from draft to ready for review.                                                                                                                                                                                                                         |
-| `ci-changed`                  | pr only    | Check run or status context changed.                                                                                                                                                                                                                             |
-| `review-changed`              | pr only    | Review decision or latest review states changed.                                                                                                                                                                                                                 |
-| `became-mergeable`            | pr only    | PR moved from `CONFLICTING` to `MERGEABLE` (an `UNKNOWN` mid-recompute placeholder does not count).                                                                                                                                                              |
-| `unresolved-threads-added`    | pr only    | Unresolved PR review thread count increased.                                                                                                                                                                                                                     |
-| `unresolved-threads-resolved` | pr only    | Unresolved PR review thread count decreased.                                                                                                                                                                                                                     |
-| `review-threads-changed`      | pr only    | PR review thread total changed while the unresolved count held steady.                                                                                                                                                                                           |
-| `relabeled`                   | issue only | Issue labels changed. (The PR fetch does not collect labels, so PRs never emit this.)                                                                                                                                                                            |
+| Class                         | Applies to | Meaning                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ----------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `new`                         | pr, issue  | New issue or PR after the baseline. `from` is `null`.                                                                                                                                                                                                                                                                                                                                                         |
+| `first-seen`                  | pr, issue  | First time this watcher observed a non-open item. It may predate the baseline; `from` is `null`, but consumers should not treat it as newly created.                                                                                                                                                                                                                                                          |
+| `baseline-state`              | pr, issue  | Emitted only under `--baseline-emit-state`, once per tracked OPEN item on the run that seeds a baseline. `from` is `null`, `to` is the freshly observed fingerprint. Surfaces state that already existed at baseline (e.g. an already-conflicting or already-CI-blocked PR). The content-addressed `id` is stable across re-baselining. Consumers must **not** treat it as newly created (like `first-seen`). |
+| `closed`                      | pr, issue  | Issue or PR was closed.                                                                                                                                                                                                                                                                                                                                                                                       |
+| `reopened`                    | pr, issue  | Issue or PR was reopened (state returned to `OPEN`).                                                                                                                                                                                                                                                                                                                                                          |
+| `new-comments`                | pr, issue  | Comment count increased.                                                                                                                                                                                                                                                                                                                                                                                      |
+| `updated`                     | pr, issue  | Fingerprint changed with no more specific class. A PR-branch push alone (head SHA change) surfaces here.                                                                                                                                                                                                                                                                                                      |
+| `missing`                     | pr, issue  | An item the snapshot believes OPEN vanished from the fetch. Check pagination, permissions, or scope before trusting it. Absent closed items are dormant memory, not a missing delta. `to` is `null`.                                                                                                                                                                                                          |
+| `still-missing`               | pr, issue  | An already-missing open item is still absent (tick 2). Unresolved operational state, not a fresh delta. `to` is `null`.                                                                                                                                                                                                                                                                                       |
+| `presumed-deleted`            | pr, issue  | Absent for 3 consecutive ticks; treated as deleted, transferred, or converted. Emitted once; the object then goes silent but stays in memory (`missingTicks` counter in the stored fingerprint). `reappeared` still fires if the object returns. `to` is `null`.                                                                                                                                              |
+| `reappeared`                  | pr, issue  | An object previously marked `missing` returned to the fetch. It may co-occur with other classes if the fingerprint also changed.                                                                                                                                                                                                                                                                              |
+| `merged`                      | pr only    | PR was merged.                                                                                                                                                                                                                                                                                                                                                                                                |
+| `draft-ready`                 | pr only    | PR moved from draft to ready for review.                                                                                                                                                                                                                                                                                                                                                                      |
+| `ci-changed`                  | pr only    | Check run or status context changed.                                                                                                                                                                                                                                                                                                                                                                          |
+| `review-changed`              | pr only    | Review decision or latest review states changed.                                                                                                                                                                                                                                                                                                                                                              |
+| `became-mergeable`            | pr only    | PR moved from `CONFLICTING` to `MERGEABLE` (an `UNKNOWN` mid-recompute placeholder does not count).                                                                                                                                                                                                                                                                                                           |
+| `unresolved-threads-added`    | pr only    | Unresolved PR review thread count increased.                                                                                                                                                                                                                                                                                                                                                                  |
+| `unresolved-threads-resolved` | pr only    | Unresolved PR review thread count decreased.                                                                                                                                                                                                                                                                                                                                                                  |
+| `review-threads-changed`      | pr only    | PR review thread total changed while the unresolved count held steady.                                                                                                                                                                                                                                                                                                                                        |
+| `relabeled`                   | issue only | Issue labels changed. (The PR fetch does not collect labels, so PRs never emit this.)                                                                                                                                                                                                                                                                                                                         |
 
 **Forward compatibility:** new classes may be added in a later minor version.
 Consumers must treat an unrecognized class as "something changed, inspect,"
@@ -371,9 +382,12 @@ Field guarantees:
 - `schemaVersion` (number): report shape version. Bumped **only** on a breaking
   change — a field removed or renamed. Additive changes (new optional keys on the
   report, a delta, or a fingerprint) do not bump it. Assert `schemaVersion === 1`.
-- `baseline` (boolean): `true` on the first run for a snapshot. When `true`,
-  `deltas` is always `[]` even though every tracked object is new — a baseline
-  seeds memory, it does not report. Handle it distinctly from "no deltas."
+- `baseline` (boolean): `true` on the first run for a snapshot. Without
+  `--baseline-emit-state`, `deltas` is always `[]` when `true` even though every
+  tracked object is new — a baseline seeds memory, it does not report. With
+  `--baseline-emit-state`, a baseline that observes at least one tracked open item
+  instead carries a non-empty `deltas` array of `baseline-state` deltas (and the
+  run exits `10`). Handle `baseline` distinctly from "no deltas" either way.
 - `repo`, `monitorId` (string): echo the flags.
 - `repoSource` (`"flag"` | `"git-remote"` | `"gh"`): how `--repo` was resolved
   — `"flag"` when passed explicitly, `"git-remote"` when derived from the
