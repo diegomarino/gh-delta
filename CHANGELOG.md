@@ -4,6 +4,23 @@ All notable changes to this package will be documented here.
 
 This project follows semantic versioning.
 
+## [0.4.0](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.3.1...gh-delta-v0.4.0) (2026-07-28)
+
+
+### Features
+
+* add --baseline-emit-state flag for pre-existing open items ([b903d4b](https://github.com/diegomarino/gh-delta/commit/b903d4ba5f42bd8bb345e62bd9fb1135e640588a))
+* add mergeStateStatus enum to the delta summary ([1cfecdb](https://github.com/diegomarino/gh-delta/commit/1cfecdb9095fe5e09003256528d04af2417d6d9d))
+* add opt-in baseline-state delta class to the detector ([6288815](https://github.com/diegomarino/gh-delta/commit/6288815cab81293e81378f7156707f632c07aa26))
+* derive --repo from the git remote when omitted ([#18](https://github.com/diegomarino/gh-delta/issues/18)) ([c992b9e](https://github.com/diegomarino/gh-delta/commit/c992b9e14a2b2530da0e545e89261e6a79886e0b))
+* mergeStateStatus in delta summary + opt-in baseline-state emission ([7502787](https://github.com/diegomarino/gh-delta/commit/75027874edf468a3dade0064aa30d7fbc9466b1a))
+* observe mergeStateStatus in the PR fingerprint boundary ([6fb3bbe](https://github.com/diegomarino/gh-delta/commit/6fb3bbebb5ef52a87364e74c2863aacf655b95ef))
+
+
+### Bug Fixes
+
+* compare mergeStateStatus so merge-state transitions are not swallowed ([bf0d36b](https://github.com/diegomarino/gh-delta/commit/bf0d36b85e102fd948d603fe1f23b6e21d71f186))
+
 ## [0.3.1](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.3.0...gh-delta-v0.3.1) (2026-07-12)
 
 
