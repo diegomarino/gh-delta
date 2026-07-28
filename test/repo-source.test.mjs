@@ -58,6 +58,13 @@ const fakeExec = (table) => (cmd, args) => {
 };
 const timeoutErr = () => Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' });
 const noRemote = () => new Error('fatal: No such remote');
+// Genuine permanent-decline gh stderr: no git repo here at all. Used by
+// fixtures that need gh to decline (not fail transiently) without a remote.
+const notARepo = () =>
+  Object.assign(new Error('gh: exit status 1'), {
+    stderr:
+      'failed to run git: fatal: not a git repository (or any of the parent directories): .git\n',
+  });
 
 test('origin on github.com resolves to git-remote source', () => {
   const exec = fakeExec({
@@ -116,7 +123,7 @@ test('no git remotes and gh says not-a-repo -> declined', () => {
   const exec = fakeExec({
     'git remote get-url origin': noRemote(),
     'git remote get-url upstream': noRemote(),
-    'gh repo view --json nameWithOwner -q .nameWithOwner': new Error('no repo'),
+    'gh repo view --json nameWithOwner -q .nameWithOwner': notARepo(),
   });
   assert.deepEqual(resolveRepoFromGit({ exec }), { status: 'declined' });
 });
@@ -128,6 +135,47 @@ test('gh timeout during fallback -> failed, not declined', () => {
     'gh repo view --json nameWithOwner -q .nameWithOwner': timeoutErr(),
   });
   assert.equal(resolveRepoFromGit({ exec }).status, 'failed');
+});
+
+// gh CLI stderr signatures (gh 2.96.0) that mean "genuinely nothing to derive
+// here" -- a permanent decline. Everything else gh can fail with (network,
+// API 5xx, rate limit, auth) is transient and must map to 'failed'.
+const ghErr = (stderr) => Object.assign(new Error('gh: exit status 1'), { stderr });
+
+test('gh stderr "not a git repository" -> declined (permanent)', () => {
+  const exec = fakeExec({
+    'git remote get-url origin': noRemote(),
+    'git remote get-url upstream': noRemote(),
+    'gh repo view --json nameWithOwner -q .nameWithOwner': ghErr(
+      'failed to run git: fatal: not a git repository (or any of the parent directories): .git\n',
+    ),
+  });
+  assert.deepEqual(resolveRepoFromGit({ exec }), { status: 'declined' });
+});
+
+test('gh stderr "known GitHub host" (no matching remote) -> declined (permanent)', () => {
+  const exec = fakeExec({
+    'git remote get-url origin': noRemote(),
+    'git remote get-url upstream': noRemote(),
+    'gh repo view --json nameWithOwner -q .nameWithOwner': ghErr(
+      'none of the git remotes configured for this repository point to a known GitHub host. ' +
+        'To tell gh about a new GitHub host, please use gh auth login\n',
+    ),
+  });
+  assert.deepEqual(resolveRepoFromGit({ exec }), { status: 'declined' });
+});
+
+test('gh stderr network error -> failed, NOT declined (regression: transient failures must be retryable)', () => {
+  const exec = fakeExec({
+    'git remote get-url origin': noRemote(),
+    'git remote get-url upstream': noRemote(),
+    'gh repo view --json nameWithOwner -q .nameWithOwner': ghErr(
+      'error connecting to api.github.com\n',
+    ),
+  });
+  const result = resolveRepoFromGit({ exec });
+  assert.equal(result.status, 'failed');
+  assert.notEqual(result.status, 'declined');
 });
 
 test('gh fallback receives the configured ghTimeoutMs', () => {
@@ -145,7 +193,7 @@ test('a credentialed declined URL never leaks into the result', () => {
   const exec = fakeExec({
     'git remote get-url origin': 'https://user:s3cr3t@gitlab.com/me/proj.git',
     'git remote get-url upstream': noRemote(),
-    'gh repo view --json nameWithOwner -q .nameWithOwner': new Error('no repo'),
+    'gh repo view --json nameWithOwner -q .nameWithOwner': notARepo(),
   });
   assert.deepEqual(resolveRepoFromGit({ exec }), { status: 'declined' });
   // (no warnings/reason string exists here to carry the token)
