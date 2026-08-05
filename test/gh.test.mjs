@@ -246,6 +246,75 @@ test('the PR query requests mergeStateStatus and normalizePr defaults it to UNKN
   assert.equal(rows[0].mergeStateStatus, 'UNKNOWN');
 });
 
+test('the PR query requests base ref, labels, assignees, and review requests and normalizePr carries them', () => {
+  let sentQuery = '';
+  const exec = (_cmd, args) => {
+    sentQuery = args.find((a) => a.startsWith('query=')) ?? '';
+    return page([
+      prNode({
+        baseRefName: 'main',
+        labels: { nodes: [null, { name: 'bug' }], pageInfo: { hasNextPage: false } },
+        assignees: { nodes: [{ login: 'alice' }, null], pageInfo: { hasNextPage: false } },
+        reviewRequests: {
+          nodes: [
+            { requestedReviewer: { login: 'bob' } },
+            { requestedReviewer: { combinedSlug: 'org/platform-team' } },
+            null,
+          ],
+          pageInfo: { hasNextPage: false },
+        },
+      }),
+    ]);
+  };
+  const rows = fetchPRs('o/r', { exec, horizonCutoff: null });
+  for (const field of ['baseRefName', 'labels', 'assignees', 'reviewRequests']) {
+    assert.ok(sentQuery.includes(field), `PR GraphQL selection must request ${field}`);
+  }
+  assert.equal(rows[0].baseRefName, 'main');
+  assert.deepEqual(rows[0].labels, [{ name: 'bug' }]);
+  assert.deepEqual(rows[0].assignees, ['alice']);
+  assert.deepEqual(rows[0].reviewRequests, ['bob', 'org/platform-team']);
+});
+
+test('normalizePr defaults the new fields when a node predates them', () => {
+  const rows = fetchPRs('o/r', { exec: () => page([prNode()]), horizonCutoff: null });
+  assert.equal(rows[0].baseRefName, '');
+  assert.deepEqual(rows[0].labels, []);
+  assert.deepEqual(rows[0].assignees, []);
+  assert.deepEqual(rows[0].reviewRequests, []);
+});
+
+test('fails closed on paginated PR assignees', () => {
+  const overflow = prNode({
+    assignees: { nodes: [{ login: 'alice' }], pageInfo: { hasNextPage: true } },
+  });
+  assert.throws(() => fetchPRs('o/r', { exec: () => page([overflow]) }), /paginated assignees/);
+});
+
+test('the issue query requests assignees and fetchIssues normalizes them', () => {
+  let sentQuery = '';
+  const exec = (_cmd, args) => {
+    sentQuery = args.find((a) => a.startsWith('query=')) ?? '';
+    return page([
+      {
+        number: 7,
+        title: 'bug',
+        state: 'OPEN',
+        updatedAt: '2026-07-01T10:00:00Z',
+        labels: { nodes: [], pageInfo: { hasNextPage: false } },
+        assignees: {
+          nodes: [{ login: 'zoe' }, { login: 'alice' }],
+          pageInfo: { hasNextPage: false },
+        },
+        comments: { totalCount: 0 },
+      },
+    ]);
+  };
+  const rows = fetchIssues('o/r', { exec, horizonCutoff: null });
+  assert.ok(sentQuery.includes('assignees'), 'issue GraphQL selection must request assignees');
+  assert.deepEqual(rows[0].assignees, ['zoe', 'alice']);
+});
+
 test('normalizePr passes through a present mergeStateStatus verbatim', () => {
   const rows = fetchPRs('o/r', {
     exec: () => page([prNode({ mergeStateStatus: 'BEHIND' })]),
