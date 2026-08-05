@@ -140,7 +140,7 @@ Text output is designed for scheduled logs:
 JSON output is designed for programs and agents:
 
 <p align="center">
-  <img src="docs/img/json-output.svg" alt="gh-delta --format json --detail report for a PR with CI and review changes" width="520">
+  <img src="docs/img/json-output.svg" alt="gh-delta --format json --detail report for a PR with CI, review, and requested-reviewer changes" width="520">
 </p>
 
 Use `--summary-line` when an agent only needs a display sentence. Use `--detail`
