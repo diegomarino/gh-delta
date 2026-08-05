@@ -4,6 +4,29 @@ All notable changes to this package will be documented here.
 
 This project follows semantic versioning.
 
+## [0.5.0](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.4.0...gh-delta-v0.5.0) (2026-08-05)
+
+
+### Features
+
+* add seven neutral delta classes for agent feedback signals ([49eba4f](https://github.com/diegomarino/gh-delta/commit/49eba4f239d5d8e3e3cd7f25a3f0be8c84d84362))
+* explain the new classes in details, text output, and help ([e3fe9be](https://github.com/diegomarino/gh-delta/commit/e3fe9be58b661a1d9e0bf5fc7ccc2504dc27de06))
+* extend neutral GitHub signals from the [#23](https://github.com/diegomarino/gh-delta/issues/23) audit ([a679688](https://github.com/diegomarino/gh-delta/commit/a679688660b0f33f548a4d4e4d4d163d9825ed43))
+* fetch base ref, labels, assignees, and review requests ([730ce69](https://github.com/diegomarino/gh-delta/commit/730ce69738da3beab8b9a1610745fc93162fd1c7))
+
+
+### Bug Fixes
+
+* suppress additive-field detail rows on upgrade ticks ([518331f](https://github.com/diegomarino/gh-delta/commit/518331f1a24dad84f8c8ab8c68fffd7bd47a932b))
+
+
+### Documentation
+
+* catch operator docs up with the new classes and audit notes ([0fc4c0c](https://github.com/diegomarino/gh-delta/commit/0fc4c0c41d6c284ff2570a4c34d8d49ad0a179fb))
+* document the new classes and compared fingerprint fields ([8af1b84](https://github.com/diegomarino/gh-delta/commit/8af1b840fa03388dcdf292537945747c8418056e))
+* rate-limit budget, unresolvable-reviewer placeholder, GHES opt-in stance ([3b4e029](https://github.com/diegomarino/gh-delta/commit/3b4e02972e6b47ebccee6b81766f7bc6023a31e4))
+* showcase review-requests-changed in the example artifacts ([f5bb320](https://github.com/diegomarino/gh-delta/commit/f5bb320eddb7a3ec397dbd262ed55bd62f718fec))
+
 ## [0.4.0](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.3.1...gh-delta-v0.4.0) (2026-07-28)
 
 
