@@ -128,6 +128,12 @@ Heartbeat format:
 
 Use `--format json` when another program needs the raw structured report.
 
+**Cadence and rate limit:** a typical tick costs ~18 GraphQL points (7 per PR
+page + 2 per issue page, × two fetch phases) against GitHub's 5,000
+points/hour-per-token budget — generous for one monitor, shared across all
+monitors on the same token. Numbers and how to spend less:
+[Fetch limits](docs/contract.md#fetch-limits-page-caps).
+
 ## Outpost Mode
 
 `--outpost-url` must be an `http:` or `https:` URL. Invalid configuration exits

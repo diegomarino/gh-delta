@@ -602,7 +602,7 @@ PR fingerprint:
 | `base`                    | yes         | base branch name (`baseRefName`). A compared field; a transition emits `base-changed`. Snapshots predating it do not fire on its first appearance (same upgrade rule as `mergeStateStatus`).                                                                                                                                                                                                                                                       |
 | `labels`                  | yes         | string[], sorted label names. A compared field; a transition emits `relabeled`. Same additive upgrade rule.                                                                                                                                                                                                                                                                                                                                        |
 | `assignees`               | yes         | string[], sorted assignee logins. A compared field; a transition emits `assignees-changed`. Same additive upgrade rule.                                                                                                                                                                                                                                                                                                                            |
-| `reviewRequests`          | yes         | string[], sorted requested-reviewer names (user/bot logins; teams as `org/slug`). A compared field; a transition emits `review-requests-changed`. Same additive upgrade rule.                                                                                                                                                                                                                                                                      |
+| `reviewRequests`          | yes         | string[], sorted requested-reviewer names (user/bot logins; teams as `org/slug`). A reviewer the token cannot resolve (e.g. a private team) is recorded as the literal placeholder `?` — deterministic per token, but two monitors with different token scopes can fingerprint the same PR differently there. A compared field; a transition emits `review-requests-changed`. Same additive upgrade rule.                                          |
 | `missing`                 | bookkeeping | boolean; present on fingerprints stored for missing items. Not part of the change comparison.                                                                                                                                                                                                                                                                                                                                                      |
 | `missingTicks`            | bookkeeping | number; consecutive ticks an item has been absent. Present alongside `missing: true`.                                                                                                                                                                                                                                                                                                                                                              |
 
@@ -674,6 +674,18 @@ page inside a PR node) — is treated as incomplete state and **fails closed**
 family with more than 1000 currently-open items, or with more than 3000 items
 updated since the last horizon, needs a shorter tick interval or a narrower
 `--entities` selection to stay under these caps.
+
+**Rate-limit budget.** GitHub charges GraphQL by _requested_ page shape, not by
+rows returned: as of 0.5.0 a PR page costs **7 points** and an issue page **2
+points** (measured live via `rateLimit { cost }`; the PR page was 4 points
+before the 0.5.0 fields). A typical steady-state tick — both entity families,
+one page each, open + updated phases — costs **~18 points** against the
+GraphQL budget of **5,000 points/hour per token**; a baseline tick skips the
+updated phase and costs half. That leaves headroom for hundreds of ticks per
+hour, but the budget is shared by every monitor (and every other GraphQL use)
+on the same token. To spend less: drop an entity family with `--entities pr`
+or `--entities issue`, lengthen the tick cadence (cost scales linearly), or
+split dense fleets across tokens.
 
 Snapshot shape: `{ "pr": object, "issue": object, "meta"?: object }`.
 `meta.horizon` is stamped with the run timestamp on every successful write.
@@ -760,8 +772,10 @@ On **Windows** the behavior degrades explicitly, never silently:
   github.com. On a GHES version whose `RequestedReviewer` union predates
   `Bot` (or lacks `combinedSlug`), GraphQL **validation rejects the whole
   query** and every tick fails with a `github` error. If you run against an
-  older GHES and hit this, report it — the selection can be degraded (`slug`,
-  no `Bot` fragment) at the cost of team-slug detail.
+  older GHES and hit this, report it — the fix would ship as an **opt-in
+  compatibility selection** for those hosts (e.g. an env knob switching to
+  `slug`, no `Bot` fragment), never as a degradation of the github.com
+  default, which would lose Copilot-reviewer detection for everyone.
 
 ## Outpost Payload (schema v1)
 
