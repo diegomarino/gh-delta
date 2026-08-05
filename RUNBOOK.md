@@ -230,17 +230,24 @@ developer polling loops or webhook-driven automation.
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `new` (PR)                    | a worker opened a PR; read it and queue review                                                                                                                    |
 | `first-seen`                  | first observed non-open item; inspect it before treating it as newly created                                                                                      |
+| `baseline-state`              | only under `--baseline-emit-state`, on the seeding run: pre-existing open-item state (e.g. already conflicting); inspect, do not treat as newly created           |
 | `ci-changed`                  | CI green: consider merge path; CI red: nudge worker with the failure (with `--format json --detail`, the delta's `ci` detail names the exact checks that changed) |
 | `review-changed`              | approved: merge candidate; changes requested: relay to worker (with `--format json --detail`, the `reviews` detail names the reviewers and state transitions)     |
 | `became-mergeable`            | conflicts resolved; merge candidate                                                                                                                               |
+| `became-conflicting`          | PR now conflicts with its base; rebase or resolve before merge                                                                                                    |
 | `draft-ready`                 | PR left draft and is ready for review; queue it for review or dispatch                                                                                            |
+| `converted-to-draft`          | PR went back to draft; hold review and merge actions until it is ready again                                                                                      |
 | `merged` / `closed`           | slice done; advance build order or sync spawn base                                                                                                                |
 | `reopened`                    | item reopened; re-enter it into the active work queue                                                                                                             |
 | `new-comments`                | read PR threads; fold review comments before merge                                                                                                                |
+| `comments-removed`            | comments were deleted; re-read the thread — prior context may be gone                                                                                             |
 | `unresolved-threads-added`    | unresolved review threads appeared; resolve before merge                                                                                                          |
 | `unresolved-threads-resolved` | review threads resolved; re-check CI and review state                                                                                                             |
 | `review-threads-changed`      | review thread activity changed; inspect before acting                                                                                                             |
-| `relabeled`                   | scope or state change on an issue; reassess dispatch                                                                                                              |
+| `relabeled`                   | labels changed (PR or issue — route on `entity`); reassess dispatch                                                                                               |
+| `assignees-changed`           | ownership changed (with `--detail`, the `assignees` detail names added/removed logins); check who owns the item before dispatching                                |
+| `review-requests-changed`     | requested reviewers changed (with `--detail`, added/removed logins; teams as `org/slug`); check who is now expected to review                                     |
+| `base-changed`                | PR base branch changed; prior CI/mergeability context refers to the old base — re-check both                                                                      |
 | `missing`                     | open item disappeared from fetch; check pagination, permissions, or scope                                                                                         |
 | `still-missing`               | open item remains absent (tick 2); unresolved operational issue, not a fresh delta                                                                                |
 | `presumed-deleted`            | absent for 3 consecutive ticks; treat as gone; verify on GitHub if unexpected; no further ticks will mention it unless it reappears                               |

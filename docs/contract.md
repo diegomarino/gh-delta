@@ -293,6 +293,8 @@ the array is not significant and not guaranteed stable.
 | `reopened`                    | pr, issue  | Issue or PR was reopened (state returned to `OPEN`).                                                                                                                                                                                                                                                                                                                                                          |
 | `new-comments`                | pr, issue  | Comment count increased.                                                                                                                                                                                                                                                                                                                                                                                      |
 | `comments-removed`            | pr, issue  | Comment count decreased (comment deleted, or deletions outnumbering additions within one tick). Prior context an agent read may be gone; re-read before acting.                                                                                                                                                                                                                                               |
+| `relabeled`                   | pr, issue  | Labels changed. Detail names the added/removed labels. **Was issue-only before 0.5.0** — route on `entity`, not on the class.                                                                                                                                                                                                                                                                                 |
+| `assignees-changed`           | pr, issue  | Assignees changed. Detail names the added/removed logins. Neutral state transition: gh-delta reports who owns the item now, never who _should_.                                                                                                                                                                                                                                                               |
 | `updated`                     | pr, issue  | Fingerprint changed with no more specific class. A PR-branch push alone (head SHA change) surfaces here.                                                                                                                                                                                                                                                                                                      |
 | `missing`                     | pr, issue  | An item the snapshot believes OPEN vanished from the fetch. Check pagination, permissions, or scope before trusting it. Absent closed items are dormant memory, not a missing delta. `to` is `null`.                                                                                                                                                                                                          |
 | `still-missing`               | pr, issue  | An already-missing open item is still absent (tick 2). Unresolved operational state, not a fresh delta. `to` is `null`.                                                                                                                                                                                                                                                                                       |
@@ -303,13 +305,11 @@ the array is not significant and not guaranteed stable.
 | `converted-to-draft`          | pr only    | PR moved back from ready to draft. The inverse of `draft-ready`.                                                                                                                                                                                                                                                                                                                                              |
 | `ci-changed`                  | pr only    | Check run or status context changed.                                                                                                                                                                                                                                                                                                                                                                          |
 | `review-changed`              | pr only    | Review decision or latest review states changed.                                                                                                                                                                                                                                                                                                                                                              |
-| `became-mergeable`            | pr only    | PR moved from `CONFLICTING` to `MERGEABLE` (an `UNKNOWN` mid-recompute placeholder does not count).                                                                                                                                                                                                                                                                                                           |
-| `became-conflicting`          | pr only    | PR moved from `MERGEABLE` to `CONFLICTING` (an `UNKNOWN` mid-recompute placeholder does not count). The inverse of `became-mergeable`.                                                                                                                                                                                                                                                                        |
+| `became-mergeable`            | pr only    | PR moved from `CONFLICTING` to `MERGEABLE` (an `UNKNOWN` mid-recompute placeholder does not count). Best-effort edge trigger: a transition sampled through the `UNKNOWN` window surfaces as `updated` instead — gate decisions on the observed `mergeable` state, not on this class.                                                                                                                          |
+| `became-conflicting`          | pr only    | PR moved from `MERGEABLE` to `CONFLICTING` (an `UNKNOWN` mid-recompute placeholder does not count). The inverse of `became-mergeable`, with the same best-effort caveat: sampling through `UNKNOWN` yields `updated` instead.                                                                                                                                                                                 |
 | `unresolved-threads-added`    | pr only    | Unresolved PR review thread count increased.                                                                                                                                                                                                                                                                                                                                                                  |
 | `unresolved-threads-resolved` | pr only    | Unresolved PR review thread count decreased.                                                                                                                                                                                                                                                                                                                                                                  |
 | `review-threads-changed`      | pr only    | PR review thread total changed while the unresolved count held steady.                                                                                                                                                                                                                                                                                                                                        |
-| `relabeled`                   | pr, issue  | Labels changed. Detail names the added/removed labels.                                                                                                                                                                                                                                                                                                                                                        |
-| `assignees-changed`           | pr, issue  | Assignees changed. Detail names the added/removed logins. Neutral state transition: gh-delta reports who owns the item now, never who _should_.                                                                                                                                                                                                                                                               |
 | `review-requests-changed`     | pr only    | Requested reviewers changed (review requested or a request withdrawn/satisfied). Detail names the added/removed logins (teams as `org/slug`). Note GitHub removes a user from `reviewRequests` once they submit a review, so a submitted review usually fires this together with `review-changed`.                                                                                                            |
 | `base-changed`                | pr only    | Base branch changed (PR retargeted). Prior CI and mergeability context refer to the old base; expect `mergeable: UNKNOWN` churn while GitHub recomputes.                                                                                                                                                                                                                                                      |
 
@@ -429,7 +429,12 @@ Each delta:
   deliberately **excludes `monitorId`**, the report `at`, `title`, and every
   derived display field — so two monitors observing the same current GitHub
   state emit the same `id`. Use it as the idempotency key for dedupe. Added
-  additively; it does not bump `schemaVersion`.
+  additively; it does not bump `schemaVersion`. Ids are stable **per gh-delta
+  version**: a release that adds compared fingerprint fields (e.g. 0.5.0's
+  `base`/`labels`/`assignees`/`reviewRequests`) shifts each item's id once on
+  its first post-upgrade delta, and monitors on different versions emit
+  different ids for the same observation — upgrade co-posting monitors
+  together to keep cross-monitor dedupe intact.
 - `entity` (`"pr"` | `"issue"`): the **only** discriminator between an issue and
   a PR. GitHub numbers are shared across issues and PRs, so `number` alone is
   ambiguous — always key on `(entity, number)`.
@@ -447,10 +452,12 @@ Each delta:
   all issue deltas. Lets a consumer route or group by branch without a second
   GitHub round-trip.
 
-  > Note: gh-delta does **not** signal branch deletion — deletion changes neither
-  > `headRefName` nor `headRefOid` (both retained by GitHub) and is not
-  > fingerprinted, so it produces no delta. The field is purely "which branch",
-  > never "does the branch still exist".
+  > Note: gh-delta does **not** identify branch deletion as such — deletion
+  > changes neither `headRefName` nor `headRefOid` (both retained by GitHub).
+  > GitHub does bump the PR's `updatedAt` when the head branch is deleted, so
+  > within the horizon window the deletion surfaces as an opaque `updated`
+  > delta; query `headRef` (null once deleted) to attribute it. The field is
+  > purely "which branch", never "does the branch still exist".
 
 - `classes` (string[]): non-empty set of [classes](#delta-classes).
 - `from`, `to`: entity [fingerprints](#fingerprint-fields-from--to), or `null`. `from` is
@@ -747,6 +754,14 @@ On **Windows** the behavior degrades explicitly, never silently:
   keys case-fold the resolved snapshot path on Windows, so `C:\State\x.json`
   and `c:\state\x.json` are one monitor, not two. On POSIX, paths that differ
   by case are genuinely different files and are kept distinct.
+- **GraphQL schema age (GitHub Enterprise).** The PR query's `reviewRequests`
+  selection spreads an inline fragment on `Bot` and selects
+  `Team.combinedSlug` — both newer schema members, verified against
+  github.com. On a GHES version whose `RequestedReviewer` union predates
+  `Bot` (or lacks `combinedSlug`), GraphQL **validation rejects the whole
+  query** and every tick fails with a `github` error. If you run against an
+  older GHES and hit this, report it — the selection can be degraded (`slug`,
+  no `Bot` fragment) at the cost of team-slug detail.
 
 ## Outpost Payload (schema v1)
 
