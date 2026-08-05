@@ -195,6 +195,141 @@ test('an identical PR (only array reorder) emits NO delta', () => {
   assert.deepEqual(r.deltas, []);
 });
 
+test('ready → draft emits converted-to-draft', () => {
+  const base = detectDeltas(null, { pr: [pr({ isDraft: false })], issue: [] });
+  const r = detectDeltas(base.snapshot, {
+    pr: [pr({ isDraft: true, updatedAt: '2026-07-01T11:00:00Z' })],
+    issue: [],
+  });
+  assert.ok(r.deltas[0].classes.includes('converted-to-draft'));
+});
+
+test('mergeable MERGEABLE → CONFLICTING emits became-conflicting', () => {
+  const base = detectDeltas(null, { pr: [pr({ mergeable: 'MERGEABLE' })], issue: [] });
+  const r = detectDeltas(base.snapshot, {
+    pr: [pr({ mergeable: 'CONFLICTING', updatedAt: '2026-07-01T11:00:00Z' })],
+    issue: [],
+  });
+  assert.ok(r.deltas[0].classes.includes('became-conflicting'));
+});
+
+test('mergeable UNKNOWN → CONFLICTING does NOT emit became-conflicting', () => {
+  const base = detectDeltas(null, { pr: [pr({ mergeable: 'UNKNOWN' })], issue: [] });
+  const r = detectDeltas(base.snapshot, {
+    pr: [pr({ mergeable: 'CONFLICTING', updatedAt: '2026-07-01T11:00:00Z' })],
+    issue: [],
+  });
+  assert.ok(!r.deltas[0]?.classes.includes('became-conflicting'));
+});
+
+test('a base branch change emits base-changed', () => {
+  const base = detectDeltas(null, { pr: [pr({ baseRefName: 'main' })], issue: [] });
+  const r = detectDeltas(base.snapshot, {
+    pr: [pr({ baseRefName: 'release/2.0', updatedAt: '2026-07-01T11:00:00Z' })],
+    issue: [],
+  });
+  assert.ok(r.deltas[0].classes.includes('base-changed'));
+});
+
+test('a PR label change emits relabeled', () => {
+  const base = detectDeltas(null, { pr: [pr({ labels: [{ name: 'bug' }] })], issue: [] });
+  const r = detectDeltas(base.snapshot, {
+    pr: [pr({ labels: [{ name: 'bug' }, { name: 'urgent' }], updatedAt: '2026-07-01T11:00:00Z' })],
+    issue: [],
+  });
+  assert.ok(r.deltas[0].classes.includes('relabeled'));
+});
+
+test('a PR assignee change emits assignees-changed', () => {
+  const base = detectDeltas(null, { pr: [pr({ assignees: ['alice'] })], issue: [] });
+  const r = detectDeltas(base.snapshot, {
+    pr: [pr({ assignees: ['alice', 'bob'], updatedAt: '2026-07-01T11:00:00Z' })],
+    issue: [],
+  });
+  assert.ok(r.deltas[0].classes.includes('assignees-changed'));
+});
+
+test('an issue assignee change emits assignees-changed', () => {
+  const issue = {
+    number: 7,
+    title: 'bug',
+    state: 'OPEN',
+    updatedAt: '2026-07-01T10:00:00Z',
+    labels: [],
+    assignees: ['alice'],
+    comments: 0,
+  };
+  const base = detectDeltas(null, { pr: [], issue: [issue] });
+  const r = detectDeltas(base.snapshot, {
+    pr: [],
+    issue: [{ ...issue, updatedAt: '2026-07-01T11:00:00Z', assignees: [] }],
+  });
+  assert.ok(r.deltas[0].classes.includes('assignees-changed'));
+});
+
+test('a review request emits review-requests-changed', () => {
+  const base = detectDeltas(null, { pr: [pr({ reviewRequests: [] })], issue: [] });
+  const r = detectDeltas(base.snapshot, {
+    pr: [pr({ reviewRequests: ['carol'], updatedAt: '2026-07-01T11:00:00Z' })],
+    issue: [],
+  });
+  assert.ok(r.deltas[0].classes.includes('review-requests-changed'));
+});
+
+test('a comment total decrease emits comments-removed', () => {
+  const base = detectDeltas(null, { pr: [pr({ totalCommentsCount: 3 })], issue: [] });
+  const r = detectDeltas(base.snapshot, {
+    pr: [pr({ totalCommentsCount: 2, updatedAt: '2026-07-01T11:00:00Z' })],
+    issue: [],
+  });
+  assert.deepEqual(r.deltas[0].classes, ['comments-removed']);
+});
+
+test('a snapshot predating the new compared fields does not burst on first observation', () => {
+  // Same upgrade rule as mergeStateStatus: the first appearance of base/labels/
+  // assignees/reviewRequests in a fresh fingerprint is not a change.
+  const base = detectDeltas(null, {
+    pr: [pr({ baseRefName: 'main', labels: [{ name: 'bug' }], assignees: ['alice'] })],
+    issue: [],
+  });
+  const legacy = { ...base.snapshot };
+  for (const field of ['base', 'labels', 'assignees', 'reviewRequests']) {
+    delete legacy.pr['42'][field];
+  }
+  const r = detectDeltas(legacy, {
+    pr: [pr({ baseRefName: 'main', labels: [{ name: 'bug' }], assignees: ['alice'] })],
+    issue: [],
+  });
+  assert.deepEqual(r.deltas, []);
+});
+
+test('a legacy snapshot with a real concurrent change does not misfire the new classes', () => {
+  // When a pre-upgrade snapshot sees a genuine change (a new comment), the delta
+  // must not also claim relabeled/assignees-changed/base-changed just because the
+  // old fingerprint lacked those keys.
+  const base = detectDeltas(null, {
+    pr: [pr({ baseRefName: 'main', labels: [{ name: 'bug' }], assignees: ['alice'] })],
+    issue: [],
+  });
+  const legacy = { ...base.snapshot };
+  for (const field of ['base', 'labels', 'assignees', 'reviewRequests']) {
+    delete legacy.pr['42'][field];
+  }
+  const r = detectDeltas(legacy, {
+    pr: [
+      pr({
+        baseRefName: 'main',
+        labels: [{ name: 'bug' }],
+        assignees: ['alice'],
+        totalCommentsCount: 1,
+        updatedAt: '2026-07-01T11:00:00Z',
+      }),
+    ],
+    issue: [],
+  });
+  assert.deepEqual(r.deltas[0].classes, ['new-comments']);
+});
+
 test('draft → ready emits draft-ready', () => {
   const base = detectDeltas(null, { pr: [pr({ isDraft: true })], issue: [] });
   const r = detectDeltas(base.snapshot, {
