@@ -23,27 +23,32 @@ const AT = '2026-07-01T12:05:00.000Z';
 const AT_BASELINE = '2026-07-01T12:00:00.000Z';
 
 // The PR #42 delta: a single item that exercises three distinct detail field
-// groups (`ci`, `review`, and label add/remove) so `--detail` is shown off in
-// one place. The fingerprints deliberately omit the ciChecks/reviewSummary
-// summaries, so the ci/reviews details render the `opaque: true` fallback (the
-// output of a first tick over a pre-summary snapshot).
+// groups (`ci`, `review`, and the reviewRequests add/remove set diff) so
+// `--detail` is shown off in one place. The reviewer approving satisfies their
+// pending request, so `review-changed` and `review-requests-changed` co-occur —
+// the exact interplay the contract documents. The fingerprints deliberately
+// omit the ciChecks/reviewSummary summaries, so the ci/reviews details render
+// the `opaque: true` fallback (the output of a first tick over a pre-summary
+// snapshot).
 const pr42 = withId({
   entity: 'pr',
   number: 42,
   title: 'Add billing webhook',
   headRefName: 'feature/billing-webhook',
-  classes: ['ci-changed', 'review-changed'],
+  classes: ['ci-changed', 'review-changed', 'review-requests-changed'],
   from: {
     state: 'OPEN',
     ci: 'a1b2c3',
     review: 'CHANGES_REQUESTED',
     reviews: 'r-9f8e',
+    reviewRequests: ['alice'],
   },
   to: {
     state: 'OPEN',
     ci: 'd4e5f6',
     review: 'APPROVED',
     reviews: 'r-2c1d',
+    reviewRequests: [],
   },
 });
 

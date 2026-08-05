@@ -46,26 +46,41 @@ Run the GitHub delta detector for `<owner/name>` and act on what it reports.
    - new (PR): a worker opened a PR. Read it; queue it for review.
    - first-seen: first observed non-open item. Inspect it before treating it as
      newly created.
+   - baseline-state: only under --baseline-emit-state, on the seeding run.
+     Pre-existing open-item state (e.g. already conflicting); inspect, do not
+     treat as newly created.
    - ci-changed: CI green -> move toward merge. CI red -> nudge the worker with
      the failure.
    - review-changed: APPROVED -> merge candidate. CHANGES_REQUESTED -> relay the
      changes to the worker.
    - became-mergeable: conflicts resolved -> merge candidate.
+   - became-conflicting: PR now conflicts with its base. Rebase or resolve
+     before merge.
    - draft-ready: PR left draft and is ready for review. Queue it for review or
      dispatch.
+   - converted-to-draft: PR went back to draft. Hold review and merge actions
+     until it is ready again.
    - merged / closed: a slice is done. Advance the build order or sync the spawn
      base.
    - reopened: item reopened. Re-enter it into the active work queue.
    - new-comments: read the PR/issue threads; fold in any review comments before
      merging.
+   - comments-removed: comments were deleted. Re-read the thread; prior context
+     may be gone.
    - unresolved-threads-added: unresolved PR review threads appeared. Read and
      resolve them before merging.
    - unresolved-threads-resolved: unresolved PR review threads were resolved.
      Re-check CI and review state before merging.
    - review-threads-changed: PR review thread activity changed. Inspect review
      threads before acting.
-   - relabeled: an issue's scope/state changed. Reassess whether or what to
-     dispatch.
+   - relabeled: labels changed on a PR or issue (route on entity). Reassess
+     whether or what to dispatch.
+   - assignees-changed: ownership changed. Check who owns the item before
+     dispatching.
+   - review-requests-changed: requested reviewers changed. Check who is now
+     expected to review.
+   - base-changed: the PR base branch changed. Prior CI/mergeability context
+     refers to the old base; re-check both.
    - missing: an open item disappeared from the fetch. Check pagination,
      permissions, or scope before trusting the snapshot.
    - still-missing: the same open item is still absent (tick 2). Treat it as

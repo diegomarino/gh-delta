@@ -176,6 +176,40 @@ test('prFingerprint extracts the tracked fields', () => {
   ]);
 });
 
+test('prFingerprint sorts labels, assignees, and reviewRequests, and stores the base ref', () => {
+  const fp = prFingerprint({
+    state: 'OPEN',
+    updatedAt: '2026-07-01T10:00:00Z',
+    baseRefName: 'main',
+    labels: [{ name: 'worker' }, { name: 'backend' }],
+    assignees: ['zoe', 'alice'],
+    reviewRequests: ['org/platform-team', 'bob'],
+  });
+  assert.equal(fp.base, 'main');
+  assert.deepEqual(fp.labels, ['backend', 'worker']);
+  assert.deepEqual(fp.assignees, ['alice', 'zoe']);
+  assert.deepEqual(fp.reviewRequests, ['bob', 'org/platform-team']);
+});
+
+test('prFingerprint defaults the new compared fields when input predates them', () => {
+  const fp = prFingerprint({ state: 'OPEN', updatedAt: '2026-07-01T10:00:00Z' });
+  assert.equal(fp.base, '');
+  assert.deepEqual(fp.labels, []);
+  assert.deepEqual(fp.assignees, []);
+  assert.deepEqual(fp.reviewRequests, []);
+});
+
+test('issueFingerprint sorts assignees', () => {
+  const fp = issueFingerprint({
+    state: 'OPEN',
+    updatedAt: '2026-07-01T10:00:00Z',
+    labels: [],
+    assignees: ['zoe', 'alice'],
+    comments: 0,
+  });
+  assert.deepEqual(fp.assignees, ['alice', 'zoe']);
+});
+
 test('prFingerprint reads exact totals beyond the old 100 cap', () => {
   const fp = prFingerprint({
     state: 'OPEN',
