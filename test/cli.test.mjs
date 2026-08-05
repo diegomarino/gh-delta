@@ -218,6 +218,78 @@ test('--detail keeps line compatibility and adds structured class details', () =
   ]);
 });
 
+test('--detail explains the audit-driven classes: set diffs, base transition, comment removal', () => {
+  const before = {
+    ...basePr,
+    totalCommentsCount: 3,
+    baseRefName: 'main',
+    assignees: ['alice'],
+    reviewRequests: [],
+  };
+  const after = {
+    ...basePr,
+    updatedAt: '2026-07-01T11:00:00Z',
+    totalCommentsCount: 2,
+    baseRefName: 'release/2.0',
+    assignees: ['bob'],
+    reviewRequests: ['carol', 'org/platform-team'],
+  };
+  const d = deps([[after]], {
+    existing: { pr: { 42: prFingerprint(before) }, issue: {} },
+  });
+  const { report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--detail'],
+    d,
+  );
+  const delta = report.deltas[0];
+  for (const klass of [
+    'comments-removed',
+    'base-changed',
+    'assignees-changed',
+    'review-requests-changed',
+  ]) {
+    assert.ok(delta.classes.includes(klass), `expected class ${klass}`);
+  }
+  const details = delta.details;
+  assert.deepEqual(
+    details.find((row) => row.class === 'comments-removed'),
+    {
+      class: 'comments-removed',
+      field: 'comments',
+      from: 3,
+      to: 2,
+      delta: -1,
+    },
+  );
+  assert.deepEqual(
+    details.find((row) => row.class === 'base-changed'),
+    {
+      class: 'base-changed',
+      field: 'base',
+      from: 'main',
+      to: 'release/2.0',
+    },
+  );
+  assert.deepEqual(
+    details.find((row) => row.class === 'assignees-changed'),
+    {
+      class: 'assignees-changed',
+      field: 'assignees',
+      added: ['bob'],
+      removed: ['alice'],
+    },
+  );
+  assert.deepEqual(
+    details.find((row) => row.class === 'review-requests-changed'),
+    {
+      class: 'review-requests-changed',
+      field: 'reviewRequests',
+      added: ['carol', 'org/platform-team'],
+      removed: [],
+    },
+  );
+});
+
 test('--detail names the exact checks and reviews that changed when the snapshot carries summaries', () => {
   const before = {
     ...basePr,
