@@ -218,6 +218,35 @@ test('--detail keeps line compatibility and adds structured class details', () =
   ]);
 });
 
+test('--detail suppresses additive-field rows the old snapshot predates (no phantom transitions)', () => {
+  // Upgrade path: the stored fingerprint predates base/labels/assignees/
+  // reviewRequests (and mergeStateStatus). A same-tick catch-all change (head
+  // bump) fires `updated`; its details must not report `null -> current` rows
+  // for fields whose first appearance the detector itself suppressed.
+  const legacy = prFingerprint({ ...basePr, totalCommentsCount: 0 });
+  for (const field of ['base', 'labels', 'assignees', 'reviewRequests', 'mergeStateStatus']) {
+    delete legacy[field];
+  }
+  const after = {
+    ...basePr,
+    updatedAt: '2026-07-01T11:00:00Z',
+    headRefOid: 'sha2',
+    baseRefName: 'main',
+    labels: [{ name: 'bug' }],
+    assignees: ['alice'],
+    reviewRequests: ['bob'],
+  };
+  const d = deps([[after]], { existing: { pr: { 42: legacy }, issue: {} } });
+  const { report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--detail'],
+    d,
+  );
+  const delta = report.deltas[0];
+  assert.deepEqual(delta.classes, ['updated']);
+  const detailFields = delta.details.map((row) => row.field).sort();
+  assert.deepEqual(detailFields, ['head', 'updatedAt']);
+});
+
 test('--detail explains the audit-driven classes: set diffs, base transition, comment removal', () => {
   const before = {
     ...basePr,
