@@ -12,9 +12,11 @@ with a machine-readable code. Scheduling belongs to cron, an automation system,
 or the caller.
 
 The tool does not decide what to do. It only detects changes such as new PRs,
-merged PRs, CI status changes, review decision changes, unresolved review
-threads, new comments, relabeling, missing objects, and catch-all updates. Your
-orchestrator, script, or agent owns the action.
+merged PRs, CI status changes, review decision changes, requested-reviewer and
+assignee changes, unresolved review threads, new or deleted comments,
+relabeling, base-branch retargets, draft transitions, mergeability flips,
+missing objects, and catch-all updates. Your orchestrator, script, or agent owns
+the action.
 
 `gh-delta` is not a dashboard, inbox, or PR bot. It is a deterministic GitHub
 delta detector for schedulers, scripts, and agent loops.
