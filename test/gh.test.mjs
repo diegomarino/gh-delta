@@ -109,6 +109,46 @@ test('fails closed when open items exceed the page cap', () => {
   assert.throws(() => fetchPRs('o/r', { exec, horizonCutoff: null }), /exceeded 10 pages/);
 });
 
+test('the PR query requests review-thread id and normalizePr carries reviewThreadNodes', () => {
+  let sentQuery = '';
+  const exec = (_cmd, args) => {
+    sentQuery = args.find((a) => a.startsWith('query=')) ?? '';
+    return page([
+      prNode({
+        reviewThreads: {
+          totalCount: 2,
+          nodes: [
+            { id: 'T_A', isResolved: false },
+            { id: 'T_B', isResolved: true },
+          ],
+          pageInfo: { hasNextPage: false },
+        },
+      }),
+    ]);
+  };
+  const rows = fetchPRs('o/r', { exec, horizonCutoff: null });
+  assert.match(sentQuery, /reviewThreads\(first: \d+\) \{ totalCount nodes \{ id isResolved \}/);
+  assert.deepEqual(rows[0].reviewThreadNodes, [
+    { id: 'T_A', isResolved: false },
+    { id: 'T_B', isResolved: true },
+  ]);
+});
+
+test('normalizePr drops review threads with no id and defaults reviewThreadNodes to [] when absent', () => {
+  const exec = () =>
+    page([
+      prNode({
+        reviewThreads: {
+          totalCount: 1,
+          nodes: [{ isResolved: false }], // no id
+          pageInfo: { hasNextPage: false },
+        },
+      }),
+    ]);
+  const rows = fetchPRs('o/r', { exec, horizonCutoff: null });
+  assert.deepEqual(rows[0].reviewThreadNodes, []);
+});
+
 test('fails closed on nested pagination and GraphQL errors', () => {
   const overflow = prNode();
   overflow.reviewThreads.pageInfo.hasNextPage = true;

@@ -245,6 +245,54 @@ test('id is present and stable for each delta family (spec 4)', () => {
   assert.equal(new Set(Object.values(ids)).size, Object.keys(ids).length);
 });
 
+test('threadDigest/threadStates never influence the delta id (out of comparableFingerprint)', () => {
+  // Part of the head-changed/thread-identity feature: the thread digest is a
+  // detector-internal trigger only (see lib/detect.mjs fingerprintChanged) and
+  // must never reach comparableFingerprint, or every existing delta id would
+  // shift the moment a PR carries thread data.
+  const withThreads = {
+    ...openFp,
+    threadDigest: 'deadbeefcafe',
+    threadStates: [{ id: 'T_A', isResolved: false }],
+  };
+  const without = { ...openFp };
+  const a = deltaId(
+    deltaIdentity('o/r', {
+      entity: 'pr',
+      number: 42,
+      classes: ['updated'],
+      from: null,
+      to: withThreads,
+    }),
+  );
+  const b = deltaId(
+    deltaIdentity('o/r', {
+      entity: 'pr',
+      number: 42,
+      classes: ['updated'],
+      from: null,
+      to: without,
+    }),
+  );
+  assert.equal(a, b);
+});
+
+test('id for a plain OPEN->MERGED transition is byte-identical to the pre-feature golden value', () => {
+  // Regression pin (hard constraint 1): existing delta ids must not shift.
+  // This id was computed by the same expression before head-changed/
+  // thread-identity landed; any change here means an existing id moved.
+  const merged = deltaId(
+    deltaIdentity('o/r', {
+      entity: 'pr',
+      number: 42,
+      classes: ['merged'],
+      from: openFp,
+      to: { ...openFp, state: 'MERGED' },
+    }),
+  );
+  assert.equal(merged, 'c20982ade8bdba64a2c7da27008158d805ccc2e52e5bb12c8edee731b1c41abe');
+});
+
 test('missing -> still-missing -> presumed-deleted produce three distinct stable ids (spec 4)', () => {
   const d = deps([[], [], []], { existing: { pr: { 42: clone(openFp) }, issue: {} } });
   const ids = [];

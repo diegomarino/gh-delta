@@ -67,10 +67,13 @@ Run the GitHub delta detector for `<owner/name>` and act on what it reports.
      merging.
    - comments-removed: comments were deleted. Re-read the thread; prior context
      may be gone.
-   - unresolved-threads-added: unresolved PR review threads appeared. Read and
-     resolve them before merging.
-   - unresolved-threads-resolved: unresolved PR review threads were resolved.
-     Re-check CI and review state before merging.
+   - unresolved-threads-added: unresolved PR review threads appeared (this
+     also fires when one thread resolves and a different one reopens in the
+     same tick, even if the total count is unchanged). Read and resolve them
+     before merging.
+   - unresolved-threads-resolved: unresolved PR review threads were resolved
+     (same count-unchanged-swap caveat as above). Re-check CI and review state
+     before merging.
    - review-threads-changed: PR review thread activity changed. Inspect review
      threads before acting.
    - relabeled: labels changed on a PR or issue (route on entity). Reassess
@@ -81,6 +84,9 @@ Run the GitHub delta detector for `<owner/name>` and act on what it reports.
      expected to review.
    - base-changed: the PR base branch changed. Prior CI/mergeability context
      refers to the old base; re-check both.
+   - head-changed: the PR head commit changed (push, rebase, or force-push).
+     Coexists with updated. Re-check CI and review state before trusting prior
+     approvals -- a force-push can invalidate them.
    - missing: an open item disappeared from the fetch. Check pagination,
      permissions, or scope before trusting the snapshot.
    - still-missing: the same open item is still absent (tick 2). Treat it as
@@ -89,8 +95,9 @@ Run the GitHub delta detector for `<owner/name>` and act on what it reports.
      GitHub if unexpected. No further ticks will mention it unless it reappears.
    - reappeared: a previously missing object returned. Check why it vanished
      before acting on the return.
-   - updated: catch-all timestamp or commit-only bump. Inspect GitHub before
-     dismissing it, including comments and review threads.
+   - updated: catch-all for any other change. Coexists with head-changed on a
+     plain push. Inspect GitHub before dismissing it, including comments and
+     review threads.
 
 Rules:
 - Do NOT call ScheduleWakeup.
