@@ -71,6 +71,7 @@ The process entrypoint is deliberately thin:
 process argv
   -> choose requested output format
   -> add optional summaryLine/details fields for JSON, or a human line for text
+  -> apply post-detection attention filters (including fail-open ignored-comment authors)
   -> run the detector, with optional outpost delivery
   -> render stdout/stderr
   -> exit with the detector code

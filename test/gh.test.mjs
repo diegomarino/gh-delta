@@ -70,6 +70,68 @@ test('baseline (null horizon) fetches only open PRs and normalizes rows', () => 
   assert.equal(rows[0].unresolvedReviewThreads, 1);
 });
 
+test('queries and normalizes bounded comment identities plus failed check URLs', () => {
+  let prQuery = '';
+  const prs = fetchPRs('o/r', {
+    exec: (_cmd, args) => {
+      prQuery = args.find((arg) => arg.startsWith('query=')) ?? '';
+      return page([
+        prNode({
+          commits: {
+            nodes: [
+              {
+                commit: {
+                  statusCheckRollup: {
+                    contexts: {
+                      nodes: [
+                        {
+                          __typename: 'CheckRun',
+                          name: 'build',
+                          status: 'COMPLETED',
+                          conclusion: 'FAILURE',
+                          detailsUrl: 'https://ci/build',
+                        },
+                      ],
+                      pageInfo: { hasNextPage: false },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+          comments: { nodes: [{ id: 'C1', author: { login: 'Bot[bot]' } }] },
+        }),
+      ]);
+    },
+    horizonCutoff: null,
+  });
+  assert.match(prQuery, /CheckRun \{ name status conclusion detailsUrl \}/);
+  assert.match(prQuery, /comments\(last: 5\) \{ nodes \{ id author \{ login \} \} \}/);
+  assert.deepEqual(prs[0].commentNodes, [{ id: 'C1', author: 'Bot[bot]' }]);
+  assert.equal(prs[0].statusCheckRollup[0].detailsUrl, 'https://ci/build');
+
+  let issueQuery = '';
+  const issues = fetchIssues('o/r', {
+    exec: (_cmd, args) => {
+      issueQuery = args.find((arg) => arg.startsWith('query=')) ?? '';
+      return page([
+        {
+          number: 2,
+          title: 'issue',
+          state: 'OPEN',
+          updatedAt: '2026-07-01T10:00:00Z',
+          labels: { nodes: [], pageInfo: { hasNextPage: false } },
+          assignees: { nodes: [], pageInfo: { hasNextPage: false } },
+          comments: { totalCount: 1, nodes: [{ id: 'I1', author: { login: 'bot' } }] },
+        },
+      ]);
+    },
+    horizonCutoff: null,
+  });
+  assert.match(issueQuery, /comments \{ totalCount nodes \{ id author \{ login \} \} \}/);
+  assert.deepEqual(issues[0].commentNodes, [{ id: 'I1', author: 'bot' }]);
+});
+
 test('incremental fetch adds updated items and cuts at the horizon', () => {
   const calls = [];
   const exec = (_cmd, args) => {

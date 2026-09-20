@@ -271,6 +271,11 @@ reviews that changed (`added`/`removed`/`changed`), so an agent can act without
 re-querying GitHub. The exact JSON shape is specified in
 [Report Shape](contract.md#report-shape).
 
+To silence known bot-only comment activity without losing state advancement, use
+`--ignore-authors github-actions[bot],dependabot[bot]`. This filter is fail-open:
+if the latest five-comment window cannot prove every new comment belongs to an
+ignored author, the comment delta remains.
+
 `gh-delta --help-json` prints machine-readable help for agents and other tooling.
 It is the right source for generated CLIs, prompts, and monitors that need the
 current command surface.

@@ -64,7 +64,9 @@ Run the GitHub delta detector for `<owner/name>` and act on what it reports.
      base.
    - reopened: item reopened. Re-enter it into the active work queue.
    - new-comments: read the PR/issue threads; fold in any review comments before
-     merging.
+     merging. For the full audit trail outside gh-delta's bounded detail, run
+     `gh pr view <number> --repo <owner/name> --comments` (or
+     `gh issue view <number> --repo <owner/name> --comments`).
    - comments-removed: comments were deleted. Re-read the thread; prior context
      may be gone.
    - unresolved-threads-added: unresolved PR review threads appeared (this
