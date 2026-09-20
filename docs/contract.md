@@ -15,7 +15,9 @@ machine-readable form of this document is available at `gh-delta --help-json`.
 gh-delta [--repo <owner/name>] [--monitor-id <id>]
          [--state-file <path> | --state-dir <dir>]
          [--entities pr,issue] [--format json|text]
-         [--summary-line] [--detail] [--summaries] [--baseline-emit-state]
+         [--summary-line] [--detail] [--summaries]
+         [--only-classes <classes>] [--ignore-classes <classes>] [--settled]
+         [--baseline-emit-state]
          [--outpost-url <url>]
          [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>]
          [--gh-timeout-ms <ms>] [--no-registry] [--lock-stale-ms <duration>]
@@ -76,6 +78,24 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
   `mergeable`, …) read from the same observation as the opaque fingerprints, with
   no second GitHub call. Additive and off by default; see
   [Delta Summary schema](#delta-summary-schema).
+- `--only-classes <classes>` is an attention filter: keep a delta when it
+  carries at least one comma-separated class name. `classes` must contain one
+  or more values from `DELTA_CLASSES`; whitespace and duplicate names are
+  ignored, and an unknown name is a configuration error (exit `2`).
+- `--ignore-classes <classes>` is an attention filter: remove the named
+  comma-separated `DELTA_CLASSES` values from every delta, then drop a delta
+  left with no classes. It has the same validation, whitespace, and duplicate
+  behavior as `--only-classes`.
+- `--settled` is an attention filter that drops a delta whose normalized summary
+  has `ciRollup: "pending"` or `mergeable: "unknown"`. It implies
+  `--summaries`; no explicit `--summaries` flag is needed. `ciRollup: "none"`
+  is settled and is kept.
+
+**Attention filters are not a queue: detection and the snapshot still advance
+for filtered changes, and filtered changes are not replayed later.** When flags
+are combined, their order is binding: `--only-classes`, then
+`--ignore-classes`, then empty-delta removal, then `--settled`.
+
 - `--baseline-emit-state` is optional and off by default. On the run that seeds a
   baseline, it emits one synthetic `baseline-state` delta per tracked OPEN item
   (`from: null`, `to`: the observed fingerprint) so state that already existed at
@@ -102,7 +122,8 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
   lock — that one is only ever stolen once its own `expiresAt` has passed. See
   [Lock Semantics](#lock-semantics).
 
-**Repeated flags:** the last value wins. **`--help`, `--help-json`, and
+**Repeated flags:** the last value wins. This applies to both class-list flags;
+duplicate class names within one comma-separated list are ignored. **`--help`, `--help-json`, and
 `--version` take precedence over all validation** — an agent probing with
 `--help-json` receives the help document even when the rest of the command line
 is invalid.
@@ -222,7 +243,8 @@ deltas), the CLI writes one small breadcrumb per monitor:
 
 ## Exit Codes
 
-- `0`: baseline established or no deltas.
+- `0`: baseline established, no deltas, or no surviving deltas after attention
+  filtering.
 - `10`: deltas found. Also emitted when `--baseline-emit-state` seeds a baseline
   that observes at least one tracked open item: the report then carries
   `baseline: true` **and** a non-empty `deltas` array of `baseline-state` deltas.
@@ -397,6 +419,7 @@ Success reports (exit `0` and `10`):
       ]
     }
   ],
+  "filteredDeltas": 2,
   "summary": "1 delta(s)"
 }
 ```
@@ -429,6 +452,11 @@ Field guarantees:
   parse it (it varies between "baseline established: N PRs, M issues" and
   "N delta(s)").
 - `deltas` (array): see below. Empty on baseline and on no-change runs.
+- `filteredDeltas` (number): whole detected deltas suppressed by one or more
+  attention filters. Present whenever `--only-classes`, `--ignore-classes`, or
+  `--settled` is supplied, including when the count is `0`; omitted when none
+  of those flags is supplied, preserving the byte-identical zero-new-flags
+  report contract. It does not count individual classes removed from a delta.
 - `warnings` (`{ label: string, reason: string }[]`): **optional; present only in JSON format when outpost
   delivery or `--repo` derivation produced warnings** — an outpost POST that
   timed out or returned an error, or `origin`/`upstream` resolving to
@@ -748,6 +776,10 @@ their derived filename or a registry entry.
 
 - The consumer supplies the snapshot **location**, never snapshot **data**.
   gh-delta reads it, diffs, and atomically rewrites it after a successful fetch.
+- Attention filters run only after complete detection. Their report/outpost
+  suppression never changes the snapshot bytes, which are identical to the
+  same observation without filters; a filtered delta is therefore not replayed
+  on a later tick.
 - The **first run** (no snapshot file) seeds a baseline: exit `0`,
   `baseline: true`, `deltas: []`. Persist the state directory between runs (or accept the ephemeral temp default's silent re-baseline).
 - Snapshot JSON is strict. A missing file seeds a baseline, but any present file

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 
 // Tests must never leave breadcrumbs in the developer's real run registry.
 process.env.GH_DELTA_NO_REGISTRY = '1';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { run, runCommand } from '../lib/cli.mjs';
@@ -739,6 +739,209 @@ test('--summaries is purely additive: delta.id and every other field are byte-id
   const { summary, ...withFlagRest } = withFlag;
   assert.ok(summary, 'the flag adds a summary');
   assert.deepEqual(withFlagRest, without);
+});
+
+const FILTER_ARGS = ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'];
+
+test('--only-classes with no matching delta suppresses attention without changing the snapshot', () => {
+  // Removing the only-class branch would incorrectly wake consumers for a
+  // ci-changed delta that no requested class admits.
+  const before = { ...basePr, statusCheckRollup: [] };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    statusCheckRollup: [{ context: 'ci/test', state: 'SUCCESS' }],
+  };
+  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const { code, report } = run([...FILTER_ARGS, '--only-classes', 'review-changed'], d);
+  assert.equal(code, 0);
+  assert.deepEqual(report.deltas, []);
+  assert.equal(report.filteredDeltas, 1);
+  assert.equal(d.stored.pr['42'].updatedAt, after.updatedAt);
+});
+
+test('--only-classes keeps matching deltas and still exits 10', () => {
+  // Dropping the positive branch would hide a requested ci transition among
+  // unrelated update churn.
+  const ciBefore = { ...basePr, statusCheckRollup: [] };
+  const ciAfter = {
+    ...ciBefore,
+    updatedAt: '2026-07-01T11:00:00Z',
+    statusCheckRollup: [{ context: 'ci/test', state: 'SUCCESS' }],
+  };
+  const updateBefore = { ...basePr, number: 43, title: 'other PR' };
+  const updateAfter = { ...updateBefore, updatedAt: '2026-07-01T11:00:00Z' };
+  const d = deps([[ciAfter, updateAfter]], {
+    existing: {
+      pr: { 42: prFingerprint(ciBefore), 43: prFingerprint(updateBefore) },
+      issue: {},
+    },
+  });
+  const { code, report } = run([...FILTER_ARGS, '--only-classes', 'ci-changed'], d);
+  assert.equal(code, 10);
+  assert.equal(report.deltas.length, 1);
+  assert.ok(report.deltas[0].classes.includes('ci-changed'));
+  assert.equal(report.filteredDeltas, 1);
+});
+
+test('--ignore-classes removes a class but retains a multi-class delta, and drops empty deltas', () => {
+  // A filter that deletes the whole multi-class delta loses an actionable head
+  // change; one that retains an empty class list emits an invalid delta.
+  const headBefore = { ...basePr };
+  const headAfter = {
+    ...headBefore,
+    updatedAt: '2026-07-01T11:00:00Z',
+    headRefOid: 'sha2',
+  };
+  const retained = run(
+    [...FILTER_ARGS, '--ignore-classes', 'updated'],
+    deps([[headAfter]], { existing: { pr: { 42: prFingerprint(headBefore) }, issue: {} } }),
+  );
+  assert.equal(retained.code, 10);
+  assert.deepEqual(retained.report.deltas[0].classes, ['head-changed']);
+  assert.equal(retained.report.filteredDeltas, 0);
+
+  const updateBefore = { ...basePr };
+  const updateAfter = { ...updateBefore, updatedAt: '2026-07-01T11:00:00Z' };
+  const dropped = run(
+    [...FILTER_ARGS, '--ignore-classes', 'updated'],
+    deps([[updateAfter]], { existing: { pr: { 42: prFingerprint(updateBefore) }, issue: {} } }),
+  );
+  assert.equal(dropped.code, 0);
+  assert.deepEqual(dropped.report.deltas, []);
+  assert.equal(dropped.report.filteredDeltas, 1);
+});
+
+test('unknown attention-filter classes are config errors that name the invalid value', () => {
+  // Accepting an unknown token silently turns a permanently misconfigured
+  // watcher into an apparently healthy no-op.
+  for (const flag of ['--only-classes', '--ignore-classes']) {
+    const { code, report } = run([...FILTER_ARGS, flag, 'not-a-delta-class'], deps([[]]));
+    assert.equal(code, 2);
+    assert.equal(report.kind, 'config');
+    assert.match(report.error, /not-a-delta-class/);
+  }
+});
+
+test('--settled drops pending and unknown PRs, keeps ciRollup none, and implies summaries', () => {
+  // Treating no CI checks as pending would suppress a settled PR forever; not
+  // deriving summaries would let pending/unknown work through unnoticed.
+  const pendingBefore = { ...basePr, number: 42, mergeable: 'MERGEABLE' };
+  const pendingAfter = {
+    ...pendingBefore,
+    updatedAt: '2026-07-01T11:00:00Z',
+    statusCheckRollup: [{ context: 'ci/test', state: 'PENDING' }],
+  };
+  const unknownBefore = { ...basePr, number: 43, mergeable: 'MERGEABLE' };
+  const unknownAfter = {
+    ...unknownBefore,
+    updatedAt: '2026-07-01T11:00:00Z',
+    mergeable: 'UNKNOWN',
+  };
+  const noneBefore = { ...basePr, number: 44, mergeable: 'MERGEABLE' };
+  const noneAfter = { ...noneBefore, updatedAt: '2026-07-01T11:00:00Z' };
+  const d = deps([[pendingAfter, unknownAfter, noneAfter]], {
+    existing: {
+      pr: {
+        42: prFingerprint(pendingBefore),
+        43: prFingerprint(unknownBefore),
+        44: prFingerprint(noneBefore),
+      },
+      issue: {},
+    },
+  });
+  const { code, report } = run([...FILTER_ARGS, '--settled'], d);
+  assert.equal(code, 10);
+  assert.deepEqual(
+    report.deltas.map((delta) => delta.number),
+    [44],
+  );
+  assert.equal(report.deltas[0].summary.ciRollup, 'none');
+  assert.equal(report.filteredDeltas, 2);
+});
+
+test('combined attention filters apply only before ignore, making ignore the final class veto', () => {
+  // Reversing the order would drop this delta after ci-changed is vetoed,
+  // instead of retaining its independent head/update classes.
+  const before = { ...basePr, statusCheckRollup: [] };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    headRefOid: 'sha2',
+    statusCheckRollup: [{ context: 'ci/test', state: 'SUCCESS' }],
+  };
+  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const { code, report } = run(
+    [...FILTER_ARGS, '--only-classes', 'ci-changed', '--ignore-classes', 'ci-changed'],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.deepEqual(report.deltas[0].classes, ['head-changed', 'updated']);
+  assert.equal(report.filteredDeltas, 0);
+});
+
+test('attention filters leave the persisted snapshot byte-identical and outpost sends survivors only', async () => {
+  // Moving filtering before persistence would replay suppressed changes later;
+  // sending the unfiltered report would still wake the downstream consumer.
+  const ciBefore = { ...basePr, statusCheckRollup: [] };
+  const ciAfter = {
+    ...ciBefore,
+    updatedAt: '2026-07-01T11:00:00Z',
+    statusCheckRollup: [{ context: 'ci/test', state: 'SUCCESS' }],
+  };
+  const updateBefore = { ...basePr, number: 43, title: 'other PR' };
+  const updateAfter = { ...updateBefore, updatedAt: '2026-07-01T11:00:00Z' };
+  const stateDir = mkdtempSync(join(tmpdir(), 'gh-delta-filters-'));
+  const unfilteredState = join(stateDir, 'unfiltered.json');
+  const filteredState = join(stateDir, 'filtered.json');
+  const argsFor = (stateFile) => [
+    '--repo',
+    'o/r',
+    '--monitor-id',
+    'main',
+    '--state-file',
+    stateFile,
+  ];
+  const dependencySet = (prs) => ({
+    fetchPRs: () => prs,
+    fetchIssues: () => [],
+    now: () => '2026-07-01T12:00:00Z',
+  });
+  try {
+    for (const stateFile of [unfilteredState, filteredState]) {
+      const seeded = run(argsFor(stateFile), dependencySet([ciBefore, updateBefore]));
+      assert.equal(seeded.code, 0);
+    }
+    const unfiltered = run(argsFor(unfilteredState), dependencySet([ciAfter, updateAfter]));
+    assert.equal(unfiltered.code, 10);
+    const filteredDeps = dependencySet([ciAfter, updateAfter]);
+    const posts = [];
+    filteredDeps.outpostFetch = async (_url, options) => {
+      posts.push(JSON.parse(options.body));
+      return { ok: true, status: 202 };
+    };
+    const { runWithOutpost } = await import('../lib/cli.mjs');
+    const filtered = await runWithOutpost(
+      [
+        ...argsFor(filteredState),
+        '--only-classes',
+        'updated',
+        '--outpost-url',
+        'https://example.com/gh-delta',
+      ],
+      filteredDeps,
+    );
+    assert.equal(filtered.code, 10);
+    assert.deepEqual(
+      filtered.report.deltas.map((delta) => delta.number),
+      [43],
+    );
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].number, 43);
+    assert.equal(readFileSync(filteredState, 'utf8'), readFileSync(unfilteredState, 'utf8'));
+  } finally {
+    rmSync(stateDir, { recursive: true, force: true });
+  }
 });
 
 test('--help-json documents the summary schema well enough to build a validator', () => {
