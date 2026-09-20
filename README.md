@@ -112,6 +112,11 @@ compare against that baseline. Use an explicit `--state-dir` for durable
 monitors; the zero-config state location is intentionally convenient but can be
 cleared by tmp cleanup.
 
+Several explicit repositories can be checked in one serial pass with a
+comma-separated or repeated `--repo`. Each repository keeps its own snapshot;
+the aggregate JSON report qualifies successful deltas with `repo` and retains
+partial errors. Use `--state-dir` (not a shared `--state-file`) in this mode.
+
 For installation modes, repeated runs, snapshots, outposts, and examples, read
 the [Usage Guide](docs/usage.md). For the exact CLI contract, use
 [`gh-delta --help-json`](docs/contract.md#cli) or [docs/contract.md](docs/contract.md).
