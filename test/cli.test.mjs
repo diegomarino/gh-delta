@@ -1084,6 +1084,24 @@ test('missing --monitor-id defaults to a stable per-machine host id', () => {
   assert.equal(report2.monitorId, report.monitorId); // stable across invocations
 });
 
+test('monitor id precedence is flag then environment then the generated default', () => {
+  for (const [argv, env, expected] of [
+    [['--monitor-id', 'flag'], { GH_DELTA_MONITOR_ID: 'env' }, 'flag'],
+    [[], { GH_DELTA_MONITOR_ID: 'env' }, 'env'],
+    [[], {}, 'generated'],
+  ]) {
+    const d = deps([[]]);
+    d.env = env;
+    d.defaultMonitor = () => 'generated';
+    const result = run(['--repo', 'o/r', '--state-file', '/tmp/x.json', ...argv], d);
+    assert.equal(result.code, 0);
+    assert.equal(result.report.monitorId, expected);
+  }
+  const invalid = deps([[]]);
+  invalid.env = { GH_DELTA_MONITOR_ID: '../bad' };
+  assert.equal(run(['--repo', 'o/r', '--state-file', '/tmp/x.json'], invalid).code, 2);
+});
+
 test('--state-file and --state-dir are mutually exclusive', () => {
   const d = {
     fetchPRs: () => {
@@ -2267,6 +2285,99 @@ test('a registry write failure never changes the run result', () => {
   assert.equal(code, 0);
   assert.equal(report.baseline, true);
   assert.equal(d.writes, 1);
+});
+
+test('a failed detector attempt updates the registry without changing its result', () => {
+  const d = deps([[]]);
+  d.env = {};
+  d.fetchPRs = () => {
+    throw new Error('offline');
+  };
+  const registered = [];
+  d.registerMonitor = (entry) => registered.push(entry);
+  const result = run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
+  assert.equal(result.code, 1);
+  assert.equal(result.report.kind, 'github');
+  assert.deepEqual(
+    registered.map(({ status, error }) => [status, error?.kind]),
+    [['failure', 'github']],
+  );
+});
+
+test('a busy detector attempt is recorded as a registry failure', () => {
+  const d = deps([[]]);
+  d.env = {};
+  d.acquireLock = () => ({ ok: false, reason: 'held' });
+  const registered = [];
+  d.registerMonitor = (entry) => registered.push(entry);
+  const result = run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
+  assert.equal(result.code, 1);
+  assert.equal(result.report.kind, 'busy');
+  assert.deepEqual(
+    registered.map(({ status, error }) => [status, error?.kind]),
+    [['failure', 'busy']],
+  );
+});
+
+test('generated monitor identity collision warning is included on success and failure', () => {
+  for (const fail of [false, true]) {
+    const d = deps([[]]);
+    d.env = {};
+    d.defaultMonitor = () => 'host-current';
+    d.machineId = 'machine-a';
+    d.readRegistry = () => ({
+      entries: [{ repo: 'o/r', machineId: 'machine-a', monitorId: 'host-other' }],
+      skippedFiles: 0,
+    });
+    if (fail)
+      d.fetchPRs = () => {
+        throw new Error('offline');
+      };
+    const result = run(['--repo', 'o/r', '--state-file', '/tmp/x.json', '--format', 'text'], d);
+    assert.equal(result.code, fail ? 1 : 0);
+    assert.ok(result.warnings.some((warning) => warning.label === 'monitor-id'));
+  }
+});
+
+test('monitor identity collision warning excludes inapplicable and unavailable registry cases', () => {
+  const cases = [
+    { argv: ['--format', 'json'], env: {} },
+    { argv: ['--format', 'text', '--monitor-id', 'host-current'], env: {} },
+    { argv: ['--format', 'text'], env: { GH_DELTA_MONITOR_ID: 'host-current' } },
+    {
+      argv: ['--format', 'text'],
+      env: {},
+      entry: { repo: 'o/r', machineId: 'machine-a', monitorId: 'host-current' },
+    },
+    {
+      argv: ['--format', 'text'],
+      env: {},
+      entry: { repo: 'x/y', machineId: 'machine-a', monitorId: 'host-other' },
+    },
+    {
+      argv: ['--format', 'text'],
+      env: {},
+      entry: { repo: 'o/r', machineId: 'machine-b', monitorId: 'host-other' },
+    },
+    { argv: ['--format', 'text'], env: {}, registryError: true },
+  ];
+  for (const { argv, env, entry, registryError } of cases) {
+    const d = deps([[]]);
+    d.env = env;
+    d.defaultMonitor = () => 'host-current';
+    d.machineId = 'machine-a';
+    d.readRegistry = () => {
+      if (registryError) throw new Error('unreadable registry');
+      return {
+        entries: [entry ?? { repo: 'o/r', machineId: 'machine-a', monitorId: 'host-other' }],
+      };
+    };
+    const result = run(['--repo', 'o/r', '--state-file', '/tmp/x.json', ...argv], d);
+    assert.equal(
+      result.warnings.some((warning) => warning.label === 'monitor-id'),
+      false,
+    );
+  }
 });
 
 test('snapshots are self-describing: meta carries identity next to horizon', () => {

@@ -48,11 +48,11 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
   [Exit Codes](#exit-codes).
 
 - `--monitor-id` is optional. Default: `host-` + the first 12 hex characters of
-  the sha1 of `os.hostname()` — stable per machine and always grammar-valid. A
-  hostname change (host rename, container, or CI runner with a per-job hostname)
-  yields a new id and a fresh baseline. Inside a GitHub checkout, the minimal
-  zero-config invocation is `gh-delta` with no flags at all; `--repo` remains
-  available for other cwds or to pin an explicit repo.
+  the sha1 of hostname plus the Git worktree toplevel (or resolved cwd outside
+  Git), so subdirectories share a monitor while separate worktrees do not. The
+  hostname and path never appear in reports. `GH_DELTA_MONITOR_ID` supplies an
+  environment default, while an explicit `--monitor-id` wins. The one-time
+  default change intentionally re-baselines zero-config monitors.
 - `--repo` must be `owner/name`. **Canonicalized to lowercase** — snapshot paths,
   report echoes, and outpost event IDs always use the lowercased form. This
   applies whether `--repo` was passed explicitly or derived.
@@ -209,7 +209,11 @@ Success report (exit `0`; the shape is also available as `reportFields` /
   with an `error` string and `null` counts instead of failing the listing. A
   registered monitor whose snapshot file no longer exists keeps its entry with
   `stale: true` — a retired monitor or cleaned state, reported rather than
-  hidden.
+  hidden. Additive diagnostics are `lastAttemptAt`, `lastOkAt`, `lastError`
+  (`null` or `{kind,message,at}`), `observationAgeMs`, and `snapshotStatus`
+  (`present`, `corrupt`, `expected-missing`, or `not-yet-created`). `--since`
+  filters by the same successful-observation timestamp; a failed first attempt
+  has no observation and does not pass it.
 - `skippedFiles` (number): directory or registry entries that could not be
   identified as monitor snapshots or registry entries. They are counted, never
   guessed at.
@@ -253,8 +257,8 @@ above the complete log tail. A missing log permits only seq `0`. Success is exit
 
 The registry is how `gh-delta list` sees monitors whose snapshots live outside
 any directory it could guess — an arbitrary `--state-dir` or an explicit
-`--state-file`. After every successful detector run (baseline, no-delta, or
-deltas), the CLI writes one small breadcrumb per monitor:
+`--state-file`. After every resolved detector attempt, including a failure, the
+CLI writes one small breadcrumb per monitor:
 
 - **Location:** `$GH_DELTA_REGISTRY_DIR` when set, otherwise
   `$XDG_STATE_HOME/gh-delta/registry`, falling back to
@@ -262,7 +266,8 @@ deltas), the CLI writes one small breadcrumb per monitor:
   snapshot default, a reboot must not erase the inventory.
 - **Shape:** one JSON file per monitor, keyed by a sha256 hash of the canonical
   snapshot path (case-folded on Windows; see [Platform Notes](#platform-notes)), containing `registryVersion`, `repo`, `monitorId`, `entities`,
-  `stateFile`, and `lastRun` (the field catalog is `REGISTRY_ENTRY_FIELDS` in
+  `stateFile`, `lastRun`, `machineId`, `lastAttemptAt`, `lastOkAt`, and
+  `lastError` (the field catalog is `REGISTRY_ENTRY_FIELDS` in
   `gh-delta/contract`). Re-registering the same monitor overwrites its own
   file (temp file + atomic rename): idempotent, last-writer-wins, and
   concurrent monitors never share a file — no locks.
