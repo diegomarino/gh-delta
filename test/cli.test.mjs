@@ -230,6 +230,7 @@ test('--detail keeps line compatibility and adds structured class details', () =
       from: 0,
       to: 2,
       delta: 2,
+      opaque: true,
     },
   ]);
 });
@@ -742,6 +743,214 @@ test('--summaries is purely additive: delta.id and every other field are byte-id
 });
 
 const FILTER_ARGS = ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'];
+
+test('--ignore-authors suppresses fully covered bot comments but advances the snapshot', () => {
+  const before = {
+    ...basePr,
+    totalCommentsCount: 1,
+    conversationComments: 1,
+    commentNodes: [{ id: 'C0', author: 'human' }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    totalCommentsCount: 2,
+    conversationComments: 2,
+    commentNodes: [
+      { id: 'C0', author: 'human' },
+      { id: 'C1', author: 'GitHub-Actions[bot]' },
+    ],
+  };
+  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const result = run([...FILTER_ARGS, '--ignore-authors', 'github-actions[bot]'], d);
+  assert.equal(result.code, 0);
+  assert.deepEqual(result.report.deltas, []);
+  assert.equal(result.report.filteredDeltas, 1);
+  assert.equal(d.stored.pr['42'].comments, 2);
+});
+
+test('--ignore-authors fails open and --detail is opaque for an unusable new comment row', () => {
+  const before = {
+    ...basePr,
+    totalCommentsCount: 1,
+    conversationComments: 1,
+    commentNodes: [{ id: 'C0', author: 'human' }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    totalCommentsCount: 2,
+    conversationComments: 2,
+    commentNodes: [
+      { id: 'C0', author: 'human' },
+      { id: null, author: null },
+    ],
+  };
+  const existing = { pr: { 42: prFingerprint(before) }, issue: {} };
+  const filtered = run(
+    [...FILTER_ARGS, '--ignore-authors', 'human'],
+    deps([[after]], { existing }),
+  );
+  assert.equal(filtered.code, 10);
+  assert.ok(filtered.report.deltas[0].classes.includes('new-comments'));
+  assert.equal(filtered.report.filteredDeltas, 0);
+  const detailed = run([...FILTER_ARGS, '--detail'], deps([[after]], { existing })).report
+    .deltas[0];
+  const comments = detailed.details.find((row) => row.class === 'new-comments');
+  assert.equal(comments.opaque, true);
+  assert.equal(comments.added, undefined);
+});
+
+test('--ignore-authors and --detail fail open when PR aggregate comments include non-conversation rows', () => {
+  const before = {
+    ...basePr,
+    totalCommentsCount: 4,
+    conversationComments: 1,
+    commentNodes: [{ id: 'C0', author: 'human' }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    totalCommentsCount: 5,
+    conversationComments: 1,
+    commentNodes: [{ id: 'C0', author: 'github-actions[bot]' }],
+  };
+  const existing = { pr: { 42: prFingerprint(before) }, issue: {} };
+  const filtered = run(
+    [...FILTER_ARGS, '--ignore-authors', 'github-actions[bot]'],
+    deps([[after]], { existing }),
+  );
+  assert.equal(filtered.code, 10);
+  assert.ok(filtered.report.deltas[0].classes.includes('new-comments'));
+  const detailed = run([...FILTER_ARGS, '--detail'], deps([[after]], { existing })).report
+    .deltas[0];
+  const comments = detailed.details.find((row) => row.class === 'new-comments');
+  assert.equal(comments.opaque, true);
+  assert.equal(comments.added, undefined);
+});
+
+test('class filters run before ignored authors and filteredDeltas excludes surviving class removal', () => {
+  const before = {
+    ...basePr,
+    totalCommentsCount: 1,
+    conversationComments: 1,
+    commentNodes: [{ id: 'C0', author: 'human' }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    headRefOid: 'sha2',
+    totalCommentsCount: 2,
+    conversationComments: 2,
+    commentNodes: [
+      { id: 'C0', author: 'human' },
+      { id: 'C1', author: 'github-actions[bot]' },
+    ],
+  };
+  const result = run(
+    [
+      ...FILTER_ARGS,
+      '--only-classes',
+      'new-comments',
+      '--ignore-classes',
+      'ci-changed',
+      '--ignore-authors',
+      'github-actions[bot]',
+    ],
+    deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } }),
+  );
+  assert.equal(result.code, 10);
+  assert.deepEqual(result.report.deltas[0].classes, ['head-changed', 'updated']);
+  assert.equal(result.report.filteredDeltas, 0);
+});
+
+test('--detail gates actionable check, review, and comment identity metadata', () => {
+  const before = {
+    ...basePr,
+    statusCheckRollup: [
+      {
+        __typename: 'CheckRun',
+        name: 'build',
+        status: 'COMPLETED',
+        conclusion: 'SUCCESS',
+        detailsUrl: 'https://ci/old',
+      },
+    ],
+    latestReviews: [
+      {
+        id: 'R1',
+        submittedAt: '2026-07-01T09:00:00Z',
+        author: { login: 'alice' },
+        state: 'APPROVED',
+        commit: { oid: 'a' },
+      },
+    ],
+    totalCommentsCount: 1,
+    conversationComments: 1,
+    commentNodes: [{ id: 'C0', author: 'human' }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    statusCheckRollup: [
+      {
+        __typename: 'CheckRun',
+        name: 'build',
+        status: 'COMPLETED',
+        conclusion: 'FAILURE',
+        detailsUrl: 'https://ci/build',
+      },
+    ],
+    latestReviews: [
+      {
+        id: 'R2',
+        submittedAt: '2026-07-01T10:00:00Z',
+        author: { login: 'alice' },
+        state: 'CHANGES_REQUESTED',
+        commit: { oid: 'b' },
+      },
+    ],
+    totalCommentsCount: 2,
+    conversationComments: 2,
+    commentNodes: [
+      { id: 'C0', author: 'human' },
+      { id: 'C1', author: 'bot' },
+    ],
+  };
+  const existing = { pr: { 42: prFingerprint(before) }, issue: {} };
+  const plain = run(FILTER_ARGS, deps([[after]], { existing })).report.deltas[0];
+  assert.equal(JSON.stringify(plain).includes('https://ci/build'), false);
+  assert.equal(JSON.stringify(plain).includes('R2'), false);
+  assert.equal(JSON.stringify(plain).includes('C1'), false);
+  const detailed = run([...FILTER_ARGS, '--detail'], deps([[after]], { existing })).report
+    .deltas[0];
+  assert.equal(
+    detailed.details.find((row) => row.field === 'ci').changed[0].to.detailsUrl,
+    'https://ci/build',
+  );
+  assert.equal(detailed.details.find((row) => row.field === 'reviews').changed[0].to.id, 'R2');
+  assert.deepEqual(
+    detailed.details.find((row) => row.class === 'new-comments'),
+    {
+      class: 'new-comments',
+      field: 'comments',
+      from: 1,
+      to: 2,
+      delta: 1,
+      added: [{ id: 'C1', author: 'bot' }],
+    },
+  );
+});
+
+test('--ignore-authors rejects empty members before repository derivation', () => {
+  const d = deps([[]]);
+  d.resolveRepo = () => {
+    throw new Error('must not derive');
+  };
+  const { code, report } = run(['--ignore-authors', 'bot,', '--state-file', '/tmp/x.json'], d);
+  assert.equal(code, 2);
+  assert.match(report.error, /--ignore-authors/);
+});
 
 test('--only-classes with no matching delta suppresses attention without changing the snapshot', () => {
   // Removing the only-class branch would incorrectly wake consumers for a

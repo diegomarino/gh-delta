@@ -16,7 +16,7 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
          [--state-file <path> | --state-dir <dir>]
          [--entities pr,issue] [--format json|text]
          [--summary-line] [--detail] [--summaries]
-         [--only-classes <classes>] [--ignore-classes <classes>] [--settled]
+         [--only-classes <classes>] [--ignore-classes <classes>] [--ignore-authors <logins>] [--settled]
          [--baseline-emit-state]
          [--log]
          [--outpost-url <url>]
@@ -87,6 +87,13 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
   comma-separated `DELTA_CLASSES` values from every delta, then drop a delta
   left with no classes. It has the same validation, whitespace, and duplicate
   behavior as `--only-classes`.
+- `--ignore-authors <logins>` is a comma-separated, case-insensitive list of
+  non-empty GitHub logins. It is a post-detection attention filter: it removes
+  `new-comments` only when the positive count increment fits the observed final
+  five comment rows and every inferred row has an id and a listed author. It
+  fails open on overflow, missing id/author, aggregate/conversation-count
+  mismatch, or other uncertainty. Snapshots
+  still advance; `filteredDeltas` is present whenever this flag is supplied.
 - `--settled` is an attention filter that drops a delta whose normalized summary
   has `ciRollup: "pending"` or `mergeable: "unknown"`. It implies
   `--summaries`; no explicit `--summaries` flag is needed. `ciRollup: "none"`
@@ -95,7 +102,9 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
 **Attention filters are not a queue: detection and the snapshot still advance
 for filtered changes, and filtered changes are not replayed later.** When flags
 are combined, their order is binding: `--only-classes`, then
-`--ignore-classes`, then empty-delta removal, then `--settled`.
+`--ignore-classes`, then `--ignore-authors`, then empty-delta removal, then `--settled`.
+`filteredDeltas` counts only deltas removed entirely; removing one class from a
+surviving multi-class delta does not increment it.
 
 - `--baseline-emit-state` is optional and off by default. On the run that seeds a
   baseline, it emits one synthetic `baseline-state` delta per tracked OPEN item
