@@ -12,6 +12,9 @@
     "./detect": {
       "import": "./lib/detect.mjs"
     },
+    "./duration": {
+      "import": "./lib/duration.mjs"
+    },
     "./fingerprint": {
       "import": "./lib/fingerprint.mjs"
     },
