@@ -29,6 +29,7 @@ flowchart LR
     CLI --> Args[lib/args.mjs]
     CLI --> GH[lib/gh.mjs]
     CLI --> Snap[lib/snapshot.mjs]
+    CLI --> Log[lib/deltalog.mjs]
     CLI --> Det[lib/detect.mjs] --> FP[lib/fingerprint.mjs]
     CLI --> Out[lib/outpost.mjs]
     CLI --> Txt[lib/text-output.mjs]
@@ -37,6 +38,7 @@ flowchart LR
     GH -. gh api graphql .-> GitHub[(GitHub GraphQL)]
     Out -. HTTP POST .-> Endpoint[(outpost endpoint)]
     Snap -. read/atomic write .-> FS[(snapshot file)]
+    Log -. append/read/atomic cursor .-> FS
     Reg -. atomic breadcrumb write .-> RegFS[(run registry)]
     Lst -. read-only scan .-> FS
     Lst -. read-only scan .-> RegFS
@@ -144,6 +146,8 @@ The impure edges are isolated:
 - `gh.mjs` shells out to `gh api graphql` for incremental GraphQL fetches.
 - `snapshot.mjs` performs filesystem I/O, derives monitor-scoped snapshot paths,
   and computes the incremental-fetch horizon cutoff.
+- `deltalog.mjs` owns opt-in append-only NDJSON validation, sequencing, crash-tail
+  recovery, log path derivation, and atomic consumer cursors.
 - `outpost.mjs` validates optional outpost URLs, builds payloads, and sends
   short-timeout HTTP POSTs.
 - `text-output.mjs` formats heartbeat text, list inventory text, and outpost
@@ -242,10 +246,13 @@ Do not run overlapping ticks against the same state file; use scheduler-level
 locking if overlap is possible. Atomic writes prevent partial JSON snapshots,
 but they do not make two concurrent detector passes a serialized workflow.
 
-Successful detections are at-most-once from the detector's perspective. The
-snapshot advances before an agent acts on deltas and before optional outpost
-delivery is attempted. Operators that need at-least-once action delivery should
-persist detector output or add an external pending/ack queue.
+Without `--log`, successful detections remain snapshot-at-most-once: the snapshot
+advances before an agent acts on deltas and before optional outpost delivery.
+With opt-in `--log`, the same existing snapshot lock serializes `append + fsync`
+before snapshot publication, creating an at-least-once replay seam: a crash in
+that gap can duplicate a content-addressed delta id at a later sequence. Consumer
+cursors are a local at-most-once convenience, not acknowledgement; consumers
+deduplicate work by `id` when they need at-least-once action delivery.
 
 Snapshot JSON shape and field semantics are specified in
 [Snapshot Semantics](contract.md#snapshot-semantics).
