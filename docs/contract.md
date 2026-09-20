@@ -22,7 +22,8 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
          [--outpost-url <url>]
          [--outpost-secret <ENV_VARIABLE_NAME>]
          [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>]
-         [--gh-timeout-ms <ms>] [--no-registry] [--lock-stale-ms <duration>]
+         [--gh-timeout-ms <ms>] [--rate-limit-floor <n>]
+         [--no-registry] [--lock-stale-ms <duration>]
 ```
 
 - `--repo` is **optional**. An explicit value always wins. When omitted,
@@ -136,6 +137,15 @@ monitorId>__<entities>.ndjson`, or `<state-file>.deltalog.ndjson` for an explici
   unlimited). Excess deltas are skipped with an outpost warning.
 - `--gh-timeout-ms` timeout in milliseconds for each `gh` subprocess call
   (default `60000`).
+- `--rate-limit-floor <n>` is an opt-in pre-fetch GraphQL quota floor. `n` is a
+  non-negative safe integer. After acquiring the state lock and validating the
+  current snapshot, the detector reads `resources.graphql.remaining` from one
+  `gh api rate_limit` call immediately before the observation fetch. Equality
+  proceeds. A lower remaining quota exits `1` with `kind: "rate-limit"`, a
+  stable message naming both values, and top-level ISO-8601 UTC `resetAt`; it
+  leaves the snapshot, log, outpost, and watch cleanup untouched. A malformed
+  or failed rate-limit request remains the ordinary transient `github` error.
+  Omitted means no rate-limit call and byte-identical legacy behavior.
 - `--no-registry` skips the best-effort [run-registry](#run-registry) breadcrumb
   this run would otherwise leave for `gh-delta list`. Equivalent to setting
   `GH_DELTA_NO_REGISTRY=1`. It never affects the report, exit code, or snapshot.
@@ -795,11 +805,11 @@ Emitted with exit code `1` (transient) or `2` (permanent). It **does not** carry
 ```
 
 - `schemaVersion` (number), `error` (string), `at` (string): always present.
-- `kind` (string): one of `config`, `snapshot`, `github`, `io`, `busy`, `log`. This is
-  a closed set while `report.schemaVersion === 1`, but forward-compatible like
-  classes — treat unknown values as "something changed, inspect". `config` and
-  `snapshot`, and `log` kinds map to exit `2`; `github`, `io`, and `busy` kinds map to
-  exit `1`. This is where `--repo` derivation errors land too: no repo
+- `kind` (string): one of `config`, `snapshot`, `github`, `io`, `busy`, `log`,
+  `rate-limit`. This is a closed set while `report.schemaVersion === 1`, but
+  forward-compatible like classes — treat unknown values as "something changed,
+  inspect". `config`, `snapshot`, and `log` kinds map to exit `2`; `github`,
+  `io`, `busy`, and `rate-limit` kinds map to exit `1`. This is where `--repo` derivation errors land too: no repo
   derivable from git remotes or `gh` is `kind: "config"` (exit `2`, permanent);
   a `gh` timeout while deriving `--repo` is `kind: "github"` (exit `1`,
   transient) — see the `--repo` bullet in [CLI](#cli). `busy` means the
@@ -810,6 +820,10 @@ Emitted with exit code `1` (transient) or `2` (permanent). It **does not** carry
 - `repo`, `monitorId` (string): present once the corresponding flag has been
   parsed (absent for errors raised before that, e.g. an unknown option). `error`
   strings are human-readable and not a stable enum.
+- `resetAt` (ISO-8601 UTC string): present **only** when `kind` is `rate-limit`
+  because `--rate-limit-floor` found `resources.graphql.remaining` below the
+  configured floor. It is the API's reset epoch normalized to UTC; it is absent
+  for every other error, including a malformed or failed rate-limit request.
 
 ## Delta Log and Cursors
 

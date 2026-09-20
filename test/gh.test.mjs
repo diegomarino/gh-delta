@@ -6,6 +6,7 @@ import {
   fetchPRsByNumber,
   fetchIssues,
   fetchEnrichment,
+  fetchRateLimit,
   DEFAULT_GH_TIMEOUT_MS,
 } from '../lib/gh.mjs';
 
@@ -57,6 +58,53 @@ function page(nodes, hasNextPage = false, endCursor = null) {
     data: { repository: { items: { nodes, pageInfo: { hasNextPage, endCursor } } } },
   });
 }
+
+test('rate-limit fetch invokes the REST boundary once, reports progress, and normalizes resetAt', () => {
+  const calls = [];
+  const result = fetchRateLimit({
+    exec: (_cmd, args, opts) => {
+      calls.push({ args, opts });
+      return JSON.stringify({ resources: { graphql: { remaining: 12, reset: 1780000000 } } });
+    },
+    timeoutMs: 321,
+    onProgress: () => calls.push({ progress: true }),
+  });
+  assert.deepEqual(result, { remaining: 12, resetAt: '2026-05-28T20:26:40.000Z' });
+  assert.deepEqual(calls[0], { args: ['api', 'rate_limit'], opts: { timeoutMs: 321 } });
+  assert.equal(calls.filter((call) => call.progress).length, 1);
+});
+
+test('rate-limit fetch fails closed for invalid payload and never progresses after a process failure', () => {
+  assert.throws(
+    () => fetchRateLimit({ exec: () => '{' }),
+    /GitHub rate-limit returned invalid JSON/,
+  );
+  for (const payload of [
+    {},
+    { resources: { graphql: { remaining: -1, reset: 1 } } },
+    { resources: { graphql: { remaining: 1.5, reset: 1 } } },
+    { resources: { graphql: { remaining: Number.MAX_SAFE_INTEGER + 1, reset: 1 } } },
+    { resources: { graphql: { remaining: 1, reset: '1' } } },
+    { resources: { graphql: { remaining: 1, reset: Number.MAX_SAFE_INTEGER } } },
+  ]) {
+    assert.throws(
+      () => fetchRateLimit({ exec: () => JSON.stringify(payload) }),
+      /GitHub rate-limit returned unexpected shape/,
+    );
+  }
+  let progress = 0;
+  assert.throws(
+    () =>
+      fetchRateLimit({
+        exec: () => {
+          throw new Error('process failed');
+        },
+        onProgress: () => progress++,
+      }),
+    /process failed/,
+  );
+  assert.equal(progress, 0);
+});
 
 test('enrichment fetch uses one sorted nodes query and normalizes review bodies by requested id', () => {
   const calls = [];

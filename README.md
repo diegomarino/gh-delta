@@ -21,6 +21,14 @@ the action.
 `gh-delta` is not a dashboard, inbox, or PR bot. It is a deterministic GitHub
 delta detector for schedulers, scripts, and agent loops.
 
+For quota-sensitive schedules, opt into a pre-fetch GraphQL floor. A tick with
+too little remaining quota exits transiently without fetching or advancing its
+snapshot:
+
+```bash
+gh-delta --repo owner/repo --rate-limit-floor 50
+```
+
 See [Alternatives and adjacent tools](docs/alternatives.md) for how `gh-delta`
 compares to related projects.
 

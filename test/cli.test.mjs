@@ -1695,6 +1695,8 @@ test('--help-json returns machine-readable help without fetching GitHub', () => 
   assert.ok(help.options.some((option) => option.name === '--state-dir'));
   assert.ok(help.options.some((option) => option.name === '--format'));
   assert.ok(help.options.some((option) => option.name === '--summary-line'));
+  assert.ok(help.options.some((option) => option.name === '--rate-limit-floor'));
+  assert.match(help.output.description, /resetAt.*rate-limit/i);
   assert.ok(help.options.some((option) => option.name === '--help-json'));
   assert.ok(help.options.some((option) => option.name === '--version'));
   assert.equal(help.version, packageJson.version);
@@ -2689,6 +2691,128 @@ test('--gh-timeout-ms abc is a config error (exit 2, kind config)', () => {
   assert.equal(code, 2);
   assert.equal(report.kind, 'config');
   assert.match(report.error, /--gh-timeout-ms/);
+});
+
+test('--rate-limit-floor validates before repository derivation or state access', () => {
+  for (const floor of ['-1', '1.5', 'nope', '', String(Number.MAX_SAFE_INTEGER + 1)]) {
+    let derived = false;
+    let read = false;
+    const result = run(['--rate-limit-floor', floor], {
+      now: () => '2026-07-01T12:00:00Z',
+      resolveRepo: () => {
+        derived = true;
+        return { repo: 'o/r', source: 'gh' };
+      },
+      readSnapshot: () => {
+        read = true;
+        return null;
+      },
+    });
+    assert.equal(result.code, 2, floor);
+    assert.equal(result.report.kind, 'config', floor);
+    assert.match(result.report.error, /--rate-limit-floor/, floor);
+    assert.equal(derived, false, floor);
+    assert.equal(read, false, floor);
+  }
+});
+
+test('--rate-limit-floor gates fetch after snapshot read and reports a low quota without writes', () => {
+  const order = [];
+  let writes = 0;
+  let registered;
+  const result = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/x.json',
+      '--rate-limit-floor',
+      '4',
+    ],
+    {
+      ...NOOP_LOCK_DEPS,
+      readSnapshot: () => {
+        order.push('read');
+        return null;
+      },
+      fetchRateLimit: (_options) => {
+        order.push('rate');
+        return { remaining: 3, resetAt: '2026-07-01T13:00:00.000Z' };
+      },
+      fetchPRs: () => {
+        order.push('fetch');
+        return [];
+      },
+      fetchIssues: () => {
+        order.push('fetch');
+        return [];
+      },
+      writeSnapshotAtomic: () => {
+        writes++;
+      },
+      registerMonitor: (entry) => {
+        registered = entry;
+      },
+      now: () => '2026-07-01T12:00:00Z',
+      env: {},
+    },
+  );
+  assert.equal(result.code, 1);
+  assert.equal(result.report.kind, 'rate-limit');
+  assert.equal(result.report.resetAt, '2026-07-01T13:00:00.000Z');
+  assert.match(result.report.error, /remaining 3.*floor 4/);
+  assert.deepEqual(order, ['read', 'rate']);
+  assert.equal(writes, 0);
+  assert.equal(registered.status, 'failure');
+  assert.equal(registered.error.kind, 'rate-limit');
+});
+
+test('--rate-limit-floor allows equality and forwards timeout before the observation fetch', () => {
+  const order = [];
+  const result = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/x.json',
+      '--rate-limit-floor',
+      '4',
+      '--gh-timeout-ms',
+      '321',
+    ],
+    {
+      ...NOOP_LOCK_DEPS,
+      readSnapshot: () => null,
+      fetchRateLimit: (options) => {
+        order.push(['rate', options.timeoutMs]);
+        return { remaining: 4, resetAt: '2026-07-01T13:00:00.000Z' };
+      },
+      fetchPRs: () => {
+        order.push(['fetch']);
+        return [];
+      },
+      fetchIssues: () => [],
+      writeSnapshotAtomic: () => {},
+      now: () => '2026-07-01T12:00:00Z',
+    },
+  );
+  assert.equal(result.code, 0);
+  assert.deepEqual(order, [['rate', 321], ['fetch']]);
+});
+
+test('omitting --rate-limit-floor makes no rate-limit call', () => {
+  let calls = 0;
+  const d = deps([[]]);
+  d.fetchRateLimit = () => {
+    calls++;
+    return { remaining: 0, resetAt: '2026-07-01T13:00:00.000Z' };
+  };
+  run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
+  assert.equal(calls, 0);
 });
 
 test('--gh-timeout-ms threads into fetchers and defaults to 60000', () => {
