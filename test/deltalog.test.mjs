@@ -140,6 +140,147 @@ test('reader advances only through the manifest prefix while fsync fails, then r
   );
 });
 
+test('first append publishes an empty boundary before a failed record fsync', () => {
+  const logFile = tempPath('first-publication.ndjson');
+  const cursorPath = `${logFile}.cursor.json`;
+  let duringFailedFsync;
+  const descriptors = new Map();
+  assert.throws(
+    () =>
+      appendDeltaLog(
+        logFile,
+        { detectedAt: '2026-09-20T12:00:00.000Z', deltas: [first] },
+        {
+          fs: {
+            openSync(path, flags) {
+              const fd = openSync(path, flags);
+              descriptors.set(fd, path);
+              return fd;
+            },
+            fsyncSync(fd) {
+              if (descriptors.get(fd) !== logFile) return fsyncSync(fd);
+              duringFailedFsync = readDeltaLog(logFile, { afterSeq: 0 });
+              setCursorAtomic(cursorPath, {
+                cursorVersion: 1,
+                logFile,
+                seq: duringFailedFsync.scannedTo,
+              });
+              throw new Error('first record fsync failed');
+            },
+          },
+        },
+      ),
+    /first record fsync failed/,
+  );
+  assert.deepEqual(duringFailedFsync.entries, []);
+  assert.equal(duringFailedFsync.scannedTo, 0);
+  assert.equal(readCursor(cursorPath).seq, 0);
+});
+
+test('reader reconciles a newly published legacy boundary before exposing a concurrent suffix', () => {
+  const logFile = tempPath('legacy-publication-race.ndjson');
+  const legacyRecord = {
+    seq: 1,
+    id: first.id,
+    detectedAt: '2026-09-20T12:00:00.000Z',
+    delta: first,
+  };
+  writeFileSync(logFile, `${JSON.stringify(legacyRecord)}\n`);
+  let injected = false;
+  const readerFs = {
+    readFileSync(path, ...args) {
+      if (path === logFile && !injected) {
+        injected = true;
+        assert.throws(
+          () =>
+            appendDeltaLog(
+              logFile,
+              { detectedAt: '2026-09-20T12:01:00.000Z', deltas: [second] },
+              {
+                fs: {
+                  fsyncSync(fd) {
+                    const bytes = readFileSync(logFile);
+                    if (bytes.includes(Buffer.from(second.id)))
+                      throw new Error('second fsync failed');
+                    return fsyncSync(fd);
+                  },
+                },
+              },
+            ),
+          /second fsync failed/,
+        );
+      }
+      return readFileSync(path, ...args);
+    },
+  };
+  assert.deepEqual(
+    readDeltaLog(logFile, { afterSeq: 0 }, { fs: readerFs }).entries.map((entry) => entry.seq),
+    [1],
+  );
+});
+
+function recordWithInvalidTitleByte(record) {
+  const bytes = Buffer.from(`${JSON.stringify(record)}\n`);
+  const title = Buffer.from(`"title":"${record.delta.title}"`);
+  const titleStart = bytes.indexOf(title);
+  assert.ok(titleStart >= 0);
+  bytes[titleStart + Buffer.byteLength('"title":"')] = 0x80;
+  return bytes;
+}
+
+test('invalid UTF-8 in a complete unpublished suffix is a log error without mutation', () => {
+  const logFile = tempPath('invalid-suffix-utf8.ndjson');
+  appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:00:00.000Z', deltas: [first] });
+  const invalidSuffix = recordWithInvalidTitleByte({
+    seq: 2,
+    id: second.id,
+    detectedAt: '2026-09-20T12:01:00.000Z',
+    delta: second,
+  });
+  writeFileSync(logFile, Buffer.concat([readFileSync(logFile), invalidSuffix]));
+  const before = readFileSync(logFile);
+  assert.throws(
+    () => appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:02:00.000Z', deltas: [first] }),
+    /invalid UTF-8/,
+  );
+  assert.deepEqual(readFileSync(logFile), before);
+});
+
+test('reader rejects invalid UTF-8 inside its published prefix', () => {
+  const logFile = tempPath('invalid-prefix-utf8.ndjson');
+  appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:00:00.000Z', deltas: [first] });
+  const bytes = readFileSync(logFile);
+  const title = Buffer.from('"title":"one"');
+  const titleStart = bytes.indexOf(title);
+  assert.ok(titleStart >= 0);
+  bytes[titleStart + Buffer.byteLength('"title":"')] = 0x80;
+  writeFileSync(logFile, bytes);
+  assert.throws(() => readDeltaLog(logFile, { afterSeq: 0 }), /invalid UTF-8/);
+});
+
+test('complete-suffix recovery fsync opens the log writable', () => {
+  const logFile = tempPath('recovery-writable-fsync.ndjson');
+  appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:00:00.000Z', deltas: [first] });
+  writeFileSync(
+    logFile,
+    `${readFileSync(logFile, 'utf8')}${JSON.stringify({ seq: 2, id: second.id, detectedAt: '2026-09-20T12:01:00.000Z', delta: second })}\n`,
+  );
+  const openModes = [];
+  appendDeltaLog(
+    logFile,
+    { detectedAt: '2026-09-20T12:02:00.000Z', deltas: [first] },
+    {
+      fs: {
+        openSync(path, flags) {
+          if (path === logFile) openModes.push(flags);
+          return openSync(path, flags);
+        },
+      },
+    },
+  );
+  assert.ok(openModes.includes('r+'));
+});
+
 test('afterSeq beyond the published manifest tail is a log error even with a newline suffix', () => {
   const logFile = tempPath('cursor-ahead.ndjson');
   appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:00:00.000Z', deltas: [first] });

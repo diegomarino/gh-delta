@@ -789,12 +789,22 @@ permanent `log` error rather than an empty replay.
 
 For a legacy/manual log without a manifest, the first append fully validates its
 complete prefix and atomically bootstraps the manifest before appending new bytes.
+For a brand-new log, it first publishes the empty `{version:1,lastSeq:0,
+byteLength:0}` boundary; that boundary is valid even if the log file does not yet
+exist, so a failed first-record fsync remains invisible to readers. A reader that
+started a legacy read and discovers a newly published manifest after acquiring
+the old bytes restarts from that published boundary.
 For ordinary manifest-backed appends, the committed prefix is trusted by the
 writer and only the bounded unpublished suffix plus newly serialized records are
 validated; reads always validate the whole published prefix. On recovery, a valid
 contiguous complete suffix is fsynced and promoted, an unterminated suffix is
 truncated, and a malformed complete suffix fails closed without mutation. A
 manifest ahead of a missing/truncated log is a permanent `log` error.
+
+Byte lengths are raw UTF-8 byte offsets, not decoded-string lengths. Invalid
+UTF-8 in any complete published record or complete suffix is a permanent `log`
+error before mutation. Recovery opens its non-truncating fsync handle writable
+(`r+`) for Windows compatibility.
 
 A cursor is atomically replaced JSON with exactly
 `{"cursorVersion":1,"logFile":"/absolute/log.ndjson","seq":41}`. `seq` is a

@@ -258,6 +258,11 @@ later sequence. Consumer cursors are a local at-most-once convenience, not
 acknowledgement; consumers deduplicate work by `id` when they need at-least-once
 action delivery.
 
+The initial manifest publishes an empty byte-zero prefix before the first record
+write. Legacy readers reconcile a manifest appearing during their read, and all
+record boundaries are raw strict-UTF-8 bytes so an invalid byte cannot alter a
+published offset through replacement-character decoding.
+
 Snapshot JSON shape and field semantics are specified in
 [Snapshot Semantics](contract.md#snapshot-semantics).
 
