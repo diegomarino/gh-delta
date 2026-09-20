@@ -56,6 +56,8 @@ test('text output makes suppressed attention-filter deltas visible to operators'
 
   assert.match(output, /Attention filters suppressed 2 delta\(s\)/);
   assert.match(output, /snapshot advanced and they will not be replayed/);
+  assert.match(output, /No deltas remain after attention filtering/);
+  assert.doesNotMatch(output, /No GitHub deltas since the last snapshot/);
 });
 
 test('delta text output prints each delta with suggested action', () => {
