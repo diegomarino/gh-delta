@@ -303,14 +303,17 @@ delta classes, snapshot behavior, or any outpost path, update:
 | [CONTRIBUTING.md](CONTRIBUTING.md)                                               | Contributing changes                                                    |
 | [CHANGELOG.md](CHANGELOG.md)                                                     | Checking what changed between versions                                  |
 
-## License
-
 ## Local watch lists
 
-Use `--watch-dir <path>` to emit only selected post-fetch deltas, or manage a
-monitor-private list with `gh-delta watch add pr:42 --until merged`, `watch rm`,
-and `watch ls`. The full repository is still fetched and the persisted snapshot
-is unchanged; missing lifecycle detection remains repository-wide. I-6b will
-add economical fetching and its separate snapshot identity.
+Use `--watch-dir <path>` to manage a monitor-private list with `gh-delta watch
+add pr:42 --until merged`, `watch rm`, and `watch ls`. A list of zero to ten
+PRs (while `--entities` includes `pr`) automatically makes one targeted GraphQL
+query (zero calls for an empty list) and uses an independent `__watch-pr.json` snapshot; `--state-file x.json`
+uses `x.json.watch.json`. Removing a watch silently removes it from that
+snapshot; a still-watched PR absent from GitHub follows the normal missing
+lifecycle. Lists with an issue, more than ten entries, or `--entities issue` retain the ordinary
+full-repository fetch and snapshot history.
+
+## License
 
 [MIT](LICENSE) © diegomarino

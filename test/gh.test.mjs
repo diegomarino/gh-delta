@@ -1,7 +1,7 @@
 // GitHub GraphQL boundary tests: incremental fetch, cutoff, caps, and normalization.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchPRs, fetchIssues, DEFAULT_GH_TIMEOUT_MS } from '../lib/gh.mjs';
+import { fetchPRs, fetchPRsByNumber, fetchIssues, DEFAULT_GH_TIMEOUT_MS } from '../lib/gh.mjs';
 
 function prNode(over = {}) {
   return {
@@ -51,6 +51,55 @@ function page(nodes, hasNextPage = false, endCursor = null) {
     data: { repository: { items: { nodes, pageInfo: { hasNextPage, endCursor } } } },
   });
 }
+
+test('targeted PR fetch uses one aliased query and the canonical normalizer', () => {
+  const calls = [];
+  const rows = fetchPRsByNumber('o/r', [9, 3, 9], {
+    exec: (_cmd, args, opts) => {
+      calls.push({ args, opts });
+      return JSON.stringify({
+        data: { repository: { pr3: prNode({ number: 3 }), pr9: prNode({ number: 9 }) } },
+      });
+    },
+    onProgress: () => calls.push({ progress: true }),
+  });
+  assert.equal(calls.filter((call) => call.args).length, 1);
+  const query = calls.find((call) => call.args).args.find((arg) => arg.startsWith('query='));
+  assert.match(query, /pr3: pullRequest\(number: \$n3\)/);
+  assert.match(query, /pr9: pullRequest\(number: \$n9\)/);
+  assert.equal(calls.filter((call) => call.progress).length, 1);
+  assert.deepEqual(
+    rows.map((row) => row.number),
+    [3, 9],
+  );
+  assert.deepEqual(rows[0].statusCheckRollup, [
+    { __typename: 'CheckRun', name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' },
+  ]);
+});
+
+test('targeted PR fetch fails closed on alias shape, GraphQL errors, and nested overflow', () => {
+  assert.throws(
+    () =>
+      fetchPRsByNumber('o/r', [3], { exec: () => JSON.stringify({ data: { repository: {} } }) }),
+    /unexpected shape/,
+  );
+  assert.throws(
+    () =>
+      fetchPRsByNumber('o/r', [3], {
+        exec: () => JSON.stringify({ errors: [{ message: 'boom' }] }),
+      }),
+    /returned errors: boom/,
+  );
+  const overflow = prNode({ number: 3 });
+  overflow.reviewThreads.pageInfo.hasNextPage = true;
+  assert.throws(
+    () =>
+      fetchPRsByNumber('o/r', [3], {
+        exec: () => JSON.stringify({ data: { repository: { pr3: overflow } } }),
+      }),
+    /paginated reviewThreads/,
+  );
+});
 
 test('baseline (null horizon) fetches only open PRs and normalizes rows', () => {
   const calls = [];

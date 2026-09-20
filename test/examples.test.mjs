@@ -28,11 +28,12 @@ test('every example report covers exactly the frozen REPORT_FIELDS, minus the om
   // `filteredDeltas` is similarly absent without an attention-filter flag.
   // A live run on the common no-warning/no-filter path these fixtures depict
   // `logFile` is likewise absent unless the opt-in --log flag is supplied.
-  // A live run on the common no-warning/no-filter/no-log path these fixtures depict
-  // therefore omits those keys, so the frozen field list minus those keys is
+  // A live run on the common no-warning/no-filter/no-log/non-economical path these
+  // fixtures depict therefore omits those keys (including scope, emitted only by
+  // economical watch reports), so the frozen field list minus those keys is
   // what a real report covers here — asserting the raw REPORT_FIELDS set would
   // require a key no live run actually emits (audit finding F10.1).
-  const OMIT_WHEN_EMPTY = new Set(['warnings', 'filteredDeltas', 'logFile']);
+  const OMIT_WHEN_EMPTY = new Set(['warnings', 'filteredDeltas', 'logFile', 'scope']);
   const expected = [...REPORT_FIELDS].filter((field) => !OMIT_WHEN_EMPTY.has(field));
   for (const [name, report] of Object.entries({ baselineReport, deltaReport, detailReport })) {
     assert.deepEqual(
