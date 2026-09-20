@@ -826,18 +826,54 @@ sequenceDiagram
 }
 ```
 
-Outpost is best-effort notification. `id` is the same content-addressed delta id
-carried in the JSON report — stable across runs **and across monitors** (it
-excludes `monitorId`), so it is the dedupe key when one receiver collapses the
-same observed change reported by several monitors. `eventId` is stable for the
-semantic delta **within a monitor** (it includes `monitorId`) and is the
-receiver's per-monitor dedupe key. `deliveryId` includes the detector timestamp
-and identifies one delivery attempt. `gh-delta` does not provide reliable
+Outpost is best-effort notification. The payload carries three distinct
+identifiers, each with its own job — do not use one where another belongs:
+
+- **`id`** is the identity of the **change**: the same content-addressed delta
+  id carried in the JSON report, hashed from the observed `to` state (or
+  `from`/`classes`/`missingTicks` for the missing lifecycle). It is stable
+  across runs **and across monitors** (it excludes `monitorId`), and it is
+  **the correct field to dedupe work by** — with a caveat, because `id`
+  identifies the observed **state**, not "this specific occurrence": an item
+  that returns to a previously observed state (e.g. CI red, then green, then
+  red again with nothing else on the fingerprint changed) repeats its earlier
+  `id` by design. Do **not** dedupe `id` against unbounded history — that
+  discards the legitimate third delta as a false duplicate. Instead dedupe
+  against the **most recent `id` per item** (or a bounded recent window):
+  suppress a payload only when its `id` matches the last `id` recorded for
+  that `(entity, number)`, which still collapses true duplicate deliveries
+  (two monitors observing the same change emit the same `id` — it excludes
+  `monitorId` — and arrive adjacently) while correctly forwarding a later
+  recurrence of an earlier state. Also note that for deltas with an observed
+  `to` state, `id` excludes `classes` as well as `monitorId` — two monitors
+  with different snapshot histories can reach the same final state through
+  different transitions and emit the **same `id` with different class sets**,
+  so any receiver-side class filtering must run and be resolved **before**
+  the `id` is recorded, not after.
+- **`eventId`** is the identity of the **series**: "this monitor saw this
+  item reach this class set." It includes `monitorId` but deliberately
+  excludes the observed state and the timestamp, so it is stable **by
+  design** across every repeat occurrence of that class set on that item —
+  including different observed states. It is the right key for grouping,
+  correlating, or threading notifications about a kind of change. **Never
+  use `eventId` to decide whether to discard a payload**: two different
+  states (e.g. CI red, then green, then red again on the same PR) share the
+  same `eventId`, so dedupe-by-`eventId` silently drops every change after
+  the first — this is a data-loss bug, not a feature, and it is the failure
+  mode this section exists to prevent.
+- **`deliveryId`** is the identity of **one send attempt**: `eventId` plus
+  the detection timestamp. Use it only to correlate logs and transport
+  retries, never to dedupe work.
+
+Separating the three identities is a clarification of existing behavior, not a
+payload change: `OUTPOST_SCHEMA_VERSION` is not bumped, and no emitted value,
+key, or key order changes.
+
+`gh-delta` does not provide reliable
 delivery, retries, an outbox, acknowledgement, or replay while
 `report.schemaVersion === 1`. Classes are
 sorted before they are joined into the ids, so semantic identity is independent
-of the order the classifier emitted them. PR payloads currently use an empty
-`labels` array because the PR fetch does not collect labels. `headRefName` (the
+of the order the classifier emitted them. `headRefName` (the
 PR head branch name, retained by GitHub after the branch is deleted) mirrors the
 report delta exactly: present only on PR payloads that have a current object, and
 omitted from issue payloads and the missing lifecycle (`missing` /

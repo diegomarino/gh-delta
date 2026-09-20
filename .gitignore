@@ -13,3 +13,4 @@ tools/examples/build/
 docs/audits/
 .prompts/
 docs/superpowers/
+.worktrees/
