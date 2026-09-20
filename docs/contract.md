@@ -833,9 +833,23 @@ identifiers, each with its own job — do not use one where another belongs:
   id carried in the JSON report, hashed from the observed `to` state (or
   `from`/`classes`/`missingTicks` for the missing lifecycle). It is stable
   across runs **and across monitors** (it excludes `monitorId`), and it is
-  **the correct field to dedupe work by**: a repeat means the observed state
-  genuinely repeated, the only case where discarding is correct. Safe to
-  remember indefinitely.
+  **the correct field to dedupe work by** — with a caveat, because `id`
+  identifies the observed **state**, not "this specific occurrence": an item
+  that returns to a previously observed state (e.g. CI red, then green, then
+  red again with nothing else on the fingerprint changed) repeats its earlier
+  `id` by design. Do **not** dedupe `id` against unbounded history — that
+  discards the legitimate third delta as a false duplicate. Instead dedupe
+  against the **most recent `id` per item** (or a bounded recent window):
+  suppress a payload only when its `id` matches the last `id` recorded for
+  that `(entity, number)`, which still collapses true duplicate deliveries
+  (two monitors observing the same change emit the same `id` — it excludes
+  `monitorId` — and arrive adjacently) while correctly forwarding a later
+  recurrence of an earlier state. Also note that for deltas with an observed
+  `to` state, `id` excludes `classes` as well as `monitorId` — two monitors
+  with different snapshot histories can reach the same final state through
+  different transitions and emit the **same `id` with different class sets**,
+  so any receiver-side class filtering must run and be resolved **before**
+  the `id` is recorded, not after.
 - **`eventId`** is the identity of the **series**: "this monitor saw this
   item reach this class set." It includes `monitorId` but deliberately
   excludes the observed state and the timestamp, so it is stable **by
