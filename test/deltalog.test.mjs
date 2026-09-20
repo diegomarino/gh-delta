@@ -1,6 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  fsyncSync,
+  ftruncateSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  writeFileSync,
+  writeSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -75,6 +85,19 @@ test('append writes contiguous, exact NDJSON records and reader scans them', () 
   });
 });
 
+test('append rejects an invalid delta before changing existing log bytes', () => {
+  const logFile = tempPath('preserve.ndjson');
+  appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:00:00.000Z', deltas: [first] });
+  const before = readFileSync(logFile, 'utf8');
+
+  assert.throws(
+    () =>
+      appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:01:00.000Z', deltas: [{ id: 'x' }] }),
+    /delta must include entity, number, and classes/,
+  );
+  assert.equal(readFileSync(logFile, 'utf8'), before);
+});
+
 test('a retry after a durable append records the same id at a later sequence', () => {
   const logFile = tempPath('retry.ndjson');
   appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:00:00.000Z', deltas: [first] });
@@ -99,6 +122,44 @@ test('reader ignores a crash partial tail and append removes only that suffix', 
   );
   assert.equal(readDeltaLog(logFile, { afterSeq: 0 }).trailingPartial, true);
   appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:01:00.000Z', deltas: [second] });
+  assert.deepEqual(
+    readDeltaLog(logFile, { afterSeq: 0 }).entries.map((entry) => entry.seq),
+    [1, 2],
+  );
+});
+
+test('reader sees only prior complete records during a controlled partial append', () => {
+  const logFile = tempPath('partial-live.ndjson');
+  appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:00:00.000Z', deltas: [first] });
+  let duringAppend;
+  let firstWrite = true;
+  appendDeltaLog(
+    logFile,
+    { detectedAt: '2026-09-20T12:01:00.000Z', deltas: [second] },
+    {
+      fs: {
+        closeSync,
+        fsyncSync,
+        ftruncateSync,
+        mkdirSync,
+        openSync,
+        readFileSync,
+        writeSync(fd, bytes, offset, length, position) {
+          if (firstWrite) {
+            firstWrite = false;
+            const written = writeSync(fd, bytes, offset, Math.min(length - 1, 8), position);
+            duringAppend = readDeltaLog(logFile, { afterSeq: 0 });
+            return written;
+          }
+          return writeSync(fd, bytes, offset, length, position);
+        },
+      },
+    },
+  );
+  assert.deepEqual(
+    duringAppend.entries.map((entry) => entry.seq),
+    [1],
+  );
   assert.deepEqual(
     readDeltaLog(logFile, { afterSeq: 0 }).entries.map((entry) => entry.seq),
     [1, 2],
