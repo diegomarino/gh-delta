@@ -237,6 +237,7 @@ subpaths; the package root is intentionally not exported.
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | `gh-delta/detect`      | `detectDeltas`                                                                                                                                                                                                                                                                                 | Pure delta classification engine                        |
 | `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint`, `summarizeCiRollup`, `summarizeReviews`, `comparableFingerprint`, `stableValue`, `deltaIdentity`, `deltaId`                                                                                                        | Stable object fingerprint builders and delta-id hashing |
+| `gh-delta/duration`    | `parseDuration`                                                                                                                                                                                                                                                                                | Shared duration grammar for every duration-valued flag  |
 | `gh-delta/list`        | `listMonitors`, `parseSnapshotFilename`, `parseSince`                                                                                                                                                                                                                                          | Read-only monitor snapshot inventory                    |
 | `gh-delta/registry`    | `registerMonitor`, `readRegistry`, `defaultRegistryDir`, `registryEntryPath`, `canonicalStateFileKey`, `REGISTRY_VERSION`                                                                                                                                                                      | Run-registry breadcrumbs for gh-delta list              |
 | `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`                                                                                                                                                                                                                     | Outpost payload and transport helpers                   |
@@ -253,6 +254,10 @@ Behavioral notes for consumers:
 - `postOutpost` throws on HTTP failures so callers can classify transport errors.
 - `readSnapshot` throws on malformed JSON; callers should treat this as
   recoverable only via explicit snapshot reset.
+- `parseDuration(raw, { flag })` is the single implementation of the duration
+  grammar (a positive integer followed by `s`, `m`, `h`, or `d`). `parseSince` is
+  a thin wrapper over it that fixes `flag` to `--since`; every future
+  duration-valued flag must use `parseDuration` rather than restate the grammar.
 - `snapshotPath` is deterministic and scoped by repo, monitor-id, and entity set.
 - `horizonCutoff` derives the incremental-fetch cutoff from a prior snapshot
   (`meta.horizon` minus the overlap, or the newest fingerprint `updatedAt` for
@@ -848,3 +853,21 @@ When the detector runs with `--summaries`, PR payloads also carry the normalized
 webhook receiver reads the same semantic state (`ciRollup`, `reviewDecision`,
 `mergeable`, …) as a consumer of the JSON report. It is omitted when `--summaries`
 is not set and on payloads without a current object.
+
+## Help Completeness
+
+**`--help` and `--help-json` never list a flag or subcommand that is not
+implemented.** One appears there in the same change that makes it work, never
+earlier as a placeholder. The machine-readable help is what an agent reads as
+this tool's contract, so a documented flag that always exits `2` is worse than
+an undocumented one: it turns a discoverable capability into a dead end.
+
+The converse holds too — a flag the parser accepts is always documented. Both
+directions are enforced per command by a test that compares each subcommand's
+parser option table against its help specification, so the two cannot drift.
+
+The same reasoning applies to `DELTA_CLASSES`, `ERROR_KINDS`, and the other
+catalogs exported from `gh-delta/contract`: they list what the detector can
+actually emit today. A consumer validating against them is correct to reject
+anything absent, and adding a name to a catalog before the code emits it would
+break that guarantee.
