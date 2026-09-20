@@ -213,6 +213,43 @@ test('listMonitors merges the registry, dedupes scanned paths, and marks stale e
   );
 });
 
+test('a newer snapshot observation supersedes a stale registry success timestamp', () => {
+  const stateDir = mkdtempSync(join(tmpdir(), 'gd-list-'));
+  const elsewhere = mkdtempSync(join(tmpdir(), 'gd-elsewhere-'));
+  const registryDir = mkdtempSync(join(tmpdir(), 'gd-reg-'));
+  const env = { GH_DELTA_REGISTRY_DIR: registryDir };
+  const external = join(elsewhere, 'private.json');
+  writeSnapshotAtomic(external, {
+    pr: {},
+    issue: {},
+    meta: {
+      horizon: '2026-07-08T11:30:00.000Z',
+      repo: 'o/r',
+      monitorId: 'no-registry-run',
+      entities: ['pr'],
+    },
+  });
+  registerMonitor({
+    repo: 'o/r',
+    monitorId: 'no-registry-run',
+    entities: ['pr'],
+    stateFile: external,
+    status: 'ok',
+    at: '2026-07-08T09:00:00.000Z',
+    env,
+  });
+
+  const { monitors } = listMonitors(stateDir, {
+    registryDir,
+    now: () => NOW,
+    sinceMs: 60 * 60 * 1000,
+  });
+
+  assert.equal(monitors.length, 1);
+  assert.equal(monitors[0].lastOkAt, '2026-07-08T11:30:00.000Z');
+  assert.equal(monitors[0].observationAgeMs, 30 * 60 * 1000);
+});
+
 test('list distinguishes a failed first attempt from a lost successful snapshot and filters by success', () => {
   const stateDir = mkdtempSync(join(tmpdir(), 'gd-list-'));
   const registryDir = mkdtempSync(join(tmpdir(), 'gd-reg-'));
