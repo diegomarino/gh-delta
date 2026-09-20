@@ -15,10 +15,15 @@ machine-readable form of this document is available at `gh-delta --help-json`.
 gh-delta [--repo <owner/name>] [--monitor-id <id>]
          [--state-file <path> | --state-dir <dir>]
          [--entities pr,issue] [--format json|text]
-         [--summary-line] [--detail] [--summaries] [--baseline-emit-state]
+         [--summary-line] [--detail] [--summaries]
+         [--only-classes <classes>] [--ignore-classes <classes>] [--ignore-authors <logins>] [--settled]
+         [--baseline-emit-state]
+         [--log]
          [--outpost-url <url>]
+         [--outpost-secret <ENV_VARIABLE_NAME>]
          [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>]
-         [--gh-timeout-ms <ms>] [--no-registry] [--lock-stale-ms <duration>]
+         [--gh-timeout-ms <ms>] [--rate-limit-floor <n>]
+         [--no-registry] [--lock-stale-ms <duration>]
 ```
 
 - `--repo` is **optional**. An explicit value always wins. When omitted,
@@ -45,11 +50,11 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
   [Exit Codes](#exit-codes).
 
 - `--monitor-id` is optional. Default: `host-` + the first 12 hex characters of
-  the sha1 of `os.hostname()` — stable per machine and always grammar-valid. A
-  hostname change (host rename, container, or CI runner with a per-job hostname)
-  yields a new id and a fresh baseline. Inside a GitHub checkout, the minimal
-  zero-config invocation is `gh-delta` with no flags at all; `--repo` remains
-  available for other cwds or to pin an explicit repo.
+  the sha1 of hostname plus the Git worktree toplevel (or resolved cwd outside
+  Git), so subdirectories share a monitor while separate worktrees do not. The
+  hostname and path never appear in reports. `GH_DELTA_MONITOR_ID` supplies an
+  environment default, while an explicit `--monitor-id` wins. The one-time
+  default change intentionally re-baselines zero-config monitors.
 - `--repo` must be `owner/name`. **Canonicalized to lowercase** — snapshot paths,
   report echoes, and outpost event IDs always use the lowercased form. This
   applies whether `--repo` was passed explicitly or derived.
@@ -63,6 +68,8 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
   monitors. `--state-file` is an explicit snapshot path; `--state-dir` derives a
   path scoped by repo, monitor id, and selected entities (see
   [Snapshot Semantics](#snapshot-semantics)). Both together exit `2` (config).
+  An eligible economical `--watch-dir` tick deliberately selects an independent
+  derived `__watch-pr.json` path (or `<state-file>.watch.json`) instead.
 - `--entities` defaults to `pr,issue`. Accepted: `pr`, `issue`, `pr,issue`.
 - `--format` defaults to `json`. `text` is an operator/log mode, not a machine
   contract; automated consumers must use `json`.
@@ -76,6 +83,33 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
   `mergeable`, …) read from the same observation as the opaque fingerprints, with
   no second GitHub call. Additive and off by default; see
   [Delta Summary schema](#delta-summary-schema).
+- `--only-classes <classes>` is an attention filter: keep a delta when it
+  carries at least one comma-separated class name. `classes` must contain one
+  or more values from `DELTA_CLASSES`; whitespace and duplicate names are
+  ignored, and an unknown name is a configuration error (exit `2`).
+- `--ignore-classes <classes>` is an attention filter: remove the named
+  comma-separated `DELTA_CLASSES` values from every delta, then drop a delta
+  left with no classes. It has the same validation, whitespace, and duplicate
+  behavior as `--only-classes`.
+- `--ignore-authors <logins>` is a comma-separated, case-insensitive list of
+  non-empty GitHub logins. It is a post-detection attention filter: it removes
+  `new-comments` only when the positive count increment fits the observed final
+  five comment rows and every inferred row has an id and a listed author. It
+  fails open on overflow, missing id/author, aggregate/conversation-count
+  mismatch, or other uncertainty. Snapshots
+  still advance; `filteredDeltas` is present whenever this flag is supplied.
+- `--settled` is an attention filter that drops a delta whose normalized summary
+  has `ciRollup: "pending"` or `mergeable: "unknown"`. It implies
+  `--summaries`; no explicit `--summaries` flag is needed. `ciRollup: "none"`
+  is settled and is kept.
+
+**Attention filters are not a queue: detection and the snapshot still advance
+for filtered changes, and filtered changes are not replayed later.** When flags
+are combined, their order is binding: `--only-classes`, then
+`--ignore-classes`, then `--ignore-authors`, then empty-delta removal, then `--settled`.
+`filteredDeltas` counts only deltas removed entirely; removing one class from a
+surviving multi-class delta does not increment it.
+
 - `--baseline-emit-state` is optional and off by default. On the run that seeds a
   baseline, it emits one synthetic `baseline-state` delta per tracked OPEN item
   (`from: null`, `to`: the observed fingerprint) so state that already existed at
@@ -83,15 +117,35 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
   exits `10` with `baseline: true` and a non-empty `deltas` array; ids are stable
   across re-baselining. Without the flag, baseline behavior is byte-identical. See
   the [`baseline-state`](#delta-classes) class and [Exit Codes](#exit-codes).
+- `--log` is optional and off by default. It appends each surviving post-filter,
+  post-decoration delta to a monitor-bound NDJSON journal, fsyncs it, then
+  atomically publishes its reader-visible boundary before snapshot publication.
+  Its path is `<stateDir>/log-<encoded repo>__monitor-<encoded
+monitorId>__<entities>.ndjson`, or `<state-file>.deltalog.ndjson` for an explicit
+  state file. The success report adds absolute `logFile`, including on zero-delta
+  ticks; zero-delta ticks do not open the log. Without `--log` that field is
+  omitted and the log module is never opened.
 - `--outpost-url` is optional at-most-once HTTP delivery; see
   [Outpost Payload](#outpost-payload-schema-v1). It does not affect the JSON
   report, exit code, or snapshot.
+- `--outpost-secret` names (never contains) an environment variable holding the
+  shared HMAC secret. It requires `--outpost-url`; invalid names and unset or
+  empty values are configuration errors before repository derivation or I/O.
 - `--outpost-timeout-ms` timeout in milliseconds for each outpost HTTP POST
   (default `4000`).
 - `--outpost-max-posts` maximum number of outpost POSTs per run (default:
   unlimited). Excess deltas are skipped with an outpost warning.
 - `--gh-timeout-ms` timeout in milliseconds for each `gh` subprocess call
   (default `60000`).
+- `--rate-limit-floor <n>` is an opt-in pre-fetch GraphQL quota floor. `n` is a
+  non-negative safe integer. After acquiring the state lock and validating the
+  current snapshot, the detector reads `resources.graphql.remaining` from one
+  `gh api rate_limit` call immediately before the observation fetch. Equality
+  proceeds. A lower remaining quota exits `1` with `kind: "rate-limit"`, a
+  stable message naming both values, and top-level ISO-8601 UTC `resetAt`; it
+  leaves the snapshot, log, outpost, and watch cleanup untouched. A malformed
+  or failed rate-limit request remains the ordinary transient `github` error.
+  Omitted means no rate-limit call and byte-identical legacy behavior.
 - `--no-registry` skips the best-effort [run-registry](#run-registry) breadcrumb
   this run would otherwise leave for `gh-delta list`. Equivalent to setting
   `GH_DELTA_NO_REGISTRY=1`. It never affects the report, exit code, or snapshot.
@@ -102,7 +156,8 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
   lock — that one is only ever stolen once its own `expiresAt` has passed. See
   [Lock Semantics](#lock-semantics).
 
-**Repeated flags:** the last value wins. **`--help`, `--help-json`, and
+**Repeated flags:** the last value wins. This applies to both class-list flags;
+duplicate class names within one comma-separated list are ignored. **`--help`, `--help-json`, and
 `--version` take precedence over all validation** — an agent probing with
 `--help-json` receives the help document even when the rest of the command line
 is invalid.
@@ -126,7 +181,8 @@ entries, so it is safe to run at any time, including while monitors tick.
 - A scan identifies a snapshot two ways: the derived filename (encodes repo,
   monitor id, and entities), or — for arbitrary filenames — the identity the
   detector stamps inside the snapshot (`meta.repo`, `meta.monitorId`,
-  `meta.entities`; see [Snapshot Semantics](#snapshot-semantics)). Files
+  `meta.entities`; see [Snapshot Semantics](#snapshot-semantics)). Economical
+  PR-watch entries additionally expose `scope: "watch-pr"`. Files
   identified neither way are counted in `skippedFiles`.
 - A missing state directory or registry is an empty inventory (exit `0`), not
   an error.
@@ -179,7 +235,11 @@ Success report (exit `0`; the shape is also available as `reportFields` /
   with an `error` string and `null` counts instead of failing the listing. A
   registered monitor whose snapshot file no longer exists keeps its entry with
   `stale: true` — a retired monitor or cleaned state, reported rather than
-  hidden.
+  hidden. Additive diagnostics are `lastAttemptAt`, `lastOkAt`, `lastError`
+  (`null` or `{kind,message,at}`), `observationAgeMs`, and `snapshotStatus`
+  (`present`, `corrupt`, `expected-missing`, or `not-yet-created`). `--since`
+  filters by the same successful-observation timestamp; a failed first attempt
+  has no observation and does not pass it.
 - `skippedFiles` (number): directory or registry entries that could not be
   identified as monitor snapshots or registry entries. They are counted, never
   guessed at.
@@ -190,12 +250,41 @@ directory unreadable), `2` permanent error (invalid arguments). `list` never
 exits `10`. Error reports use the standard
 [error report shape](#error-report-shape).
 
+### gh-delta read
+
+```
+gh-delta read --cursor <path>
+  [--only-classes <classes>] [--number <positive integer>]
+  [--advance] [--format json|text]
+```
+
+Reads only the existing cursor-bound log: no GitHub call, snapshot read/write,
+lock, or registry access. `--only-classes` accepts known `DELTA_CLASSES`; `--number`
+filters GitHub item number, not result count. It always scans complete records to
+EOF, so `cursor.to` includes entries rejected by consumer filters. Without
+`--advance` the cursor bytes are unchanged; with it, the cursor is atomically set
+to that scanned tail after the report is assembled. Exit `10` means returned
+`deltas` is nonempty. A missing cursor, invalid cursor, or malformed complete log
+record is `kind: "log"` / exit `2`; a missing log is empty only at cursor seq `0`.
+
+### gh-delta cursor set
+
+```
+gh-delta cursor set <cursor-path> <seq> [--log-file <path>] [--format json|text]
+```
+
+Initializes a missing cursor only with `--log-file` (normalized absolute). An
+existing cursor stays bound to its log; a supplied `--log-file` must match. `seq`
+is a non-negative safe integer and may move backwards for replay, but cannot be
+above the complete log tail. A missing log permits only seq `0`. Success is exit
+`0`; cursor replacement is atomic.
+
 ## Run Registry
 
 The registry is how `gh-delta list` sees monitors whose snapshots live outside
 any directory it could guess — an arbitrary `--state-dir` or an explicit
-`--state-file`. After every successful detector run (baseline, no-delta, or
-deltas), the CLI writes one small breadcrumb per monitor:
+`--state-file`. After every resolved detector attempt, including a failure, the
+CLI writes one small breadcrumb per monitor:
 
 - **Location:** `$GH_DELTA_REGISTRY_DIR` when set, otherwise
   `$XDG_STATE_HOME/gh-delta/registry`, falling back to
@@ -203,7 +292,8 @@ deltas), the CLI writes one small breadcrumb per monitor:
   snapshot default, a reboot must not erase the inventory.
 - **Shape:** one JSON file per monitor, keyed by a sha256 hash of the canonical
   snapshot path (case-folded on Windows; see [Platform Notes](#platform-notes)), containing `registryVersion`, `repo`, `monitorId`, `entities`,
-  `stateFile`, and `lastRun` (the field catalog is `REGISTRY_ENTRY_FIELDS` in
+  `stateFile`, `lastRun`, `machineId`, `lastAttemptAt`, `lastOkAt`, and
+  `lastError` (the field catalog is `REGISTRY_ENTRY_FIELDS` in
   `gh-delta/contract`). Re-registering the same monitor overwrites its own
   file (temp file + atomic rename): idempotent, last-writer-wins, and
   concurrent monitors never share a file — no locks.
@@ -222,7 +312,8 @@ deltas), the CLI writes one small breadcrumb per monitor:
 
 ## Exit Codes
 
-- `0`: baseline established or no deltas.
+- `0`: baseline established, no deltas, or no surviving deltas after attention
+  filtering.
 - `10`: deltas found. Also emitted when `--baseline-emit-state` seeds a baseline
   that observes at least one tracked open item: the report then carries
   `baseline: true` **and** a non-empty `deltas` array of `baseline-state` deltas.
@@ -240,19 +331,20 @@ deltas), the CLI writes one small breadcrumb per monitor:
 The package publishes a small, explicit ESM surface. Imports must use explicit
 subpaths; the package root is intentionally not exported.
 
-| Export path            | Symbols                                                                                                                                                                                                                                                                                        | Purpose                                                       |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `gh-delta/detect`      | `detectDeltas`                                                                                                                                                                                                                                                                                 | Pure delta classification engine                              |
-| `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint`, `summarizeCiRollup`, `summarizeReviews`, `comparableFingerprint`, `stableValue`, `deltaIdentity`, `deltaId`                                                                                                        | Stable object fingerprint builders and delta-id hashing       |
-| `gh-delta/duration`    | `parseDuration`                                                                                                                                                                                                                                                                                | Shared duration grammar for every duration-valued flag        |
-| `gh-delta/list`        | `listMonitors`, `parseSnapshotFilename`, `parseSince`                                                                                                                                                                                                                                          | Read-only monitor snapshot inventory                          |
-| `gh-delta/registry`    | `registerMonitor`, `readRegistry`, `defaultRegistryDir`, `registryEntryPath`, `canonicalStateFileKey`, `REGISTRY_VERSION`                                                                                                                                                                      | Run-registry breadcrumbs for gh-delta list                    |
-| `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`                                                                                                                                                                                                                     | Outpost payload and transport helpers                         |
-| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`, `defaultStateDir`, `horizonCutoff`                                                                                                                                                                                                      | Snapshot path and persistence helpers                         |
-| `gh-delta/lock`        | `acquireLock`, `releaseLock`, `assertLockOwned`, `lockPath`, `LOCK_EXPIRY_SLACK_MS`                                                                                                                                                                                                            | State-file lock: one writer per `(repo, monitorId, entities)` |
-| `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`, `canonicalEntityKey`, `defaultMonitorId`                                                                                                                                                                                          | Shared argument parsing policies                              |
-| `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                                                                                                                                                                                                                                      | Package metadata and version output                           |
-| `gh-delta/contract`    | `REPORT_SCHEMA_VERSION`, `OUTPOST_SCHEMA_VERSION`, `REPORT_FIELDS`, `DELTA_FIELDS`, `DELTA_DETAIL_FIELDS`, `DELTA_DETAIL_FIELDS_BY_CLASS`, `DELTA_CLASSES`, `ERROR_KINDS`, `LIST_REPORT_FIELDS`, `LIST_MONITOR_FIELDS`, `REGISTRY_ENTRY_FIELDS`, `DELTA_SUMMARY_FIELDS`, `DELTA_SUMMARY_ENUMS` | Runtime contract constants and field catalogs                 |
+| Export path            | Symbols                                                                                                                                                                                                                                                                                                                                                                                                                                             | Purpose                                                       |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `gh-delta/detect`      | `detectDeltas`                                                                                                                                                                                                                                                                                                                                                                                                                                      | Pure delta classification engine                              |
+| `gh-delta/deltalog`    | `deltaLogPath`, `appendDeltaLog`, `readDeltaLog`, `readCursor`, `setCursorAtomic`                                                                                                                                                                                                                                                                                                                                                                   | Durable NDJSON journal and atomic consumer cursors            |
+| `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint`, `summarizeCiRollup`, `summarizeReviews`, `comparableFingerprint`, `stableValue`, `deltaIdentity`, `deltaId`                                                                                                                                                                                                                                                             | Stable object fingerprint builders and delta-id hashing       |
+| `gh-delta/duration`    | `parseDuration`                                                                                                                                                                                                                                                                                                                                                                                                                                     | Shared duration grammar for every duration-valued flag        |
+| `gh-delta/list`        | `listMonitors`, `parseSnapshotFilename`, `parseSince`                                                                                                                                                                                                                                                                                                                                                                                               | Read-only monitor snapshot inventory                          |
+| `gh-delta/registry`    | `registerMonitor`, `readRegistry`, `defaultRegistryDir`, `registryEntryPath`, `canonicalStateFileKey`, `REGISTRY_VERSION`                                                                                                                                                                                                                                                                                                                           | Run-registry breadcrumbs for gh-delta list                    |
+| `gh-delta/outpost`     | `buildOutpostPayload`, `outpostSignature`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`                                                                                                                                                                                                                                                                                                                                                      | Outpost payload and transport helpers                         |
+| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `economicalSnapshotPath`, `writeSnapshotAtomic`, `defaultStateDir`, `horizonCutoff`                                                                                                                                                                                                                                                                                                                                 | Snapshot path and persistence helpers                         |
+| `gh-delta/lock`        | `acquireLock`, `releaseLock`, `assertLockOwned`, `lockPath`, `LOCK_EXPIRY_SLACK_MS`                                                                                                                                                                                                                                                                                                                                                                 | State-file lock: one writer per `(repo, monitorId, entities)` |
+| `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`, `canonicalEntityKey`, `defaultMonitorId`                                                                                                                                                                                                                                                                                                                                               | Shared argument parsing policies                              |
+| `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                                                                                                                                                                                                                                                                                                                                                                                           | Package metadata and version output                           |
+| `gh-delta/contract`    | `REPORT_SCHEMA_VERSION`, `OUTPOST_SCHEMA_VERSION`, `REPORT_FIELDS`, `DELTA_FIELDS`, `DELTA_DETAIL_FIELDS`, `DELTA_DETAIL_FIELDS_BY_CLASS`, `DELTA_CLASSES`, `ERROR_KINDS`, `LIST_REPORT_FIELDS`, `LIST_MONITOR_FIELDS`, `REGISTRY_ENTRY_FIELDS`, `DELTA_SUMMARY_FIELDS`, `DELTA_SUMMARY_ENUMS`, `DELTA_LOG_RECORD_FIELDS`, `CURSOR_FILE_FIELDS`, `READ_REPORT_FIELDS`, `READ_CURSOR_FIELDS`, `CURSOR_SET_REPORT_FIELDS`, `CURSOR_SET_CURSOR_FIELDS` | Runtime contract constants and field catalogs                 |
 
 Behavioral notes for consumers:
 
@@ -266,7 +358,13 @@ Behavioral notes for consumers:
   grammar (a positive integer followed by `s`, `m`, `h`, or `d`). `parseSince` is
   a thin wrapper over it that fixes `flag` to `--since`; every future
   duration-valued flag must use `parseDuration` rather than restate the grammar.
-- `snapshotPath` is deterministic and scoped by repo, monitor-id, and entity set.
+- `appendDeltaLog` fsyncs complete NDJSON records, then atomically publishes a
+  versioned reader boundary; `readDeltaLog` validates every published record and
+  never exposes an unpublished suffix. Complete malformed or noncontiguous
+  records are permanent errors. `setCursorAtomic` replaces a validated,
+  absolute-bound cursor through a same-directory atomic rename.
+- `snapshotPath` is deterministic and scoped by repo, monitor-id, and entity set;
+  `economicalSnapshotPath` derives the independent bounded-watch sibling.
 - `horizonCutoff` derives the incremental-fetch cutoff from a prior snapshot
   (`meta.horizon` minus the overlap, or the newest fingerprint `updatedAt` for
   legacy snapshots without `meta`); a `null` snapshot yields `null` (open-items-
@@ -397,6 +495,7 @@ Success reports (exit `0` and `10`):
       ]
     }
   ],
+  "filteredDeltas": 2,
   "summary": "1 delta(s)"
 }
 ```
@@ -420,6 +519,8 @@ Field guarantees:
   bullet in [CLI](#cli) for the full precedence and error behavior.
 - `entities` (string[]): the selected families, always in canonical order
   `["pr", "issue"]` regardless of the `--entities` input order.
+- `logFile` (string, optional): absolute path of the opt-in durable delta log.
+  Present only when `--log` is supplied, including when `deltas` is empty.
 - `stateFile` (string): the resolved snapshot path — useful when the temp-dir
   default is in effect. The temp-dir default resolves under the OS temp dir —
   `/tmp/…` on Linux, `/var/folders/…/T/…` on macOS; trust this field rather
@@ -429,6 +530,11 @@ Field guarantees:
   parse it (it varies between "baseline established: N PRs, M issues" and
   "N delta(s)").
 - `deltas` (array): see below. Empty on baseline and on no-change runs.
+- `filteredDeltas` (number): whole detected deltas suppressed by one or more
+  attention filters. Present whenever `--only-classes`, `--ignore-classes`, or
+  `--settled` is supplied, including when the count is `0`; omitted when none
+  of those flags is supplied, preserving the byte-identical zero-new-flags
+  report contract. It does not count individual classes removed from a delta.
 - `warnings` (`{ label: string, reason: string }[]`): **optional; present only in JSON format when outpost
   delivery or `--repo` derivation produced warnings** — an outpost POST that
   timed out or returned an error, or `origin`/`upstream` resolving to
@@ -614,6 +720,30 @@ When `--summaries` and `--outpost-url` are combined, the same `summary` object i
 mirrored onto the [outpost payload](#outpost-payload-schema-v1) so webhook
 consumers see the identical field.
 
+### Opt-in emitted-delta enrichment
+
+`--enrich review,comments,threads` is a comma-separated, deduplicated selection
+of body fetches. It is off by default. Only final emitted deltas can trigger it:
+new/changed `CHANGES_REQUESTED` reviews on `review-changed`, identifiable new
+conversation comments on `new-comments`, and newly unresolved thread ids on
+`unresolved-threads-added`. Each selected `(delta, kind)` makes at most one
+GraphQL `nodes(ids:)` call after the snapshot write. Missing durable identities
+or a GitHub/shape failure produces a warning and no speculative fetch.
+
+Successful non-empty kinds attach this optional sibling:
+
+```json
+{ "enrichment": { "review": [], "comments": [], "threads": [] } }
+```
+
+Review rows contain `id`, `author`, `state`, `submittedAt`, `commit`, and `body`;
+comment rows contain `id`, `author`, `createdAt`, `body`, and deterministic
+case-insensitive-deduplicated `mentions`; thread rows contain `id` and a
+`firstComment` with id, author, createdAt, path, line, originalLine, and body.
+Nullable GitHub values remain `null`. Enrichment never changes ids, classes,
+exit codes, snapshots, or durable delta logs; `gh-delta read` does not replay it.
+Outpost payloads mirror it when present.
+
 ### Fingerprint fields (`from` / `to`)
 
 The fingerprint is the detector's stable-shaped but **semi-opaque** change-detection
@@ -675,11 +805,11 @@ Emitted with exit code `1` (transient) or `2` (permanent). It **does not** carry
 ```
 
 - `schemaVersion` (number), `error` (string), `at` (string): always present.
-- `kind` (string): one of `config`, `snapshot`, `github`, `io`, `busy`. This is
-  a closed set while `report.schemaVersion === 1`, but forward-compatible like
-  classes — treat unknown values as "something changed, inspect". `config` and
-  `snapshot` kinds map to exit `2`; `github`, `io`, and `busy` kinds map to
-  exit `1`. This is where `--repo` derivation errors land too: no repo
+- `kind` (string): one of `config`, `snapshot`, `github`, `io`, `busy`, `log`,
+  `rate-limit`. This is a closed set while `report.schemaVersion === 1`, but
+  forward-compatible like classes — treat unknown values as "something changed,
+  inspect". `config`, `snapshot`, and `log` kinds map to exit `2`; `github`,
+  `io`, `busy`, and `rate-limit` kinds map to exit `1`. This is where `--repo` derivation errors land too: no repo
   derivable from git remotes or `gh` is `kind: "config"` (exit `2`, permanent);
   a `gh` timeout while deriving `--repo` is `kind: "github"` (exit `1`,
   transient) — see the `--repo` bullet in [CLI](#cli). `busy` means the
@@ -690,6 +820,99 @@ Emitted with exit code `1` (transient) or `2` (permanent). It **does not** carry
 - `repo`, `monitorId` (string): present once the corresponding flag has been
   parsed (absent for errors raised before that, e.g. an unknown option). `error`
   strings are human-readable and not a stable enum.
+- `resetAt` (ISO-8601 UTC string): present **only** when `kind` is `rate-limit`
+  because `--rate-limit-floor` found `resources.graphql.remaining` below the
+  configured floor. It is the API's reset epoch normalized to UTC; it is absent
+  for every other error, including a malformed or failed rate-limit request.
+
+## Delta Log and Cursors
+
+With `--log`, the producer holds its existing snapshot lock through this order:
+`detect -> ids/attention filter -> assert lock -> append + fsync log -> atomic
+manifest publish -> assert lock -> atomic snapshot -> transient enrichment ->
+registry/report/outpost`.
+Append failure is
+`kind: "io"` / exit `1` (or `kind: "log"` / exit `2` for invalid committed log
+content), and leaves the snapshot unchanged. A crash after a durable append but
+before snapshot publication may append the same content-addressed `delta.id` at a
+later `seq` on retry. This is intentionally at-least-once journal delivery;
+consumers deduplicate work by `id`.
+
+Each complete UTF-8 NDJSON line has exactly `seq`, `id`, `detectedAt`, and
+`delta`; `seq` starts at 1 and is strictly contiguous, and `id === delta.id`.
+The journal stores the exact pre-enrichment delta after attention filters and
+requested durable decoration; transient `--enrich` bodies are never logged.
+`<logFile>.published.json` is the small versioned
+publication manifest. Version 1 is exactly
+`{"version":1,"lastSeq":N,"byteLength":B}` and binds readers to the first `B`
+bytes of `<logFile>`. Version 2 additionally records `firstSeq`; version 3 also
+records a same-directory `dataFile` generation. Readers fully validate every
+line in the selected prefix and ignore suffix bytes even when they end in a
+newline. A cursor or `afterSeq` above `lastSeq` is a permanent `log` error rather
+than an empty replay.
+
+`gh-delta log compact --keep <positive-count|duration>` is the only retention
+operation. It requires one producer state location and takes that state-file
+lock through a fenced, same-directory generation publication. Version-1 and
+version-2 manifests remain readable; compacted version-3 manifests add
+`firstSeq` and a same-directory `dataFile` generation, preserving original
+sequence numbers. The immutable generation is fsynced before the manifest
+atomically selects it, so lock-free readers resolve to either the old or new
+complete publication; a reader racing best-effort cleanup retries against the
+current manifest. A failure after the manifest rename leaves that selected
+generation intact and readable. Empty retention stores `firstSeq: lastSeq + 1`,
+so a later append uses `lastSeq + 1`. A cursor behind the retained prefix
+receives retained records and one
+`{label:"retention",reason:"cursor behind retention"}` warning; a cursor at
+`firstSeq - 1` is safe, and a cursor above `lastSeq` remains a `log` error.
+
+Publication fsyncs the log, then a same-directory manifest temp file, atomically
+renames that temp file, and fsyncs the manifest parent directory before append
+returns or a snapshot may publish. A directory open/fsync failure is an I/O
+failure: the renamed manifest remains for safe recovery and the snapshot stays
+unchanged. POSIX uses a non-mutating read handle; Windows uses a non-truncating
+writable handle on the final renamed manifest as the Node-core-supported
+`FlushFileBuffers` fallback.
+
+For a legacy/manual log without a manifest, the first append fully validates its
+complete prefix and atomically bootstraps the manifest before appending new bytes.
+For a brand-new log, it first publishes the empty `{version:1,lastSeq:0,
+byteLength:0}` boundary; that boundary is valid even if the log file does not yet
+exist, so a failed first-record fsync remains invisible to readers. A reader that
+started a legacy read and discovers a newly published manifest after acquiring
+the old bytes restarts from that published boundary.
+For ordinary manifest-backed appends, the committed prefix is trusted by the
+writer and only the bounded unpublished suffix plus newly serialized records are
+validated; reads always validate the whole published prefix. On recovery, a valid
+contiguous complete suffix is fsynced and promoted, an unterminated suffix is
+truncated, and a malformed complete suffix fails closed without mutation. A
+manifest ahead of a missing/truncated log is a permanent `log` error.
+
+Byte lengths are raw UTF-8 byte offsets, not decoded-string lengths. Invalid
+UTF-8 in any complete published record or complete suffix is a permanent `log`
+error before mutation. Recovery opens its non-truncating fsync handle writable
+(`r+`) for Windows compatibility.
+
+A cursor is atomically replaced JSON with exactly
+`{"cursorVersion":1,"logFile":"/absolute/log.ndjson","seq":41}`. `seq` is a
+non-negative safe integer (`0` means before the first record) and the absolute
+`logFile` binds one consumer to one journal. Give independent consumers distinct
+cursor files. `--advance` is an at-most-once convenience, not downstream
+acknowledgement. `read --advance` and `cursor set` acquire the existing lock
+protocol at `<cursor>.lock` before reading the cursor and hold it through scan
+and atomic replacement; a concurrent mutator is `kind: "busy"` / exit `1` and
+does not read, deliver, or write. The fixed local lease is 5 seconds plus the
+lock slack and stale threshold is 30 seconds; it is renewed immediately before
+replacement. Non-advancing reads remain lock-free, and distinct cursor files can
+proceed independently. Explicit lower-sequence replay remains allowed under the
+same lock. `setCursorAtomic` itself remains a low-level atomic replacement, not a
+compare-and-swap primitive.
+
+Read report fields, in order, are `schemaVersion`, `command`, `logFile`, `at`,
+`cursor`, `deltas`, and `summary`; cursor fields are `path`, `from`, `to`, and
+`advanced`. Cursor-set report fields are `schemaVersion`, `command`, `at`,
+`cursor`, and `summary`; its cursor fields are `path`, `logFile`, `from`, and `to`.
+`warnings` is reserved for future retention handling and is absent in I-3a.
 
 ## Snapshot Semantics
 
@@ -748,6 +971,10 @@ their derived filename or a registry entry.
 
 - The consumer supplies the snapshot **location**, never snapshot **data**.
   gh-delta reads it, diffs, and atomically rewrites it after a successful fetch.
+- Attention filters run only after complete detection. Their report/outpost
+  suppression never changes the snapshot bytes, which are identical to the
+  same observation without filters; a filtered delta is therefore not replayed
+  on a later tick.
 - The **first run** (no snapshot file) seeds a baseline: exit `0`,
   `baseline: true`, `deltas: []`. Persist the state directory between runs (or accept the ephemeral temp default's silent re-baseline).
 - Snapshot JSON is strict. A missing file seeds a baseline, but any present file
@@ -758,6 +985,10 @@ their derived filename or a registry entry.
 - A derived `--state-dir` path is scoped by repo, monitor id, **and** selected
   entities. A `--entities pr` run and a `--entities pr,issue` run use **different**
   files; keep `--entities` fixed per monitor so state is not split.
+- An eligible economical watch list is intentionally a separate PR-only history:
+  its derived path ends `__watch-pr.json` and its explicit-file path appends
+  `.watch.json`. Its metadata carries `scope: "watch-pr"`, so `list` reports it
+  instead of treating it as an unknown filename.
 - Filename segments are encoded with `encodeURIComponent` **plus `_` additionally
   encoded as `%5F`**, making derived names injective for CLI inputs. Library
   callers passing raw entity strings containing `__` to `snapshotPath` directly
@@ -960,6 +1191,11 @@ prior/next state (`from` is `null` for a `new` object; `to` is `null` for a
 
 The delivery sequence makes the at-most-once guarantee explicit: the snapshot is written before any POST, and a delivery failure leaves the exit code and report unchanged.
 
+When `--outpost-secret ENV_VARIABLE_NAME` is supplied, each POST adds
+`X-GhDelta-Signature: sha256=<lowercase hex HMAC-SHA256>`, computed over the
+exact UTF-8 `JSON.stringify(payload)` bytes sent in that request. The secret is
+never included in payloads, reports, warnings, logs, help, or process arguments.
+
 ```mermaid
 sequenceDiagram
     participant CLI as gh-delta
@@ -1076,3 +1312,33 @@ catalogs exported from `gh-delta/contract`: they list what the detector can
 actually emit today. A consumer validating against them is correct to reject
 anything absent, and adding a name to a catalog before the code emits it would
 break that guarantee.
+
+## Watch-directory selection (I-6)
+
+`--watch-dir <path>` and `--number <positive,...>` are mutually exclusive
+post-fetch selectors. Watch entries are canonical `{entity,number,until,addedAt}`
+JSON files and malformed entries are permanent configuration errors before a
+GitHub call or snapshot write. `watch add|rm|ls` are local-only commands;
+terminal watched items are removed only after their final delta and successful
+snapshot write, guarded against concurrent replacement.
+
+With an explicit `--watch-dir`, a validated list with zero to ten entries, only
+`pr` entities, and an `--entities` selection that includes `pr` automatically
+becomes an economical PR universe. It makes
+exactly one GraphQL request using `repository.pullRequest(number:)` aliases for
+the unique watched numbers (zero requests for an empty list), normalizes the
+same complete PR shape as broad polling, and never fetches issues. GraphQL
+errors, malformed aliases, and any nested connection overflow fail closed.
+`--number`, `--entities issue`, any issue entry, or more than ten entries retains
+broad fetching and the ordinary snapshot.
+
+Economical ticks use a separate identity: derived paths end in
+`__watch-pr.json`, while `--state-file x.json` becomes `x.json.watch.json`.
+Locks, logs (the selected state file plus `.deltalog.ndjson`), registry entries,
+reports, and writes use that selected path, so
+crossing the eligibility boundary never reads or overwrites the other history.
+Before diffing, the old economical snapshot is projected to current watch
+membership: removing an entry is silent and prunes it on the next write; a null
+alias for an entry that remains watched enters the regular missing lifecycle.
+Re-adding a previously removed PR may consequently be `new` (or baseline on a
+fresh economical snapshot).

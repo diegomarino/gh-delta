@@ -6,11 +6,23 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   snapshotPath,
+  economicalSnapshotPath,
   readSnapshot,
   writeSnapshotAtomic,
   horizonCutoff,
   defaultStateDir,
 } from '../lib/snapshot.mjs';
+
+test('economical snapshot paths are distinct for derived and explicit state', () => {
+  const ordinary = snapshotPath('owner/repo', 'main', 'pr-issue', '/tmp/state');
+  const economical = economicalSnapshotPath('owner/repo', 'main', 'pr-issue', '/tmp/state');
+  assert.match(economical, /__watch-pr\.json$/);
+  assert.notEqual(economical, ordinary);
+  assert.equal(
+    economicalSnapshotPath(null, null, null, null, { stateFile: '/tmp/custom.json' }),
+    '/tmp/custom.json.watch.json',
+  );
+});
 
 test('snapshotPath is collision-free for repo and monitor ids that slug the same', () => {
   const a = snapshotPath('a/b-c', 'm', 'pr', '/tmp/state');

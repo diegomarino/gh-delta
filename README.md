@@ -21,6 +21,14 @@ the action.
 `gh-delta` is not a dashboard, inbox, or PR bot. It is a deterministic GitHub
 delta detector for schedulers, scripts, and agent loops.
 
+For quota-sensitive schedules, opt into a pre-fetch GraphQL floor. A tick with
+too little remaining quota exits transiently without fetching or advancing its
+snapshot:
+
+```bash
+gh-delta --repo owner/repo --rate-limit-floor 50
+```
+
 See [Alternatives and adjacent tools](docs/alternatives.md) for how `gh-delta`
 compares to related projects.
 
@@ -159,6 +167,15 @@ that produced the fingerprints (no second GitHub fetch), and is a **sibling** of
 byte-identical whether or not the flag is set. Consumers may treat it as a hint
 and still re-derive authoritative facts themselves.
 
+### Opt-in body enrichment (`--enrich`)
+
+Use `--enrich review,comments,threads` only when the emitted delta needs the
+corresponding GitHub body text. It runs after the snapshot has been published,
+only for matching surviving delta classes, and adds a transient `enrichment`
+sibling to the report (and outpost payload when configured). Snapshot files and
+`gh-delta read` logs intentionally remain body-free; enrichment failures are
+warnings and do not change detection or exit codes.
+
 ```jsonc
 "summary": {
   // 'none' means ZERO checks ran — never conflated with 'green'. Fail-closed
@@ -208,12 +225,17 @@ whose prompt runs one detector pass and stops.
 See [docs/watch-loop-prompt.md](docs/watch-loop-prompt.md) for a prompt template
 for cron-owned watcher ticks.
 
-`--outpost-url` sends one best-effort HTTP notification per delta. `gh-delta`
+`--outpost-url` sends one best-effort HTTP notification per delta.
+`--outpost-secret <ENV_VARIABLE_NAME>` optionally signs each exact JSON body
+with HMAC-SHA256 using the named environment value (the secret itself never
+appears in the command). `gh-delta`
 does not provide retries, an outbox, acknowledgement, replay, or action routing;
 the receiving endpoint owns filtering, dedupe, and downstream action. Read the
 [Usage Guide](docs/usage.md#outpost-delivery) for a worked command and the
 [Outpost Payload](docs/contract.md#outpost-payload-schema-v1) contract for the
-exact envelope.
+exact envelope and signing rule. The zero-dependency
+[ntfy receiver example](examples/outpost-ntfy-receiver/README.md) verifies the
+signature before parsing or forwarding.
 
 Worked schedulers and receivers live in
 [examples/](https://github.com/diegomarino/gh-delta/tree/main/examples) in the
@@ -297,6 +319,17 @@ delta classes, snapshot behavior, or any outpost path, update:
 | [docs/entities-research/README.md](docs/entities-research/README.md)             | Researching future watch entities                                       |
 | [CONTRIBUTING.md](CONTRIBUTING.md)                                               | Contributing changes                                                    |
 | [CHANGELOG.md](CHANGELOG.md)                                                     | Checking what changed between versions                                  |
+
+## Local watch lists
+
+Use `--watch-dir <path>` to manage a monitor-private list with `gh-delta watch
+add pr:42 --until merged`, `watch rm`, and `watch ls`. A list of zero to ten
+PRs (while `--entities` includes `pr`) automatically makes one targeted GraphQL
+query (zero calls for an empty list) and uses an independent `__watch-pr.json` snapshot; `--state-file x.json`
+uses `x.json.watch.json`. Removing a watch silently removes it from that
+snapshot; a still-watched PR absent from GitHub follows the normal missing
+lifecycle. Lists with an issue, more than ten entries, or `--entities issue` retain the ordinary
+full-repository fetch and snapshot history.
 
 ## License
 

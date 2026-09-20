@@ -92,6 +92,35 @@ gh-delta \
   --detail
 ```
 
+### Durable replay log
+
+Add `--log` when more than one consumer needs durable replay after a detector
+tick. The snapshot still advances normally, while each emitted post-filter delta
+is appended, fsynced, and published through a sibling `.published.json` boundary
+before snapshot publication. Consumers only see the manifest-published NDJSON
+prefix and deduplicate by `delta.id`: a crash after append but before the snapshot
+can replay an id at a later sequence.
+
+```bash
+gh-delta --repo owner/repo --monitor-id prs-5m --state-dir ./state --entities pr --log
+gh-delta cursor set ./state/triage.cursor.json 0 --log-file ./state/log-owner%2Frepo__monitor-prs-5m__pr.ndjson
+gh-delta read --cursor ./state/triage.cursor.json --advance --format text
+```
+
+`read` does not contact GitHub or touch snapshots. Without `--advance`, it
+re-delivers matching deltas; with it, it moves the cursor to the published log
+tail scanned, including entries its filters rejected. `--advance` and `cursor
+set` serialize mutations of that one cursor and report busy if another mutator
+holds `<cursor>.lock`; non-advancing reads remain parallel. See [Delta Log and
+Cursors](contract.md#delta-log-and-cursors) for the cursor and crash contracts.
+
+Retention is explicit and local-only. Compact the log derived from the same
+producer identity; snapshots and consumer cursors are never changed:
+
+```bash
+gh-delta log compact --repo owner/repo --monitor-id prs-5m --state-dir ./state --entities pr --keep 7d
+```
+
 Branch on the process exit code before reading stdout. Exit `10` is the
 delta-found signal, not a process failure. See [Exit Codes](contract.md#exit-codes).
 
@@ -177,13 +206,18 @@ gh-delta \
   --state-dir ./state \
   --entities pr \
   --format text \
-  --outpost-url https://example.com/gh-delta
+  --outpost-url https://example.com/gh-delta \
+  --outpost-secret OUTPOST_SECRET
 ```
 
 Outposts are best-effort notifications. The detector snapshot advances before
 delivery is attempted, and downstream systems own filtering, dedupe, retries,
 queues, and actions. Keep scheduler logs or add an external queue if you need
 at-least-once action delivery.
+
+`--outpost-secret` takes the name of an environment variable, not the secret
+itself. When set, gh-delta signs each exact JSON request body with HMAC-SHA256
+in `X-GhDelta-Signature`; use the same `OUTPOST_SECRET` value at the receiver.
 
 The exact payload, `eventId`, `deliveryId`, and warning semantics are specified
 in [Outpost Payload](contract.md#outpost-payload-schema-v1).
@@ -242,11 +276,35 @@ reviews that changed (`added`/`removed`/`changed`), so an agent can act without
 re-querying GitHub. The exact JSON shape is specified in
 [Report Shape](contract.md#report-shape).
 
+To silence known bot-only comment activity without losing state advancement, use
+`--ignore-authors github-actions[bot],dependabot[bot]`. This filter is fail-open:
+if the latest five-comment window cannot prove every new comment belongs to an
+ignored author, the comment delta remains.
+
 `gh-delta --help-json` prints machine-readable help for agents and other tooling.
 It is the right source for generated CLIs, prompts, and monitors that need the
 current command surface.
 
 ## Troubleshooting Pointers
+
+## Watch a small set of items
+
+`gh-delta watch add pr:42 --until merged --watch-dir ./state/watch` creates an
+atomic local entry; `watch ls` and `watch rm pr:42` never contact GitHub. A tick
+with an explicit `--watch-dir` automatically uses economical mode when
+`--entities` includes `pr` and the validated list has zero to ten PR entries: it makes one aliased GraphQL request
+for unique PR numbers (or no GitHub request for an empty list), never fetches
+issues, and writes an independent watch snapshot. Its log is derived from that
+same selected snapshot path. Derived paths end in
+`__watch-pr.json`; an explicit `--state-file x.json` uses
+`x.json.watch.json`. Removing an entry projects it out before diffing (no
+missing delta); a null result for an entry still watched follows the normal
+missing lifecycle. Re-adding a removed PR can therefore be `new` (or baseline
+on a fresh watch snapshot). A list containing an issue or more than ten entries
+falls back to the ordinary full fetch and ordinary snapshot; so does
+`--entities issue`. Use `--number
+42,99` for one ephemeral tick instead. Terminal items emit their final delta,
+then are removed after snapshot publication.
 
 Common symptoms:
 

@@ -1,13 +1,15 @@
 // CLI contract tests: exit codes, snapshot safety, and user-facing detail output.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 
 // Tests must never leave breadcrumbs in the developer's real run registry.
 process.env.GH_DELTA_NO_REGISTRY = '1';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { run, runCommand } from '../lib/cli.mjs';
+import { outpostSignature } from '../lib/outpost.mjs';
 import { prFingerprint } from '../lib/fingerprint.mjs';
 import { DELTA_DETAIL_FIELDS_BY_CLASS } from '../lib/contract.mjs';
 
@@ -26,6 +28,132 @@ const basePr = {
   comments: [],
   headRefOid: 'sha1',
 };
+
+test('outpostSignature matches the published HMAC-SHA256 known vector', () => {
+  assert.equal(
+    outpostSignature('The quick brown fox jumps over the lazy dog', 'key'),
+    'sha256=f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8',
+  );
+});
+
+test('postOutpost signs the exact serialized body with the configured HMAC secret', async () => {
+  const { postOutpost } = await import('../lib/outpost.mjs');
+  const payload = { type: 'gh-delta.delta', title: 'snowman ☃' };
+  let sent;
+
+  await postOutpost('https://example.com/hook', payload, {
+    secret: 'Jefe',
+    fetchImpl: async (_url, options) => {
+      sent = options;
+      return { ok: true, status: 202 };
+    },
+  });
+
+  const expectedBody = '{"type":"gh-delta.delta","title":"snowman ☃"}';
+  assert.equal(sent.body, expectedBody, 'the signed bytes must be the bytes sent');
+  assert.equal(
+    sent.headers['X-GhDelta-Signature'],
+    `sha256=${createHmac('sha256', 'Jefe').update(expectedBody, 'utf8').digest('hex')}`,
+  );
+});
+
+test('--outpost-secret validates its environment-variable name before repo derivation', () => {
+  let derived = false;
+  const { code, report } = run(['--outpost-secret', 'not-valid'], {
+    now: () => '2026-07-01T12:00:00Z',
+    resolveRepo: () => {
+      derived = true;
+      throw new Error('must not derive');
+    },
+  });
+
+  assert.equal(code, 2);
+  assert.equal(report.kind, 'config');
+  assert.match(report.error, /--outpost-secret must name an environment variable/);
+  assert.equal(derived, false);
+});
+
+test('--outpost-secret reads the injected environment and does not leak its value', async () => {
+  const { runWithOutpost } = await import('../lib/cli.mjs');
+  const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
+    existing: {
+      pr: {
+        42: {
+          state: 'OPEN',
+          updatedAt: '2026-07-01T10:00:00Z',
+          isDraft: false,
+          ci: 'x',
+          review: 'REVIEW_REQUIRED',
+          reviews: 'x',
+          mergeable: 'UNKNOWN',
+          comments: 0,
+          head: 'sha1',
+        },
+      },
+      issue: {},
+    },
+  });
+  d.fetchPRsByNumber = () => [{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }];
+  let sent;
+  d.env = { OUTPOST_SECRET: 'not-in-report' };
+  d.outpostFetch = async (_url, options) => {
+    sent = options;
+    return { ok: true, status: 202 };
+  };
+
+  const result = await runWithOutpost(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/x.json',
+      '--outpost-url',
+      'https://example.com/hook',
+      '--outpost-secret',
+      'OUTPOST_SECRET',
+    ],
+    d,
+  );
+
+  assert.match(sent.headers['X-GhDelta-Signature'], /^sha256=[0-9a-f]{64}$/);
+  assert.doesNotMatch(JSON.stringify(result), /not-in-report/);
+  assert.doesNotMatch(sent.body, /not-in-report/);
+});
+
+test('--outpost-secret requires an outpost URL and a non-empty injected value', () => {
+  const missingUrl = run(['--repo', 'o/r', '--outpost-secret', 'OUTPOST_SECRET'], {
+    now: () => '2026-07-01T12:00:00Z',
+    env: { OUTPOST_SECRET: 'value' },
+  });
+  assert.equal(missingUrl.code, 2);
+  assert.match(missingUrl.report.error, /requires --outpost-url/);
+
+  const emptyValue = run(
+    ['--repo', 'o/r', '--outpost-url', 'https://example.com', '--outpost-secret', 'OUTPOST_SECRET'],
+    { now: () => '2026-07-01T12:00:00Z', env: { OUTPOST_SECRET: '' } },
+  );
+  assert.equal(emptyValue.code, 2);
+  assert.match(emptyValue.report.error, /OUTPOST_SECRET.*unset or empty/);
+});
+
+test('unsigned postOutpost keeps the legacy headers and body bytes', async () => {
+  const { postOutpost } = await import('../lib/outpost.mjs');
+  let sent;
+  await postOutpost(
+    'https://example.com/hook',
+    { a: 1 },
+    {
+      fetchImpl: async (_url, options) => {
+        sent = options;
+        return { ok: true, status: 202 };
+      },
+    },
+  );
+  assert.deepEqual(sent.headers, { 'Content-Type': 'application/json' });
+  assert.equal(sent.body, '{"a":1}');
+});
 
 // This suite is about detector behavior, not lock behavior (see
 // test/lock.test.mjs and test/cli-lock.test.mjs for that) -- and many tests
@@ -97,6 +225,338 @@ test('error reports carry schemaVersion and omit deltas', () => {
   assert.match(report.error, /--repo/);
   assert.equal(report.deltas, undefined);
   assert.equal(d.writes, 0);
+});
+
+test('watch add derives only a local repository and defaults monitor/state paths', () => {
+  let calls = 0;
+  const result = run(['watch', 'add', 'pr:42', '--until', 'merged'], {
+    now: () => '2026-07-01T12:00:00Z',
+    defaultMonitor: () => 'local',
+    resolveLocalRepo: () => {
+      calls++;
+      return { status: 'found', repo: 'o/r' };
+    },
+  });
+  assert.equal(calls, 1);
+  assert.equal(result.code, 0);
+  assert.match(result.report.watchDir, /watch-o%2Fr__local\.d$/);
+});
+
+test('eligible PR-only watch uses the economical fetch and separate explicit state file', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-economical-watch-'));
+  for (const number of [3, 9]) {
+    writeFileSync(
+      join(dir, `pr-${number}.json`),
+      JSON.stringify({ entity: 'pr', number, until: 'merged', addedAt: '2026-07-01T00:00:00Z' }),
+    );
+  }
+  const d = deps([[]]);
+  let targeted;
+  d.fetchPRsByNumber = (_repo, numbers, options) => {
+    targeted = { numbers, options };
+    return numbers.map((number) => ({ ...basePr, number }));
+  };
+  d.fetchPRs = () => {
+    throw new Error('broad fetch must not run for an eligible watch');
+  };
+  const result = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/economical.json',
+      '--watch-dir',
+      dir,
+    ],
+    d,
+  );
+  assert.equal(result.code, 0);
+  assert.deepEqual(targeted.numbers, [3, 9]);
+  assert.equal(targeted.options.onProgress instanceof Function, true);
+  assert.equal(result.report.stateFile, '/tmp/economical.json.watch.json');
+  assert.equal(d.readPath, '/tmp/economical.json.watch.json');
+  assert.equal(d.writePath, '/tmp/economical.json.watch.json');
+  assert.deepEqual(Object.keys(d.stored.pr), ['3', '9']);
+});
+
+test('empty eligible watch makes no GitHub calls and snapshots an empty PR universe', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-empty-economical-watch-'));
+  const d = deps([[]]);
+  d.fetchPRs = () => {
+    throw new Error('broad fetch must not run');
+  };
+  d.fetchIssues = () => {
+    throw new Error('issue fetch must not run');
+  };
+  d.fetchPRsByNumber = () => {
+    throw new Error('targeted fetch must not run for empty watch');
+  };
+  const result = run(
+    ['--repo', 'o/r', '--state-file', '/tmp/empty-economical.json', '--watch-dir', dir],
+    d,
+  );
+  assert.equal(result.code, 0);
+  assert.equal(result.report.stateFile, '/tmp/empty-economical.json.watch.json');
+  assert.deepEqual(d.stored.pr, {});
+  assert.deepEqual(d.stored.issue, {});
+});
+
+test('ineligible watch lists retain broad fetch and ordinary state history', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-broad-watch-'));
+  for (let number = 1; number <= 11; number++) {
+    writeFileSync(
+      join(dir, `pr-${number}.json`),
+      JSON.stringify({ entity: 'pr', number, until: 'merged', addedAt: '2026-07-01T00:00:00Z' }),
+    );
+  }
+  const d = deps([[basePr]]);
+  d.fetchPRsByNumber = () => {
+    throw new Error('targeted fetch must not run for 11 watches');
+  };
+  const result = run(
+    ['--repo', 'o/r', '--state-file', '/tmp/broad-watch.json', '--watch-dir', dir],
+    d,
+  );
+  assert.equal(result.code, 0);
+  assert.equal(result.report.stateFile, '/tmp/broad-watch.json');
+  assert.equal(d.readPath, '/tmp/broad-watch.json');
+});
+
+test('removing a watch projects old economical state without a missing delta', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-project-watch-'));
+  writeFileSync(
+    join(dir, 'pr-3.json'),
+    JSON.stringify({ entity: 'pr', number: 3, until: 'merged', addedAt: '2026-07-01T00:00:00Z' }),
+  );
+  const d = deps([], {
+    existing: {
+      pr: {
+        3: prFingerprint({ ...basePr, number: 3 }),
+        9: prFingerprint({ ...basePr, number: 9 }),
+      },
+      issue: {},
+    },
+  });
+  d.fetchPRsByNumber = () => [{ ...basePr, number: 3 }];
+  const result = run(
+    ['--repo', 'o/r', '--state-file', '/tmp/project-watch.json', '--watch-dir', dir],
+    d,
+  );
+  assert.equal(result.code, 0);
+  assert.deepEqual(result.report.deltas, []);
+  assert.deepEqual(Object.keys(d.stored.pr), ['3']);
+});
+
+test('a null alias for a still-watched PR enters the normal missing lifecycle', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-null-watch-'));
+  writeFileSync(
+    join(dir, 'pr-3.json'),
+    JSON.stringify({ entity: 'pr', number: 3, until: 'merged', addedAt: '2026-07-01T00:00:00Z' }),
+  );
+  const d = deps([], {
+    existing: { pr: { 3: prFingerprint({ ...basePr, number: 3 }) }, issue: {} },
+  });
+  d.fetchPRsByNumber = () => [];
+  const result = run(
+    ['--repo', 'o/r', '--state-file', '/tmp/null-watch.json', '--watch-dir', dir],
+    d,
+  );
+  assert.equal(result.code, 10);
+  assert.deepEqual(
+    result.report.deltas.map((delta) => delta.classes),
+    [['missing']],
+  );
+});
+
+test('economical watch logs derive from the selected state identity for explicit and derived paths', () => {
+  const watch = mkdtempSync(join(tmpdir(), 'gd-economical-log-watch-'));
+  writeFileSync(
+    join(watch, 'pr-42.json'),
+    JSON.stringify({ entity: 'pr', number: 42, until: 'merged', addedAt: '2026-07-01T00:00:00Z' }),
+  );
+  const runEconomical = (stateArgs) => {
+    const d = deps([], { existing: { pr: { 42: prFingerprint(basePr) }, issue: {} } });
+    d.fetchPRsByNumber = () => [{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }];
+    let appended;
+    d.appendDeltaLog = (file) => {
+      appended = file;
+    };
+    d.removeWatchUnchanged = () => false;
+    const result = run(['--repo', 'o/r', '--watch-dir', watch, '--log', ...stateArgs], d);
+    return { result, appended };
+  };
+  const explicit = runEconomical(['--state-file', '/tmp/economical-log.json']);
+  assert.equal(explicit.result.report.stateFile, '/tmp/economical-log.json.watch.json');
+  assert.equal(
+    explicit.result.report.logFile,
+    '/tmp/economical-log.json.watch.json.deltalog.ndjson',
+  );
+  assert.equal(explicit.appended, explicit.result.report.logFile);
+
+  const derived = runEconomical(['--state-dir', '/tmp/economical-log-state']);
+  assert.match(derived.result.report.stateFile, /__watch-pr\.json$/);
+  assert.equal(derived.result.report.logFile, `${derived.result.report.stateFile}.deltalog.ndjson`);
+  assert.equal(derived.appended, derived.result.report.logFile);
+});
+
+test('--entities issue makes a PR-only watch list retain normal full-fetch state', () => {
+  const watch = mkdtempSync(join(tmpdir(), 'gd-economical-issue-watch-'));
+  writeFileSync(
+    join(watch, 'pr-42.json'),
+    JSON.stringify({ entity: 'pr', number: 42, until: 'merged', addedAt: '2026-07-01T00:00:00Z' }),
+  );
+  const d = deps([[]]);
+  d.fetchPRsByNumber = () => {
+    throw new Error('targeted fetch must not run without PR entity selection');
+  };
+  const result = run(
+    [
+      '--repo',
+      'o/r',
+      '--entities',
+      'issue',
+      '--state-file',
+      '/tmp/issue-watch.json',
+      '--watch-dir',
+      watch,
+    ],
+    d,
+  );
+  assert.equal(result.code, 0);
+  assert.equal(result.report.stateFile, '/tmp/issue-watch.json');
+  assert.deepEqual(d.stored.pr, {});
+  assert.deepEqual(d.stored.issue, {});
+});
+
+test('economical run registers PR-only watch identity and scope', () => {
+  const watch = mkdtempSync(join(tmpdir(), 'gd-economical-reg-watch-'));
+  writeFileSync(
+    join(watch, 'pr-42.json'),
+    JSON.stringify({ entity: 'pr', number: 42, until: 'merged', addedAt: '2026-07-01T00:00:00Z' }),
+  );
+  const d = deps([[]]);
+  d.fetchPRsByNumber = () => [{ ...basePr }];
+  const registered = [];
+  d.registerMonitor = (entry) => registered.push(entry);
+  d.env = { GH_DELTA_REGISTRY_DIR: '/tmp/economical-registry' };
+  run(['--repo', 'o/r', '--state-file', '/tmp/economical-reg.json', '--watch-dir', watch], d);
+  assert.deepEqual(registered[0].entities, ['pr']);
+  assert.equal(registered[0].scope, 'watch-pr');
+  assert.equal(registered[0].stateFile, '/tmp/economical-reg.json.watch.json');
+});
+
+test('watch add local derivation decline is config without GitHub fetches', () => {
+  let fetched = false;
+  const result = run(['watch', 'add', 'pr:42', '--until', 'merged'], {
+    resolveLocalRepo: () => ({ status: 'declined' }),
+    fetchPRs: () => {
+      fetched = true;
+      return [];
+    },
+  });
+  assert.equal(result.code, 2);
+  assert.equal(fetched, false);
+});
+
+test('watch commands reject wrong positional cardinality before mutation', () => {
+  for (const argv of [
+    ['watch', 'add', '--until', 'merged', '--watch-dir', '/tmp/nope'],
+    ['watch', 'rm', 'pr:1', 'pr:2', '--watch-dir', '/tmp/nope'],
+    ['watch', 'ls', 'pr:1', '--watch-dir', '/tmp/nope'],
+  ]) {
+    const result = run(argv, {
+      resolveLocalRepo: () => {
+        throw new Error('unused');
+      },
+    });
+    assert.equal(result.code, 2);
+    assert.match(result.report.error, /requires exactly/);
+  }
+});
+
+test('watch cleanup failure warns after snapshot publication', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-cleanup-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  writeFileSync(
+    join(watch, 'pr-42.json'),
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
+    existing: { pr: { 42: prFingerprint(basePr) }, issue: {} },
+  });
+  d.fetchPRsByNumber = () => [{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }];
+  d.removeWatchUnchanged = () => {
+    throw new Error('unlink denied');
+  };
+  const { code, warnings } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', state, '--watch-dir', watch],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.equal(d.writes, 1);
+  assert.ok(
+    warnings.some(
+      (warning) => warning.label === 'watch cleanup' && /unlink denied/.test(warning.reason),
+    ),
+  );
+});
+
+test('ignored merged terminal delta keeps its watch entry while snapshot advances', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-ignore-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
+    existing: { pr: { 42: prFingerprint(basePr) }, issue: {} },
+  });
+  d.fetchPRsByNumber = () => [{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }];
+  let cleanup = false;
+  d.removeWatchUnchanged = () => {
+    cleanup = true;
+  };
+  const { code, report } = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      state,
+      '--watch-dir',
+      watch,
+      '--ignore-classes',
+      'merged',
+    ],
+    d,
+  );
+  assert.equal(code, 0);
+  assert.deepEqual(report.deltas, []);
+  assert.equal(report.filteredDeltas, 1);
+  assert.equal(d.writes, 1);
+  assert.equal(cleanup, false);
+  assert.ok(readFileSync(entry, 'utf8'));
+});
+
+test('watch text commands render watch-specific output, never detector deltas', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-text-'));
+  for (const argv of [
+    ['watch', 'add', 'pr:42', '--until', 'merged', '--watch-dir', dir, '--format', 'text'],
+    ['watch', 'ls', '--watch-dir', dir, '--format', 'text'],
+    ['watch', 'rm', 'pr:42', '--watch-dir', dir, '--format', 'text'],
+  ]) {
+    const result = await runCommand(argv);
+    assert.doesNotMatch(result.output, /delta\(s\)/);
+    assert.match(result.output, /watch/);
+  }
 });
 
 test('--state-dir derives a monitor-scoped snapshot path', () => {
@@ -230,6 +690,7 @@ test('--detail keeps line compatibility and adds structured class details', () =
       from: 0,
       to: 2,
       delta: 2,
+      opaque: true,
     },
   ]);
 });
@@ -741,6 +1202,417 @@ test('--summaries is purely additive: delta.id and every other field are byte-id
   assert.deepEqual(withFlagRest, without);
 });
 
+const FILTER_ARGS = ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'];
+
+test('--ignore-authors suppresses fully covered bot comments but advances the snapshot', () => {
+  const before = {
+    ...basePr,
+    totalCommentsCount: 1,
+    conversationComments: 1,
+    commentNodes: [{ id: 'C0', author: 'human' }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    totalCommentsCount: 2,
+    conversationComments: 2,
+    commentNodes: [
+      { id: 'C0', author: 'human' },
+      { id: 'C1', author: 'GitHub-Actions[bot]' },
+    ],
+  };
+  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const result = run([...FILTER_ARGS, '--ignore-authors', 'github-actions[bot]'], d);
+  assert.equal(result.code, 0);
+  assert.deepEqual(result.report.deltas, []);
+  assert.equal(result.report.filteredDeltas, 1);
+  assert.equal(d.stored.pr['42'].comments, 2);
+});
+
+test('--ignore-authors fails open and --detail is opaque for an unusable new comment row', () => {
+  const before = {
+    ...basePr,
+    totalCommentsCount: 1,
+    conversationComments: 1,
+    commentNodes: [{ id: 'C0', author: 'human' }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    totalCommentsCount: 2,
+    conversationComments: 2,
+    commentNodes: [
+      { id: 'C0', author: 'human' },
+      { id: null, author: null },
+    ],
+  };
+  const existing = { pr: { 42: prFingerprint(before) }, issue: {} };
+  const filtered = run(
+    [...FILTER_ARGS, '--ignore-authors', 'human'],
+    deps([[after]], { existing }),
+  );
+  assert.equal(filtered.code, 10);
+  assert.ok(filtered.report.deltas[0].classes.includes('new-comments'));
+  assert.equal(filtered.report.filteredDeltas, 0);
+  const detailed = run([...FILTER_ARGS, '--detail'], deps([[after]], { existing })).report
+    .deltas[0];
+  const comments = detailed.details.find((row) => row.class === 'new-comments');
+  assert.equal(comments.opaque, true);
+  assert.equal(comments.added, undefined);
+});
+
+test('--ignore-authors and --detail fail open when PR aggregate comments include non-conversation rows', () => {
+  const before = {
+    ...basePr,
+    totalCommentsCount: 4,
+    conversationComments: 1,
+    commentNodes: [{ id: 'C0', author: 'human' }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    totalCommentsCount: 5,
+    conversationComments: 1,
+    commentNodes: [{ id: 'C0', author: 'github-actions[bot]' }],
+  };
+  const existing = { pr: { 42: prFingerprint(before) }, issue: {} };
+  const filtered = run(
+    [...FILTER_ARGS, '--ignore-authors', 'github-actions[bot]'],
+    deps([[after]], { existing }),
+  );
+  assert.equal(filtered.code, 10);
+  assert.ok(filtered.report.deltas[0].classes.includes('new-comments'));
+  const detailed = run([...FILTER_ARGS, '--detail'], deps([[after]], { existing })).report
+    .deltas[0];
+  const comments = detailed.details.find((row) => row.class === 'new-comments');
+  assert.equal(comments.opaque, true);
+  assert.equal(comments.added, undefined);
+});
+
+test('class filters run before ignored authors and filteredDeltas excludes surviving class removal', () => {
+  const before = {
+    ...basePr,
+    totalCommentsCount: 1,
+    conversationComments: 1,
+    commentNodes: [{ id: 'C0', author: 'human' }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    headRefOid: 'sha2',
+    totalCommentsCount: 2,
+    conversationComments: 2,
+    commentNodes: [
+      { id: 'C0', author: 'human' },
+      { id: 'C1', author: 'github-actions[bot]' },
+    ],
+  };
+  const result = run(
+    [
+      ...FILTER_ARGS,
+      '--only-classes',
+      'new-comments',
+      '--ignore-classes',
+      'ci-changed',
+      '--ignore-authors',
+      'github-actions[bot]',
+    ],
+    deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } }),
+  );
+  assert.equal(result.code, 10);
+  assert.deepEqual(result.report.deltas[0].classes, ['head-changed', 'updated']);
+  assert.equal(result.report.filteredDeltas, 0);
+});
+
+test('--detail gates actionable check, review, and comment identity metadata', () => {
+  const before = {
+    ...basePr,
+    statusCheckRollup: [
+      {
+        __typename: 'CheckRun',
+        name: 'build',
+        status: 'COMPLETED',
+        conclusion: 'SUCCESS',
+        detailsUrl: 'https://ci/old',
+      },
+    ],
+    latestReviews: [
+      {
+        id: 'R1',
+        submittedAt: '2026-07-01T09:00:00Z',
+        author: { login: 'alice' },
+        state: 'APPROVED',
+        commit: { oid: 'a' },
+      },
+    ],
+    totalCommentsCount: 1,
+    conversationComments: 1,
+    commentNodes: [{ id: 'C0', author: 'human' }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    statusCheckRollup: [
+      {
+        __typename: 'CheckRun',
+        name: 'build',
+        status: 'COMPLETED',
+        conclusion: 'FAILURE',
+        detailsUrl: 'https://ci/build',
+      },
+    ],
+    latestReviews: [
+      {
+        id: 'R2',
+        submittedAt: '2026-07-01T10:00:00Z',
+        author: { login: 'alice' },
+        state: 'CHANGES_REQUESTED',
+        commit: { oid: 'b' },
+      },
+    ],
+    totalCommentsCount: 2,
+    conversationComments: 2,
+    commentNodes: [
+      { id: 'C0', author: 'human' },
+      { id: 'C1', author: 'bot' },
+    ],
+  };
+  const existing = { pr: { 42: prFingerprint(before) }, issue: {} };
+  const plain = run(FILTER_ARGS, deps([[after]], { existing })).report.deltas[0];
+  assert.equal(JSON.stringify(plain).includes('https://ci/build'), false);
+  assert.equal(JSON.stringify(plain).includes('R2'), false);
+  assert.equal(JSON.stringify(plain).includes('C1'), false);
+  const detailed = run([...FILTER_ARGS, '--detail'], deps([[after]], { existing })).report
+    .deltas[0];
+  assert.equal(
+    detailed.details.find((row) => row.field === 'ci').changed[0].to.detailsUrl,
+    'https://ci/build',
+  );
+  assert.equal(detailed.details.find((row) => row.field === 'reviews').changed[0].to.id, 'R2');
+  assert.deepEqual(
+    detailed.details.find((row) => row.class === 'new-comments'),
+    {
+      class: 'new-comments',
+      field: 'comments',
+      from: 1,
+      to: 2,
+      delta: 1,
+      added: [{ id: 'C1', author: 'bot' }],
+    },
+  );
+});
+
+test('--ignore-authors rejects empty members before repository derivation', () => {
+  const d = deps([[]]);
+  d.resolveRepo = () => {
+    throw new Error('must not derive');
+  };
+  const { code, report } = run(['--ignore-authors', 'bot,', '--state-file', '/tmp/x.json'], d);
+  assert.equal(code, 2);
+  assert.match(report.error, /--ignore-authors/);
+});
+
+test('--only-classes with no matching delta suppresses attention without changing the snapshot', () => {
+  // Removing the only-class branch would incorrectly wake consumers for a
+  // ci-changed delta that no requested class admits.
+  const before = { ...basePr, statusCheckRollup: [] };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    statusCheckRollup: [{ context: 'ci/test', state: 'SUCCESS' }],
+  };
+  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const { code, report } = run([...FILTER_ARGS, '--only-classes', 'review-changed'], d);
+  assert.equal(code, 0);
+  assert.deepEqual(report.deltas, []);
+  assert.equal(report.filteredDeltas, 1);
+  assert.equal(d.stored.pr['42'].updatedAt, after.updatedAt);
+});
+
+test('--only-classes keeps matching deltas and still exits 10', () => {
+  // Dropping the positive branch would hide a requested ci transition among
+  // unrelated update churn.
+  const ciBefore = { ...basePr, statusCheckRollup: [] };
+  const ciAfter = {
+    ...ciBefore,
+    updatedAt: '2026-07-01T11:00:00Z',
+    statusCheckRollup: [{ context: 'ci/test', state: 'SUCCESS' }],
+  };
+  const updateBefore = { ...basePr, number: 43, title: 'other PR' };
+  const updateAfter = { ...updateBefore, updatedAt: '2026-07-01T11:00:00Z' };
+  const d = deps([[ciAfter, updateAfter]], {
+    existing: {
+      pr: { 42: prFingerprint(ciBefore), 43: prFingerprint(updateBefore) },
+      issue: {},
+    },
+  });
+  const { code, report } = run([...FILTER_ARGS, '--only-classes', 'ci-changed'], d);
+  assert.equal(code, 10);
+  assert.equal(report.deltas.length, 1);
+  assert.ok(report.deltas[0].classes.includes('ci-changed'));
+  assert.equal(report.filteredDeltas, 1);
+});
+
+test('--ignore-classes removes a class but retains a multi-class delta, and drops empty deltas', () => {
+  // A filter that deletes the whole multi-class delta loses an actionable head
+  // change; one that retains an empty class list emits an invalid delta.
+  const headBefore = { ...basePr };
+  const headAfter = {
+    ...headBefore,
+    updatedAt: '2026-07-01T11:00:00Z',
+    headRefOid: 'sha2',
+  };
+  const retained = run(
+    [...FILTER_ARGS, '--ignore-classes', 'updated'],
+    deps([[headAfter]], { existing: { pr: { 42: prFingerprint(headBefore) }, issue: {} } }),
+  );
+  assert.equal(retained.code, 10);
+  assert.deepEqual(retained.report.deltas[0].classes, ['head-changed']);
+  assert.equal(retained.report.filteredDeltas, 0);
+
+  const updateBefore = { ...basePr };
+  const updateAfter = { ...updateBefore, updatedAt: '2026-07-01T11:00:00Z' };
+  const dropped = run(
+    [...FILTER_ARGS, '--ignore-classes', 'updated'],
+    deps([[updateAfter]], { existing: { pr: { 42: prFingerprint(updateBefore) }, issue: {} } }),
+  );
+  assert.equal(dropped.code, 0);
+  assert.deepEqual(dropped.report.deltas, []);
+  assert.equal(dropped.report.filteredDeltas, 1);
+});
+
+test('unknown attention-filter classes are config errors that name the invalid value', () => {
+  // Accepting an unknown token silently turns a permanently misconfigured
+  // watcher into an apparently healthy no-op.
+  for (const flag of ['--only-classes', '--ignore-classes']) {
+    const { code, report } = run([...FILTER_ARGS, flag, 'not-a-delta-class'], deps([[]]));
+    assert.equal(code, 2);
+    assert.equal(report.kind, 'config');
+    assert.match(report.error, /not-a-delta-class/);
+  }
+});
+
+test('--settled drops pending and unknown PRs, keeps ciRollup none, and implies summaries', () => {
+  // Treating no CI checks as pending would suppress a settled PR forever; not
+  // deriving summaries would let pending/unknown work through unnoticed.
+  const pendingBefore = { ...basePr, number: 42, mergeable: 'MERGEABLE' };
+  const pendingAfter = {
+    ...pendingBefore,
+    updatedAt: '2026-07-01T11:00:00Z',
+    statusCheckRollup: [{ context: 'ci/test', state: 'PENDING' }],
+  };
+  const unknownBefore = { ...basePr, number: 43, mergeable: 'MERGEABLE' };
+  const unknownAfter = {
+    ...unknownBefore,
+    updatedAt: '2026-07-01T11:00:00Z',
+    mergeable: 'UNKNOWN',
+  };
+  const noneBefore = { ...basePr, number: 44, mergeable: 'MERGEABLE' };
+  const noneAfter = { ...noneBefore, updatedAt: '2026-07-01T11:00:00Z' };
+  const d = deps([[pendingAfter, unknownAfter, noneAfter]], {
+    existing: {
+      pr: {
+        42: prFingerprint(pendingBefore),
+        43: prFingerprint(unknownBefore),
+        44: prFingerprint(noneBefore),
+      },
+      issue: {},
+    },
+  });
+  const { code, report } = run([...FILTER_ARGS, '--settled'], d);
+  assert.equal(code, 10);
+  assert.deepEqual(
+    report.deltas.map((delta) => delta.number),
+    [44],
+  );
+  assert.equal(report.deltas[0].summary.ciRollup, 'none');
+  assert.equal(report.filteredDeltas, 2);
+});
+
+test('combined attention filters apply only before ignore, making ignore the final class veto', () => {
+  // Reversing the order would drop this delta after ci-changed is vetoed,
+  // instead of retaining its independent head/update classes.
+  const before = { ...basePr, statusCheckRollup: [] };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    headRefOid: 'sha2',
+    statusCheckRollup: [{ context: 'ci/test', state: 'SUCCESS' }],
+  };
+  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const { code, report } = run(
+    [...FILTER_ARGS, '--only-classes', 'ci-changed', '--ignore-classes', 'ci-changed'],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.deepEqual(report.deltas[0].classes, ['head-changed', 'updated']);
+  assert.equal(report.filteredDeltas, 0);
+});
+
+test('attention filters leave the persisted snapshot byte-identical and outpost sends survivors only', async () => {
+  // Moving filtering before persistence would replay suppressed changes later;
+  // sending the unfiltered report would still wake the downstream consumer.
+  const ciBefore = { ...basePr, statusCheckRollup: [] };
+  const ciAfter = {
+    ...ciBefore,
+    updatedAt: '2026-07-01T11:00:00Z',
+    statusCheckRollup: [{ context: 'ci/test', state: 'SUCCESS' }],
+  };
+  const updateBefore = { ...basePr, number: 43, title: 'other PR' };
+  const updateAfter = { ...updateBefore, updatedAt: '2026-07-01T11:00:00Z' };
+  const stateDir = mkdtempSync(join(tmpdir(), 'gh-delta-filters-'));
+  const unfilteredState = join(stateDir, 'unfiltered.json');
+  const filteredState = join(stateDir, 'filtered.json');
+  const argsFor = (stateFile) => [
+    '--repo',
+    'o/r',
+    '--monitor-id',
+    'main',
+    '--state-file',
+    stateFile,
+  ];
+  const dependencySet = (prs) => ({
+    fetchPRs: () => prs,
+    fetchIssues: () => [],
+    now: () => '2026-07-01T12:00:00Z',
+  });
+  try {
+    for (const stateFile of [unfilteredState, filteredState]) {
+      const seeded = run(argsFor(stateFile), dependencySet([ciBefore, updateBefore]));
+      assert.equal(seeded.code, 0);
+    }
+    const unfiltered = run(argsFor(unfilteredState), dependencySet([ciAfter, updateAfter]));
+    assert.equal(unfiltered.code, 10);
+    const filteredDeps = dependencySet([ciAfter, updateAfter]);
+    const posts = [];
+    filteredDeps.outpostFetch = async (_url, options) => {
+      posts.push(JSON.parse(options.body));
+      return { ok: true, status: 202 };
+    };
+    const { runWithOutpost } = await import('../lib/cli.mjs');
+    const filtered = await runWithOutpost(
+      [
+        ...argsFor(filteredState),
+        '--only-classes',
+        'updated',
+        '--outpost-url',
+        'https://example.com/gh-delta',
+      ],
+      filteredDeps,
+    );
+    assert.equal(filtered.code, 10);
+    assert.deepEqual(
+      filtered.report.deltas.map((delta) => delta.number),
+      [43],
+    );
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].number, 43);
+    assert.equal(readFileSync(filteredState, 'utf8'), readFileSync(unfilteredState, 'utf8'));
+  } finally {
+    rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
 test('--help-json documents the summary schema well enough to build a validator', () => {
   const d = {
     fetchPRs: () => {
@@ -823,6 +1695,8 @@ test('--help-json returns machine-readable help without fetching GitHub', () => 
   assert.ok(help.options.some((option) => option.name === '--state-dir'));
   assert.ok(help.options.some((option) => option.name === '--format'));
   assert.ok(help.options.some((option) => option.name === '--summary-line'));
+  assert.ok(help.options.some((option) => option.name === '--rate-limit-floor'));
+  assert.match(help.output.description, /resetAt.*rate-limit/i);
   assert.ok(help.options.some((option) => option.name === '--help-json'));
   assert.ok(help.options.some((option) => option.name === '--version'));
   assert.equal(help.version, packageJson.version);
@@ -879,6 +1753,24 @@ test('missing --monitor-id defaults to a stable per-machine host id', () => {
   const again = deps([[]]);
   const { report: report2 } = run(['--repo', 'o/r'], again);
   assert.equal(report2.monitorId, report.monitorId); // stable across invocations
+});
+
+test('monitor id precedence is flag then environment then the generated default', () => {
+  for (const [argv, env, expected] of [
+    [['--monitor-id', 'flag'], { GH_DELTA_MONITOR_ID: 'env' }, 'flag'],
+    [[], { GH_DELTA_MONITOR_ID: 'env' }, 'env'],
+    [[], {}, 'generated'],
+  ]) {
+    const d = deps([[]]);
+    d.env = env;
+    d.defaultMonitor = () => 'generated';
+    const result = run(['--repo', 'o/r', '--state-file', '/tmp/x.json', ...argv], d);
+    assert.equal(result.code, 0);
+    assert.equal(result.report.monitorId, expected);
+  }
+  const invalid = deps([[]]);
+  invalid.env = { GH_DELTA_MONITOR_ID: '../bad' };
+  assert.equal(run(['--repo', 'o/r', '--state-file', '/tmp/x.json'], invalid).code, 2);
 });
 
 test('--state-file and --state-dir are mutually exclusive', () => {
@@ -1445,6 +2337,133 @@ test('outpost payload has exactly the documented key set (shape/byte-stability g
   );
 });
 
+test('outpost mirrors optional transient enrichment without adding it to legacy payloads', async () => {
+  const { buildOutpostPayload } = await import('../lib/outpost.mjs');
+  const base = {
+    report: { repo: 'o/r', monitorId: 'main', at: 'now' },
+    delta: { entity: 'issue', number: 1, title: 'x', classes: ['new-comments'] },
+  };
+  assert.equal(Object.hasOwn(buildOutpostPayload(base), 'enrichment'), false);
+  const enrichment = {
+    comments: [{ id: 'C1', author: 'a', createdAt: 'now', body: 'hi', mentions: [] }],
+  };
+  assert.deepEqual(
+    buildOutpostPayload({ ...base, delta: { ...base.delta, enrichment } }).enrichment,
+    enrichment,
+  );
+});
+
+test('--enrich decorates surviving deltas only after snapshot publication and leaves the durable log canonical', () => {
+  const before = {
+    ...basePr,
+    latestReviews: [],
+    totalCommentsCount: 1,
+    conversationComments: 1,
+    commentNodes: [{ id: 'C1', author: 'old' }],
+    reviewThreadNodes: [{ id: 'T1', isResolved: true }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    reviewDecision: 'CHANGES_REQUESTED',
+    latestReviews: [
+      {
+        id: 'R1',
+        state: 'CHANGES_REQUESTED',
+        submittedAt: 'now',
+        author: { login: 'a' },
+        commit: { oid: 'b' },
+      },
+    ],
+    totalCommentsCount: 2,
+    conversationComments: 2,
+    commentNodes: [
+      { id: 'C1', author: 'old' },
+      { id: 'C2', author: 'new' },
+    ],
+    reviewThreadNodes: [{ id: 'T1', isResolved: false }],
+  };
+  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const order = [];
+  d.writeSnapshotAtomic = (_path, value) => {
+    order.push('snapshot');
+    d.snapshotBytes = JSON.stringify(value);
+  };
+  d.appendDeltaLog = (_path, value) => {
+    order.push('log');
+    d.logged = value;
+  };
+  d.fetchEnrichment = (kind, ids) => {
+    order.push(kind);
+    assert.equal(order[0], 'log');
+    assert.equal(order[1], 'snapshot');
+    if (kind === 'review')
+      return [
+        {
+          id: ids[0],
+          author: 'a',
+          state: 'CHANGES_REQUESTED',
+          submittedAt: 'now',
+          commit: 'b',
+          body: 'fix',
+        },
+      ];
+    if (kind === 'comments') return [{ id: ids[0], author: 'b', createdAt: 'now', body: '@alice' }];
+    return [
+      {
+        id: ids[0],
+        firstComment: {
+          id: 'TC',
+          author: 'c',
+          createdAt: 'now',
+          path: 'x',
+          line: 2,
+          originalLine: 1,
+          body: 'body',
+        },
+      },
+    ];
+  };
+  const result = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/x.json',
+      '--log',
+      '--enrich',
+      'review,comments,threads',
+    ],
+    d,
+  );
+  assert.equal(result.code, 10);
+  assert.deepEqual(order, ['log', 'snapshot', 'review', 'comments', 'threads']);
+  assert.deepEqual(Object.keys(result.report.deltas[0].enrichment).sort(), [
+    'comments',
+    'review',
+    'threads',
+  ]);
+  assert.equal(JSON.stringify(d.logged).includes('enrichment'), false);
+  assert.equal(d.snapshotBytes.includes('enrichment'), false);
+  assert.match(result.report.deltas[0].enrichment.comments[0].mentions[0], /alice/);
+});
+
+test('--enrich invalid selection is rejected before repository derivation', () => {
+  let derived = false;
+  const result = run(['--enrich', 'review,', '--state-file', '/tmp/x.json'], {
+    now: () => '2026-07-01T12:00:00Z',
+    resolveRepo: () => {
+      derived = true;
+      throw new Error('must not derive');
+    },
+  });
+  assert.equal(result.code, 2);
+  assert.equal(derived, false);
+  assert.match(result.report.error, /--enrich/);
+});
+
 test('--help wins over unknown flags and invalid outpost URLs', () => {
   const d = { now: () => '2026-07-01T12:00:00Z' };
   const helpWithBogus = run(['--help', '--bogus'], d);
@@ -1672,6 +2691,128 @@ test('--gh-timeout-ms abc is a config error (exit 2, kind config)', () => {
   assert.equal(code, 2);
   assert.equal(report.kind, 'config');
   assert.match(report.error, /--gh-timeout-ms/);
+});
+
+test('--rate-limit-floor validates before repository derivation or state access', () => {
+  for (const floor of ['-1', '1.5', 'nope', '', String(Number.MAX_SAFE_INTEGER + 1)]) {
+    let derived = false;
+    let read = false;
+    const result = run(['--rate-limit-floor', floor], {
+      now: () => '2026-07-01T12:00:00Z',
+      resolveRepo: () => {
+        derived = true;
+        return { repo: 'o/r', source: 'gh' };
+      },
+      readSnapshot: () => {
+        read = true;
+        return null;
+      },
+    });
+    assert.equal(result.code, 2, floor);
+    assert.equal(result.report.kind, 'config', floor);
+    assert.match(result.report.error, /--rate-limit-floor/, floor);
+    assert.equal(derived, false, floor);
+    assert.equal(read, false, floor);
+  }
+});
+
+test('--rate-limit-floor gates fetch after snapshot read and reports a low quota without writes', () => {
+  const order = [];
+  let writes = 0;
+  let registered;
+  const result = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/x.json',
+      '--rate-limit-floor',
+      '4',
+    ],
+    {
+      ...NOOP_LOCK_DEPS,
+      readSnapshot: () => {
+        order.push('read');
+        return null;
+      },
+      fetchRateLimit: (_options) => {
+        order.push('rate');
+        return { remaining: 3, resetAt: '2026-07-01T13:00:00.000Z' };
+      },
+      fetchPRs: () => {
+        order.push('fetch');
+        return [];
+      },
+      fetchIssues: () => {
+        order.push('fetch');
+        return [];
+      },
+      writeSnapshotAtomic: () => {
+        writes++;
+      },
+      registerMonitor: (entry) => {
+        registered = entry;
+      },
+      now: () => '2026-07-01T12:00:00Z',
+      env: {},
+    },
+  );
+  assert.equal(result.code, 1);
+  assert.equal(result.report.kind, 'rate-limit');
+  assert.equal(result.report.resetAt, '2026-07-01T13:00:00.000Z');
+  assert.match(result.report.error, /remaining 3.*floor 4/);
+  assert.deepEqual(order, ['read', 'rate']);
+  assert.equal(writes, 0);
+  assert.equal(registered.status, 'failure');
+  assert.equal(registered.error.kind, 'rate-limit');
+});
+
+test('--rate-limit-floor allows equality and forwards timeout before the observation fetch', () => {
+  const order = [];
+  const result = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/x.json',
+      '--rate-limit-floor',
+      '4',
+      '--gh-timeout-ms',
+      '321',
+    ],
+    {
+      ...NOOP_LOCK_DEPS,
+      readSnapshot: () => null,
+      fetchRateLimit: (options) => {
+        order.push(['rate', options.timeoutMs]);
+        return { remaining: 4, resetAt: '2026-07-01T13:00:00.000Z' };
+      },
+      fetchPRs: () => {
+        order.push(['fetch']);
+        return [];
+      },
+      fetchIssues: () => [],
+      writeSnapshotAtomic: () => {},
+      now: () => '2026-07-01T12:00:00Z',
+    },
+  );
+  assert.equal(result.code, 0);
+  assert.deepEqual(order, [['rate', 321], ['fetch']]);
+});
+
+test('omitting --rate-limit-floor makes no rate-limit call', () => {
+  let calls = 0;
+  const d = deps([[]]);
+  d.fetchRateLimit = () => {
+    calls++;
+    return { remaining: 0, resetAt: '2026-07-01T13:00:00.000Z' };
+  };
+  run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
+  assert.equal(calls, 0);
 });
 
 test('--gh-timeout-ms threads into fetchers and defaults to 60000', () => {
@@ -2064,6 +3205,99 @@ test('a registry write failure never changes the run result', () => {
   assert.equal(code, 0);
   assert.equal(report.baseline, true);
   assert.equal(d.writes, 1);
+});
+
+test('a failed detector attempt updates the registry without changing its result', () => {
+  const d = deps([[]]);
+  d.env = {};
+  d.fetchPRs = () => {
+    throw new Error('offline');
+  };
+  const registered = [];
+  d.registerMonitor = (entry) => registered.push(entry);
+  const result = run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
+  assert.equal(result.code, 1);
+  assert.equal(result.report.kind, 'github');
+  assert.deepEqual(
+    registered.map(({ status, error }) => [status, error?.kind]),
+    [['failure', 'github']],
+  );
+});
+
+test('a busy detector attempt is recorded as a registry failure', () => {
+  const d = deps([[]]);
+  d.env = {};
+  d.acquireLock = () => ({ ok: false, reason: 'held' });
+  const registered = [];
+  d.registerMonitor = (entry) => registered.push(entry);
+  const result = run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
+  assert.equal(result.code, 1);
+  assert.equal(result.report.kind, 'busy');
+  assert.deepEqual(
+    registered.map(({ status, error }) => [status, error?.kind]),
+    [['failure', 'busy']],
+  );
+});
+
+test('generated monitor identity collision warning is included on success and failure', () => {
+  for (const fail of [false, true]) {
+    const d = deps([[]]);
+    d.env = {};
+    d.defaultMonitor = () => 'host-current';
+    d.machineId = 'machine-a';
+    d.readRegistry = () => ({
+      entries: [{ repo: 'o/r', machineId: 'machine-a', monitorId: 'host-other' }],
+      skippedFiles: 0,
+    });
+    if (fail)
+      d.fetchPRs = () => {
+        throw new Error('offline');
+      };
+    const result = run(['--repo', 'o/r', '--state-file', '/tmp/x.json', '--format', 'text'], d);
+    assert.equal(result.code, fail ? 1 : 0);
+    assert.ok(result.warnings.some((warning) => warning.label === 'monitor-id'));
+  }
+});
+
+test('monitor identity collision warning excludes inapplicable and unavailable registry cases', () => {
+  const cases = [
+    { argv: ['--format', 'json'], env: {} },
+    { argv: ['--format', 'text', '--monitor-id', 'host-current'], env: {} },
+    { argv: ['--format', 'text'], env: { GH_DELTA_MONITOR_ID: 'host-current' } },
+    {
+      argv: ['--format', 'text'],
+      env: {},
+      entry: { repo: 'o/r', machineId: 'machine-a', monitorId: 'host-current' },
+    },
+    {
+      argv: ['--format', 'text'],
+      env: {},
+      entry: { repo: 'x/y', machineId: 'machine-a', monitorId: 'host-other' },
+    },
+    {
+      argv: ['--format', 'text'],
+      env: {},
+      entry: { repo: 'o/r', machineId: 'machine-b', monitorId: 'host-other' },
+    },
+    { argv: ['--format', 'text'], env: {}, registryError: true },
+  ];
+  for (const { argv, env, entry, registryError } of cases) {
+    const d = deps([[]]);
+    d.env = env;
+    d.defaultMonitor = () => 'host-current';
+    d.machineId = 'machine-a';
+    d.readRegistry = () => {
+      if (registryError) throw new Error('unreadable registry');
+      return {
+        entries: [entry ?? { repo: 'o/r', machineId: 'machine-a', monitorId: 'host-other' }],
+      };
+    };
+    const result = run(['--repo', 'o/r', '--state-file', '/tmp/x.json', ...argv], d);
+    assert.equal(
+      result.warnings.some((warning) => warning.label === 'monitor-id'),
+      false,
+    );
+  }
 });
 
 test('snapshots are self-describing: meta carries identity next to horizon', () => {

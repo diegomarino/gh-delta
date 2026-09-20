@@ -24,12 +24,16 @@ const keySet = (obj) => new Set(Object.keys(obj));
 test('every example report covers exactly the frozen REPORT_FIELDS, minus the omit-when-empty ones', () => {
   // lib/cli.mjs's run() never puts `warnings` on the base report object; it is
   // only spliced in by runCommand() when outpost delivery returned at least
-  // one warning (see the `!result.warnings?.length` guard there). A live run
-  // on the common path these fixtures depict therefore omits `warnings`
-  // entirely, so the frozen field list minus that key is what a real report
-  // covers here — asserting the raw REPORT_FIELDS set would require a key no
-  // live run actually emits (audit finding F10.1).
-  const OMIT_WHEN_EMPTY = new Set(['warnings']);
+  // one warning (see the `!result.warnings?.length` guard there).
+  // `filteredDeltas` is similarly absent without an attention-filter flag.
+  // A live run on the common no-warning/no-filter path these fixtures depict
+  // `logFile` is likewise absent unless the opt-in --log flag is supplied.
+  // A live run on the common no-warning/no-filter/no-log/non-economical path these
+  // fixtures depict therefore omits those keys (including scope, emitted only by
+  // economical watch reports), so the frozen field list minus those keys is
+  // what a real report covers here — asserting the raw REPORT_FIELDS set would
+  // require a key no live run actually emits (audit finding F10.1).
+  const OMIT_WHEN_EMPTY = new Set(['warnings', 'filteredDeltas', 'logFile', 'scope']);
   const expected = [...REPORT_FIELDS].filter((field) => !OMIT_WHEN_EMPTY.has(field));
   for (const [name, report] of Object.entries({ baselineReport, deltaReport, detailReport })) {
     assert.deepEqual(
@@ -70,6 +74,17 @@ test('fully enriched deltas jointly cover exactly the frozen DELTA_FIELDS', () =
     classes: ['new-comments'],
     from: { state: 'OPEN', comments: 1 },
     to: { state: 'OPEN', comments: 3 },
+    enrichment: {
+      comments: [
+        {
+          id: 'C_1',
+          author: 'octo',
+          createdAt: '2026-07-01T12:00:00Z',
+          body: 'Please check @owner/team',
+          mentions: ['owner/team'],
+        },
+      ],
+    },
   };
   // `id` is attached at report assembly (with repo in scope), not by enrichDelta;
   // attach it to both representative deltas so the union also covers `id`.

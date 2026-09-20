@@ -8,12 +8,124 @@
 // check (see the bottom of the file).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
+import { createServer, request as httpRequest } from 'node:http';
 import {
   itemKey,
   parseSeenLine,
   loadSeenState,
   shouldForward,
+  isAuthorized,
+  createReceiverHandler,
 } from '../examples/outpost-ntfy-receiver/receiver.mjs';
+
+test('receiver authorization accepts only the exact HMAC of the raw body when a secret is configured', () => {
+  const body = '{"title":"snowman ☃"}';
+  const signature = `sha256=${createHmac('sha256', 'Jefe').update(body, 'utf8').digest('hex')}`;
+
+  assert.equal(isAuthorized({ headers: { 'x-ghdelta-signature': signature } }, body, 'Jefe'), true);
+  assert.equal(isAuthorized({ headers: {} }, body, 'Jefe'), false);
+  assert.equal(
+    isAuthorized({ headers: { 'x-ghdelta-signature': 'sha256=not-hex' } }, body, 'Jefe'),
+    false,
+  );
+  assert.equal(
+    isAuthorized({ headers: { 'x-ghdelta-signature': signature } }, '{"title":"changed"}', 'Jefe'),
+    false,
+  );
+});
+
+test('receiver rejects unsigned requests before parsing or recording and accepts a correctly signed request', async (t) => {
+  const seen = new Map();
+  let records = 0;
+  let forwards = 0;
+  const server = createServer(
+    createReceiverHandler({
+      outpostSecret: 'Jefe',
+      classes: [],
+      seen,
+      recordSeen: (key, id) => {
+        records++;
+        seen.set(key, id);
+      },
+      forward: async () => {
+        forwards++;
+      },
+    }),
+  );
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const { port } = server.address();
+  const url = `http://127.0.0.1:${port}/`;
+  const body = JSON.stringify({
+    type: 'gh-delta.delta',
+    schemaVersion: 1,
+    id: 'sha',
+    repo: 'o/r',
+    entity: 'pr',
+    number: 1,
+    classes: ['merged'],
+    detectedAt: '2026-07-01T12:00:00.000Z',
+    line: 'merged',
+    links: {},
+  });
+  const request = (headers = {}, requestBody = body) =>
+    globalThis.fetch(url, { method: 'POST', headers, body: requestBody });
+
+  assert.equal((await request()).status, 401);
+  assert.equal((await request({ 'X-GhDelta-Signature': 'sha256=not-hex' })).status, 401);
+  assert.equal((await request({ 'X-GhDelta-Signature': 'sha256=' + '0'.repeat(64) })).status, 401);
+  assert.equal(records, 0);
+  assert.equal(forwards, 0);
+  assert.equal(seen.size, 0);
+
+  const signature = `sha256=${createHmac('sha256', 'Jefe').update(body).digest('hex')}`;
+  assert.equal((await request({ 'X-GhDelta-Signature': signature })).status, 202);
+  assert.equal(records, 1);
+  assert.equal(forwards, 1);
+  assert.deepEqual([...seen], [['pr#1', 'sha']]);
+});
+
+test('receiver rejects an oversized chunked body before parsing, recording, or forwarding', async (t) => {
+  const seen = new Map();
+  let records = 0;
+  let forwards = 0;
+  const server = createServer(
+    createReceiverHandler({
+      outpostSecret: 'Jefe',
+      classes: [],
+      seen,
+      recordSeen: () => {
+        records++;
+      },
+      forward: async () => {
+        forwards++;
+      },
+    }),
+  );
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const { port } = server.address();
+  const body = 'x'.repeat(64 * 1024 + 1);
+
+  const status = await new Promise((resolve, reject) => {
+    const req = httpRequest(
+      { host: '127.0.0.1', port, method: 'POST', headers: { 'Transfer-Encoding': 'chunked' } },
+      (res) => {
+        res.resume();
+        res.on('end', () => resolve(res.statusCode));
+      },
+    );
+    req.on('error', reject);
+    req.write(body.slice(0, 1024));
+    req.end(body.slice(1024));
+  });
+
+  assert.equal(status, 413);
+  assert.equal(records, 0);
+  assert.equal(forwards, 0);
+  assert.equal(seen.size, 0);
+});
 
 function payload({ number = 42, id, classes = ['ci-changed'] } = {}) {
   return {

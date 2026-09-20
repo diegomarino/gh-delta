@@ -38,6 +38,28 @@ test('baseline text output prints a heartbeat and baseline note', () => {
   assert.match(output, /Baseline seeded for owner\/repo \(monitor: watch\)/);
 });
 
+test('text output makes suppressed attention-filter deltas visible to operators', () => {
+  // Omitting this notice makes an exit-0 filtered run indistinguishable from a
+  // no-change run even though the snapshot advanced past real changes.
+  const output = formatTextOutput({
+    code: 0,
+    report: {
+      baseline: false,
+      repo: 'owner/repo',
+      monitorId: 'watch',
+      at: '2026-07-01T10:00:00.000Z',
+      deltas: [],
+      filteredDeltas: 2,
+    },
+    now: () => '2026-07-01T10:00:00.000Z',
+  });
+
+  assert.match(output, /Attention filters suppressed 2 delta\(s\)/);
+  assert.match(output, /snapshot advanced and they will not be replayed/);
+  assert.match(output, /No deltas remain after attention filtering/);
+  assert.doesNotMatch(output, /No GitHub deltas since the last snapshot/);
+});
+
 test('delta text output prints each delta with suggested action', () => {
   const output = formatTextOutput({
     code: 10,
@@ -222,6 +244,32 @@ test('list text output prints the snapshot path so identical monitors are distin
     monitorLines[1],
     'monitors sharing repo + monitorId + entities must render as distinct lines',
   );
+});
+
+test('list text output identifies an economical watch snapshot scope', () => {
+  const output = formatListTextOutput({
+    report: {
+      command: 'list',
+      at: '2026-07-01T10:00:00.000Z',
+      stateDir: '/state',
+      registryDir: null,
+      since: null,
+      skippedFiles: 0,
+      monitors: [
+        {
+          repo: 'o/r',
+          monitorId: 'watch',
+          entities: ['pr'],
+          scope: 'watch-pr',
+          lastRun: '2026-07-01T09:00:00.000Z',
+          prCount: 1,
+          issueCount: 0,
+          stateFile: '/state/repo-o%2Fr__monitor-watch__watch-pr.json',
+        },
+      ],
+    },
+  });
+  assert.match(output, /scope: watch-pr/);
 });
 
 test('list error text output avoids snapshot/delta vocabulary', () => {

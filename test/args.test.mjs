@@ -9,6 +9,7 @@ import {
   validateRepo,
   canonicalEntityKey,
   defaultMonitorId,
+  parseEnrichmentSelection,
 } from '../lib/args.mjs';
 
 test('parseEntitySelection accepts pr, issue, or both and rejects empty selections', () => {
@@ -76,16 +77,47 @@ test('canonicalEntityKey canonicalizes order, whitespace, and duplicates; unknow
   assert.equal(canonicalEntityKey('weird'), 'weird');
 });
 
-test('defaultMonitorId derives a stable, grammar-valid per-machine id', () => {
-  const expected = `host-${createHash('sha1').update('box-a').digest('hex').slice(0, 12)}`;
-  assert.equal(defaultMonitorId({ hostname: () => 'box-a' }), expected);
-  assert.notEqual(
-    defaultMonitorId({ hostname: () => 'box-a' }),
-    defaultMonitorId({ hostname: () => 'box-b' }),
+test('defaultMonitorId is stable within a worktree and scopes different worktrees separately', () => {
+  const digest = (path) =>
+    `host-${createHash('sha1').update(`box-a${path}`).digest('hex').slice(0, 12)}`;
+  const resolveWorktree = (cwd) => (cwd.startsWith('/one/') ? '/one' : '/two');
+  assert.equal(
+    defaultMonitorId({ hostname: () => 'box-a', cwd: () => '/one/src/lib', resolveWorktree }),
+    digest('/one'),
   );
   assert.equal(
-    defaultMonitorId({ hostname: () => '' }),
-    `host-${createHash('sha1').update('unknown').digest('hex').slice(0, 12)}`,
+    defaultMonitorId({ hostname: () => 'box-a', cwd: () => '/one/test', resolveWorktree }),
+    digest('/one'),
   );
-  assert.equal(validateMonitorId(defaultMonitorId({ hostname: () => 'x' })).ok, true);
+  assert.notEqual(
+    defaultMonitorId({ hostname: () => 'box-a', cwd: () => '/one/src', resolveWorktree }),
+    defaultMonitorId({ hostname: () => 'box-a', cwd: () => '/two/src', resolveWorktree }),
+  );
+});
+
+test('defaultMonitorId falls back to the resolved cwd when git worktree lookup fails', () => {
+  assert.equal(
+    defaultMonitorId({
+      hostname: () => 'box-a',
+      cwd: () => '/outside/../outside/project',
+      resolveWorktree: () => {
+        throw new Error('not a git repository');
+      },
+    }),
+    `host-${createHash('sha1').update('box-a/outside/project').digest('hex').slice(0, 12)}`,
+  );
+  assert.equal(
+    validateMonitorId(defaultMonitorId({ hostname: () => 'x', resolveWorktree: () => '/repo' })).ok,
+    true,
+  );
+});
+
+test('parseEnrichmentSelection canonicalizes allowed kinds and rejects empty or unknown members', () => {
+  assert.deepEqual(parseEnrichmentSelection('threads,review,threads'), {
+    ok: true,
+    kinds: ['review', 'threads'],
+  });
+  assert.equal(parseEnrichmentSelection('').ok, false);
+  assert.equal(parseEnrichmentSelection('review,').ok, false);
+  assert.equal(parseEnrichmentSelection('reviews').ok, false);
 });

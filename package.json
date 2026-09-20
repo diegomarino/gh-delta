@@ -12,6 +12,9 @@
     "./detect": {
       "import": "./lib/detect.mjs"
     },
+    "./deltalog": {
+      "import": "./lib/deltalog.mjs"
+    },
     "./duration": {
       "import": "./lib/duration.mjs"
     },
@@ -38,6 +41,9 @@
     },
     "./version": {
       "import": "./lib/version.mjs"
+    },
+    "./watch": {
+      "import": "./lib/watch.mjs"
     },
     "./package.json": "./package.json"
   },

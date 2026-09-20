@@ -1,7 +1,14 @@
 // GitHub GraphQL boundary tests: incremental fetch, cutoff, caps, and normalization.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchPRs, fetchIssues, DEFAULT_GH_TIMEOUT_MS } from '../lib/gh.mjs';
+import {
+  fetchPRs,
+  fetchPRsByNumber,
+  fetchIssues,
+  fetchEnrichment,
+  fetchRateLimit,
+  DEFAULT_GH_TIMEOUT_MS,
+} from '../lib/gh.mjs';
 
 function prNode(over = {}) {
   return {
@@ -52,6 +59,215 @@ function page(nodes, hasNextPage = false, endCursor = null) {
   });
 }
 
+test('rate-limit fetch invokes the REST boundary once, reports progress, and normalizes resetAt', () => {
+  const calls = [];
+  const result = fetchRateLimit({
+    exec: (_cmd, args, opts) => {
+      calls.push({ args, opts });
+      return JSON.stringify({ resources: { graphql: { remaining: 12, reset: 1780000000 } } });
+    },
+    timeoutMs: 321,
+    onProgress: () => calls.push({ progress: true }),
+  });
+  assert.deepEqual(result, { remaining: 12, resetAt: '2026-05-28T20:26:40.000Z' });
+  assert.deepEqual(calls[0], { args: ['api', 'rate_limit'], opts: { timeoutMs: 321 } });
+  assert.equal(calls.filter((call) => call.progress).length, 1);
+});
+
+test('rate-limit fetch fails closed for invalid payload and never progresses after a process failure', () => {
+  assert.throws(
+    () => fetchRateLimit({ exec: () => '{' }),
+    /GitHub rate-limit returned invalid JSON/,
+  );
+  for (const payload of [
+    {},
+    { resources: { graphql: { remaining: -1, reset: 1 } } },
+    { resources: { graphql: { remaining: 1.5, reset: 1 } } },
+    { resources: { graphql: { remaining: Number.MAX_SAFE_INTEGER + 1, reset: 1 } } },
+    { resources: { graphql: { remaining: 1, reset: '1' } } },
+    { resources: { graphql: { remaining: 1, reset: Number.MAX_SAFE_INTEGER } } },
+  ]) {
+    assert.throws(
+      () => fetchRateLimit({ exec: () => JSON.stringify(payload) }),
+      /GitHub rate-limit returned unexpected shape/,
+    );
+  }
+  let progress = 0;
+  assert.throws(
+    () =>
+      fetchRateLimit({
+        exec: () => {
+          throw new Error('process failed');
+        },
+        onProgress: () => progress++,
+      }),
+    /process failed/,
+  );
+  assert.equal(progress, 0);
+});
+
+test('enrichment fetch uses one sorted nodes query and normalizes review bodies by requested id', () => {
+  const calls = [];
+  const rows = fetchEnrichment('review', ['R2', 'R1', 'R2'], {
+    exec: (_cmd, args, opts) => {
+      calls.push({ args, opts });
+      return JSON.stringify({
+        data: {
+          nodes: [
+            {
+              __typename: 'PullRequestReview',
+              id: 'R1',
+              body: 'please fix',
+              state: 'CHANGES_REQUESTED',
+              submittedAt: '2026-07-01T10:00:00Z',
+              author: { login: 'alice' },
+              commit: { oid: 'abc' },
+            },
+            {
+              __typename: 'PullRequestReview',
+              id: 'R2',
+              body: '',
+              state: 'CHANGES_REQUESTED',
+              submittedAt: null,
+              author: null,
+              commit: null,
+            },
+          ],
+        },
+      });
+    },
+    timeoutMs: 123,
+    onProgress: () => calls.push({ progress: true }),
+  });
+  assert.equal(calls.filter((call) => call.args).length, 1);
+  assert.deepEqual(
+    calls.find((call) => call.args).args.filter((arg) => arg.startsWith('ids[]=')),
+    ['ids[]=R1', 'ids[]=R2'],
+  );
+  assert.equal(calls.find((call) => call.args).opts.timeoutMs, 123);
+  assert.equal(calls.filter((call) => call.progress).length, 1);
+  assert.deepEqual(rows, [
+    {
+      id: 'R1',
+      author: 'alice',
+      state: 'CHANGES_REQUESTED',
+      submittedAt: '2026-07-01T10:00:00Z',
+      commit: 'abc',
+      body: 'please fix',
+    },
+    {
+      id: 'R2',
+      author: null,
+      state: 'CHANGES_REQUESTED',
+      submittedAt: null,
+      commit: null,
+      body: '',
+    },
+  ]);
+});
+
+test('enrichment fetch fails closed on node coverage, wrong type, and malformed thread connection', () => {
+  for (const body of [
+    { data: { nodes: [] } },
+    { data: { nodes: [{ __typename: 'IssueComment', id: 'R1' }] } },
+    {
+      data: {
+        nodes: [
+          {
+            __typename: 'PullRequestReviewThread',
+            id: 'T1',
+            comments: { nodes: [], pageInfo: { hasNextPage: false } },
+          },
+        ],
+      },
+    },
+  ]) {
+    assert.throws(
+      () =>
+        fetchEnrichment(
+          body.data.nodes[0]?.__typename === 'PullRequestReviewThread' ? 'threads' : 'review',
+          ['R1'],
+          { exec: () => JSON.stringify(body) },
+        ),
+      /unexpected shape|coverage/,
+    );
+  }
+});
+
+test('enrichment progress advances after a successful process return even when JSON validation fails', () => {
+  let progress = 0;
+  assert.throws(
+    () =>
+      fetchEnrichment('comments', ['C1'], {
+        exec: () => 'not-json',
+        onProgress: () => progress++,
+      }),
+    /invalid JSON/,
+  );
+  assert.equal(progress, 1);
+
+  assert.throws(
+    () =>
+      fetchEnrichment('comments', ['C1'], {
+        exec: () => {
+          throw new Error('process failed');
+        },
+        onProgress: () => progress++,
+      }),
+    /process failed/,
+  );
+  assert.equal(progress, 1);
+});
+
+test('targeted PR fetch uses one aliased query and the canonical normalizer', () => {
+  const calls = [];
+  const rows = fetchPRsByNumber('o/r', [9, 3, 9], {
+    exec: (_cmd, args, opts) => {
+      calls.push({ args, opts });
+      return JSON.stringify({
+        data: { repository: { pr3: prNode({ number: 3 }), pr9: prNode({ number: 9 }) } },
+      });
+    },
+    onProgress: () => calls.push({ progress: true }),
+  });
+  assert.equal(calls.filter((call) => call.args).length, 1);
+  const query = calls.find((call) => call.args).args.find((arg) => arg.startsWith('query='));
+  assert.match(query, /pr3: pullRequest\(number: \$n3\)/);
+  assert.match(query, /pr9: pullRequest\(number: \$n9\)/);
+  assert.equal(calls.filter((call) => call.progress).length, 1);
+  assert.deepEqual(
+    rows.map((row) => row.number),
+    [3, 9],
+  );
+  assert.deepEqual(rows[0].statusCheckRollup, [
+    { __typename: 'CheckRun', name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' },
+  ]);
+});
+
+test('targeted PR fetch fails closed on alias shape, GraphQL errors, and nested overflow', () => {
+  assert.throws(
+    () =>
+      fetchPRsByNumber('o/r', [3], { exec: () => JSON.stringify({ data: { repository: {} } }) }),
+    /unexpected shape/,
+  );
+  assert.throws(
+    () =>
+      fetchPRsByNumber('o/r', [3], {
+        exec: () => JSON.stringify({ errors: [{ message: 'boom' }] }),
+      }),
+    /returned errors: boom/,
+  );
+  const overflow = prNode({ number: 3 });
+  overflow.reviewThreads.pageInfo.hasNextPage = true;
+  assert.throws(
+    () =>
+      fetchPRsByNumber('o/r', [3], {
+        exec: () => JSON.stringify({ data: { repository: { pr3: overflow } } }),
+      }),
+    /paginated reviewThreads/,
+  );
+});
+
 test('baseline (null horizon) fetches only open PRs and normalizes rows', () => {
   const calls = [];
   const exec = (cmd, args, opts) => {
@@ -68,6 +284,71 @@ test('baseline (null horizon) fetches only open PRs and normalizes rows', () => 
   assert.equal(rows[0].totalCommentsCount, 2);
   assert.equal(rows[0].reviewThreads, 2);
   assert.equal(rows[0].unresolvedReviewThreads, 1);
+});
+
+test('queries and normalizes bounded comment identities plus failed check URLs', () => {
+  let prQuery = '';
+  const prs = fetchPRs('o/r', {
+    exec: (_cmd, args) => {
+      prQuery = args.find((arg) => arg.startsWith('query=')) ?? '';
+      return page([
+        prNode({
+          commits: {
+            nodes: [
+              {
+                commit: {
+                  statusCheckRollup: {
+                    contexts: {
+                      nodes: [
+                        {
+                          __typename: 'CheckRun',
+                          name: 'build',
+                          status: 'COMPLETED',
+                          conclusion: 'FAILURE',
+                          detailsUrl: 'https://ci/build',
+                        },
+                      ],
+                      pageInfo: { hasNextPage: false },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+          comments: { nodes: [{ id: 'C1', author: { login: 'Bot[bot]' } }] },
+        }),
+      ]);
+    },
+    horizonCutoff: null,
+  });
+  assert.match(prQuery, /CheckRun \{ name status conclusion detailsUrl \}/);
+  assert.match(prQuery, /comments\(last: 5\) \{ totalCount nodes \{ id author \{ login \} \} \}/);
+  assert.deepEqual(prs[0].commentNodes, [{ id: 'C1', author: 'Bot[bot]' }]);
+  assert.equal(prs[0].statusCheckRollup[0].detailsUrl, 'https://ci/build');
+
+  let issueQuery = '';
+  const issues = fetchIssues('o/r', {
+    exec: (_cmd, args) => {
+      issueQuery = args.find((arg) => arg.startsWith('query=')) ?? '';
+      return page([
+        {
+          number: 2,
+          title: 'issue',
+          state: 'OPEN',
+          updatedAt: '2026-07-01T10:00:00Z',
+          labels: { nodes: [], pageInfo: { hasNextPage: false } },
+          assignees: { nodes: [], pageInfo: { hasNextPage: false } },
+          comments: { totalCount: 1, nodes: [{ id: 'I1', author: { login: 'bot' } }] },
+        },
+      ]);
+    },
+    horizonCutoff: null,
+  });
+  assert.match(
+    issueQuery,
+    /comments\(last: 5\) \{ totalCount nodes \{ id author \{ login \} \} \}/,
+  );
+  assert.deepEqual(issues[0].commentNodes, [{ id: 'I1', author: 'bot' }]);
 });
 
 test('incremental fetch adds updated items and cuts at the horizon', () => {

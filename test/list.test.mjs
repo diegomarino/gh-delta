@@ -8,6 +8,7 @@ import { basename, join } from 'node:path';
 import { listMonitors, parseSince, parseSnapshotFilename } from '../lib/list.mjs';
 import { registerMonitor } from '../lib/registry.mjs';
 import { snapshotPath, writeSnapshotAtomic } from '../lib/snapshot.mjs';
+import { addWatch, watchDirPath } from '../lib/watch.mjs';
 
 const NOW = '2026-07-08T12:00:00.000Z';
 
@@ -31,6 +32,15 @@ test('parseSnapshotFilename round-trips snapshotPath for hostile identifiers', (
   }
   const combined = parseSnapshotFilename(basename(snapshotPath('o/r', 'all', 'issue,pr', '/s')));
   assert.deepEqual(combined.entities, ['pr', 'issue']);
+});
+
+test('parseSnapshotFilename recognizes economical watch snapshots as a separate scope', () => {
+  assert.deepEqual(parseSnapshotFilename('repo-o%2Fr__monitor-main__watch-pr.json'), {
+    repo: 'o/r',
+    monitorId: 'main',
+    entities: ['pr'],
+    scope: 'watch-pr',
+  });
 });
 
 test('parseSnapshotFilename rejects files that are not derived snapshots', () => {
@@ -128,6 +138,18 @@ test('listMonitors treats a missing directory as an empty inventory', () => {
   });
 });
 
+test('listMonitors reports derived watch counts and surfaces corrupt watch state', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-list-'));
+  seed(dir, 'o/r', 'main', 'pr', { pr: {}, issue: {}, meta: { horizon: NOW } });
+  const watchDir = watchDirPath('o/r', 'main', dir);
+  addWatch(watchDir, 'pr:42', 'merged', { now: () => NOW });
+  assert.equal(listMonitors(dir, { now: () => NOW }).monitors[0].watched, 1);
+  writeFileSync(join(watchDir, 'issue-1.json'), '{bad');
+  const monitor = listMonitors(dir, { now: () => NOW }).monitors[0];
+  assert.equal(monitor.watched, null);
+  assert.match(monitor.watchError, /issue-1\.json/);
+});
+
 test('listMonitors identifies self-describing snapshots with arbitrary filenames', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-list-'));
   writeSnapshotAtomic(join(dir, 'my-private-monitor.json'), {
@@ -211,4 +233,108 @@ test('listMonitors merges the registry, dedupes scanned paths, and marks stale e
       ['o/gone', 'retired', '2026-07-08T08:00:00.000Z', null, null, true],
     ],
   );
+});
+
+test('registry-only economical snapshots retain their PR scope and counts', () => {
+  const stateDir = mkdtempSync(join(tmpdir(), 'gd-state-'));
+  const registryDir = mkdtempSync(join(tmpdir(), 'gd-reg-'));
+  const externalDir = mkdtempSync(join(tmpdir(), 'gd-external-'));
+  const external = join(externalDir, 'custom.watch.json');
+  writeSnapshotAtomic(external, {
+    pr: { 42: { state: 'OPEN' } },
+    issue: {},
+    meta: { horizon: NOW, repo: 'o/r', monitorId: 'watch', entities: ['pr'], scope: 'watch-pr' },
+  });
+  registerMonitor({
+    repo: 'o/r',
+    monitorId: 'watch',
+    entities: ['pr'],
+    scope: 'watch-pr',
+    stateFile: external,
+    lastRun: NOW,
+    env: { GH_DELTA_REGISTRY_DIR: registryDir },
+  });
+  const { monitors } = listMonitors(stateDir, { now: () => NOW, registryDir });
+  assert.equal(monitors.length, 1);
+  assert.deepEqual(monitors[0].entities, ['pr']);
+  assert.equal(monitors[0].scope, 'watch-pr');
+  assert.equal(monitors[0].prCount, 1);
+});
+
+test('a newer snapshot observation supersedes a stale registry success timestamp', () => {
+  const stateDir = mkdtempSync(join(tmpdir(), 'gd-list-'));
+  const elsewhere = mkdtempSync(join(tmpdir(), 'gd-elsewhere-'));
+  const registryDir = mkdtempSync(join(tmpdir(), 'gd-reg-'));
+  const env = { GH_DELTA_REGISTRY_DIR: registryDir };
+  const external = join(elsewhere, 'private.json');
+  writeSnapshotAtomic(external, {
+    pr: {},
+    issue: {},
+    meta: {
+      horizon: '2026-07-08T11:30:00.000Z',
+      repo: 'o/r',
+      monitorId: 'no-registry-run',
+      entities: ['pr'],
+    },
+  });
+  registerMonitor({
+    repo: 'o/r',
+    monitorId: 'no-registry-run',
+    entities: ['pr'],
+    stateFile: external,
+    status: 'ok',
+    at: '2026-07-08T09:00:00.000Z',
+    env,
+  });
+
+  const { monitors } = listMonitors(stateDir, {
+    registryDir,
+    now: () => NOW,
+    sinceMs: 60 * 60 * 1000,
+  });
+
+  assert.equal(monitors.length, 1);
+  assert.equal(monitors[0].lastOkAt, '2026-07-08T11:30:00.000Z');
+  assert.equal(monitors[0].observationAgeMs, 30 * 60 * 1000);
+});
+
+test('list distinguishes a failed first attempt from a lost successful snapshot and filters by success', () => {
+  const stateDir = mkdtempSync(join(tmpdir(), 'gd-list-'));
+  const registryDir = mkdtempSync(join(tmpdir(), 'gd-reg-'));
+  const env = { GH_DELTA_REGISTRY_DIR: registryDir };
+  registerMonitor({
+    repo: 'o/failed',
+    monitorId: 'first',
+    entities: ['pr'],
+    stateFile: join(stateDir, 'first.json'),
+    machineId: 'host-a',
+    status: 'failure',
+    at: '2026-07-08T11:30:00.000Z',
+    error: { kind: 'github', message: 'offline' },
+    env,
+  });
+  registerMonitor({
+    repo: 'o/lost',
+    monitorId: 'old',
+    entities: ['pr'],
+    stateFile: join(stateDir, 'old.json'),
+    machineId: 'host-a',
+    status: 'ok',
+    at: '2026-07-08T11:00:00.000Z',
+    env,
+  });
+  const { monitors } = listMonitors(stateDir, {
+    registryDir,
+    now: () => '2026-07-08T12:00:00.000Z',
+    sinceMs: 45 * 60 * 1000,
+  });
+  assert.equal(monitors.length, 0);
+  const all = listMonitors(stateDir, {
+    registryDir,
+    now: () => '2026-07-08T12:00:00.000Z',
+  }).monitors;
+  assert.equal(all.find((m) => m.repo === 'o/failed').snapshotStatus, 'not-yet-created');
+  assert.equal(all.find((m) => m.repo === 'o/failed').observationAgeMs, null);
+  assert.equal(all.find((m) => m.repo === 'o/lost').snapshotStatus, 'expected-missing');
+  assert.equal(all.find((m) => m.repo === 'o/lost').stale, true);
 });
