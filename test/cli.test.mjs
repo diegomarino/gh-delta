@@ -298,6 +298,46 @@ test('watch cleanup failure warns after snapshot publication', () => {
   );
 });
 
+test('ignored merged terminal delta keeps its watch entry while snapshot advances', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-ignore-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
+    existing: { pr: { 42: prFingerprint(basePr) }, issue: {} },
+  });
+  let cleanup = false;
+  d.removeWatchUnchanged = () => {
+    cleanup = true;
+  };
+  const { code, report } = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      state,
+      '--watch-dir',
+      watch,
+      '--ignore-classes',
+      'merged',
+    ],
+    d,
+  );
+  assert.equal(code, 0);
+  assert.deepEqual(report.deltas, []);
+  assert.equal(report.filteredDeltas, 1);
+  assert.equal(d.writes, 1);
+  assert.equal(cleanup, false);
+  assert.ok(readFileSync(entry, 'utf8'));
+});
+
 test('watch text commands render watch-specific output, never detector deltas', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-watch-text-'));
   for (const argv of [
