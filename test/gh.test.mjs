@@ -146,6 +146,31 @@ test('enrichment fetch fails closed on node coverage, wrong type, and malformed 
   }
 });
 
+test('enrichment progress advances after a successful process return even when JSON validation fails', () => {
+  let progress = 0;
+  assert.throws(
+    () =>
+      fetchEnrichment('comments', ['C1'], {
+        exec: () => 'not-json',
+        onProgress: () => progress++,
+      }),
+    /invalid JSON/,
+  );
+  assert.equal(progress, 1);
+
+  assert.throws(
+    () =>
+      fetchEnrichment('comments', ['C1'], {
+        exec: () => {
+          throw new Error('process failed');
+        },
+        onProgress: () => progress++,
+      }),
+    /process failed/,
+  );
+  assert.equal(progress, 1);
+});
+
 test('targeted PR fetch uses one aliased query and the canonical normalizer', () => {
   const calls = [];
   const rows = fetchPRsByNumber('o/r', [9, 3, 9], {
