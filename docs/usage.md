@@ -38,6 +38,17 @@ See the `--repo` bullet in [CLI](contract.md#cli) for the full precedence
 (`origin` → `upstream` → `gh repo view` fallback) and the `repoSource` report
 field.
 
+### Several repositories
+
+Pass a comma-separated list or repeat `--repo` to run independent ticks in
+order. The JSON result is one aggregate; successful deltas include `repo` and
+partial failures are reported without preventing later repositories from
+advancing their own snapshots. Do not combine this mode with `--state-file`.
+
+```bash
+gh-delta --repo owner/api,owner/web --state-dir ./state --format text
+```
+
 Run from a source checkout:
 
 ```bash

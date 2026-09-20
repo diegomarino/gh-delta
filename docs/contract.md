@@ -58,6 +58,10 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
 - `--repo` must be `owner/name`. **Canonicalized to lowercase** — snapshot paths,
   report echoes, and outpost event IDs always use the lowercased form. This
   applies whether `--repo` was passed explicitly or derived.
+  It may be comma-separated or repeated. Two or more explicit repositories run
+  complete ticks serially; `--state-file` is rejected for that mode because one
+  file cannot safely represent several repositories. Use `--state-dir` or the
+  derived repo-scoped paths instead.
 - `--monitor-id` must start with a letter or number and contain only letters,
   numbers, dot, underscore, or dash.
 - `--state-file` and `--state-dir` are mutually exclusive and **optional**. When
@@ -502,6 +506,15 @@ Success reports (exit `0` and `10`):
 
 Field guarantees:
 
+For a multi-repository invocation, the aggregate replaces singular `repo`,
+`repoSource`, `stateFile`, `logFile`, `scope`, and `baseline` with `repos`
+(requested canonical order) and `errors` (always present, possibly empty).
+Successful deltas are flattened in repository order and carry optional
+`delta.repo`; their ids and per-repository snapshots/logs are unchanged. A
+partial failure does not roll back successful repositories: `errors` rows carry
+`repo`, `kind`, `message`, and rate-limit `resetAt` when available. Warnings use
+the ordinary `{label,reason}` shape with a repository-qualified label.
+
 - `schemaVersion` (number): report shape version. Bumped **only** on a breaking
   change — a field removed or renamed. Additive changes (new optional keys on the
   report, a delta, or a fingerprint) do not bump it. Assert `schemaVersion === 1`.
@@ -545,6 +558,9 @@ Field guarantees:
   code.
 
 Each delta:
+
+- `repo` (string, optional): present only in a multi-repository aggregate,
+  identifying the repository that produced the unchanged delta identity.
 
 - `id` (string): a 64-character lowercase sha256 hex **content hash of the
   observed change's identity**, present on every delta. It hashes

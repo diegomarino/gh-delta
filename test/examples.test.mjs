@@ -33,7 +33,14 @@ test('every example report covers exactly the frozen REPORT_FIELDS, minus the om
   // economical watch reports), so the frozen field list minus those keys is
   // what a real report covers here — asserting the raw REPORT_FIELDS set would
   // require a key no live run actually emits (audit finding F10.1).
-  const OMIT_WHEN_EMPTY = new Set(['warnings', 'filteredDeltas', 'logFile', 'scope']);
+  const OMIT_WHEN_EMPTY = new Set([
+    'warnings',
+    'filteredDeltas',
+    'logFile',
+    'scope',
+    'repos',
+    'errors',
+  ]);
   const expected = [...REPORT_FIELDS].filter((field) => !OMIT_WHEN_EMPTY.has(field));
   for (const [name, report] of Object.entries({ baselineReport, deltaReport, detailReport })) {
     assert.deepEqual(
@@ -67,6 +74,7 @@ test('fully enriched deltas jointly cover exactly the frozen DELTA_FIELDS', () =
     to: null,
   };
   const change = {
+    repo: 'owner/repo',
     entity: 'pr',
     number: 7,
     title: 'Add widget',
