@@ -246,6 +246,26 @@ test('invalid UTF-8 in a complete unpublished suffix is a log error without muta
   assert.deepEqual(readFileSync(logFile), before);
 });
 
+test('BOM-prefixed complete suffix is rejected without changing the journal or manifest', () => {
+  const logFile = tempPath('bom-suffix.ndjson');
+  appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:00:00.000Z', deltas: [first] });
+  const record = Buffer.from(
+    `${JSON.stringify({ seq: 2, id: second.id, detectedAt: '2026-09-20T12:01:00.000Z', delta: second })}\n`,
+  );
+  writeFileSync(
+    logFile,
+    Buffer.concat([readFileSync(logFile), Buffer.from([0xef, 0xbb, 0xbf]), record]),
+  );
+  const beforeLog = readFileSync(logFile);
+  const beforeManifest = readFileSync(manifestPath(logFile));
+  assert.throws(
+    () => appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:02:00.000Z', deltas: [first] }),
+    (error) => error?.kind === 'log',
+  );
+  assert.deepEqual(readFileSync(logFile), beforeLog);
+  assert.deepEqual(readFileSync(manifestPath(logFile)), beforeManifest);
+});
+
 test('reader rejects invalid UTF-8 inside its published prefix', () => {
   const logFile = tempPath('invalid-prefix-utf8.ndjson');
   appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:00:00.000Z', deltas: [first] });
