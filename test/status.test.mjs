@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { run, runCommand } from '../lib/cli.mjs';
+import { detectDeltas } from '../lib/detect.mjs';
 
 test('status reads local snapshot summaries without GitHub or writes', () => {
   const result = run(['status', '--repo', 'o/r', '--state-file', '/tmp/status.json'], {
@@ -175,4 +176,82 @@ test('status text output renders each returned item truthfully', async () => {
   assert.match(result.output, /ISSUE #7/);
   assert.match(result.output, /lastChangedAt=2026-09-20T00:00:00.000Z/);
   assert.match(result.output, /ticksSinceChange=2/);
+});
+
+test('status --refresh preserves stale bookkeeping for an unchanged item', () => {
+  const current = {
+    number: 42,
+    title: 'quiet',
+    state: 'OPEN',
+    updatedAt: '2026-09-18T00:00:00.000Z',
+    isDraft: false,
+    statusCheckRollup: [],
+    reviewDecision: null,
+    latestReviews: [],
+    mergeable: 'UNKNOWN',
+    comments: [],
+    headRefOid: 'abc',
+  };
+  const snapshot = detectDeltas(
+    null,
+    { pr: [current], issue: [] },
+    { at: '2026-09-18T00:00:00.000Z', staleAfterMs: 1 },
+  ).snapshot;
+  snapshot.pr[42].ticksSinceChange = 5;
+  snapshot.pr[42].staleEmittedFor = '2026-09-19';
+  let written;
+  const result = run(
+    ['status', '--refresh', '--repo', 'o/r', '--state-file', '/tmp/status-refresh.json'],
+    {
+      acquireLock: () => ({ ok: true, token: 'lock' }),
+      assertLockOwned: () => true,
+      releaseLock: () => {},
+      readSnapshot: () => snapshot,
+      writeSnapshotAtomic: (_path, next) => {
+        written = next;
+      },
+      fetchPRs: () => [current],
+      fetchIssues: () => [],
+      now: () => '2026-09-20T00:00:00.000Z',
+    },
+  );
+  assert.equal(result.code, 0);
+  assert.equal(written.pr[42].lastChangedAt, '2026-09-18T00:00:00.000Z');
+  assert.equal(written.pr[42].ticksSinceChange, 5);
+  assert.equal(written.pr[42].staleEmittedFor, '2026-09-19');
+});
+
+test('status --refresh reuses the repository resolved by the detector', () => {
+  let snapshot = null;
+  const result = run(['status', '--refresh', '--state-file', '/tmp/status-ghes.json'], {
+    acquireLock: () => ({ ok: true, token: 'lock' }),
+    assertLockOwned: () => true,
+    releaseLock: () => {},
+    readSnapshot: () => snapshot,
+    writeSnapshotAtomic: (_path, next) => {
+      snapshot = next;
+    },
+    resolveRepo: () => ({
+      status: 'found',
+      repo: 'enterprise/project',
+      source: 'gh',
+      warnings: [],
+    }),
+    resolveLocalRepo: () => assert.fail('status must reuse the detector-resolved repository'),
+    fetchPRs: () => [],
+    fetchIssues: () => [],
+    now: () => '2026-09-20T00:00:00.000Z',
+  });
+  assert.equal(result.code, 0);
+  assert.equal(result.report.repo, 'enterprise/project');
+});
+
+test('status validates the effective monitor id before reading its snapshot', () => {
+  const result = run(
+    ['status', '--repo', 'o/r', '--monitor-id', '../bad', '--state-file', '/tmp/status.json'],
+    { readSnapshot: () => assert.fail('invalid monitor id must not read a path') },
+  );
+  assert.equal(result.code, 2);
+  assert.equal(result.report.kind, 'config');
+  assert.match(result.report.error, /--monitor-id must start/);
 });

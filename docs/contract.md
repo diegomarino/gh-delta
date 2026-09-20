@@ -89,7 +89,8 @@ the monitor snapshot and returns each selected open PR or issue with persisted
 `summary` (issues have `summary: null`). Without `--refresh` it performs no
 GitHub call and writes nothing. `--refresh` performs exactly one normal detector
 tick before the local read, while the final status command still exits `0` on
-success. `--number` filters every returned entity. With `--watch-dir`, a local
+success. A refresh preserves existing stale bookkeeping for unchanged items; a
+real fingerprint change resets it. `--number` filters every returned entity. With `--watch-dir`, a local
 0-10 PR-only watch universe reads the detector's separate economical watch
 snapshot; all other watch lists use the normal snapshot. `text` renders the same
 returned items as the JSON report.
