@@ -20,6 +20,7 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
          [--baseline-emit-state]
          [--log]
          [--outpost-url <url>]
+         [--outpost-secret <ENV_VARIABLE_NAME>]
          [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>]
          [--gh-timeout-ms <ms>] [--no-registry] [--lock-stale-ms <duration>]
 ```
@@ -124,6 +125,9 @@ monitorId>__<entities>.ndjson`, or `<state-file>.deltalog.ndjson` for an explici
 - `--outpost-url` is optional at-most-once HTTP delivery; see
   [Outpost Payload](#outpost-payload-schema-v1). It does not affect the JSON
   report, exit code, or snapshot.
+- `--outpost-secret` names (never contains) an environment variable holding the
+  shared HMAC secret. It requires `--outpost-url`; invalid names and unset or
+  empty values are configuration errors before repository derivation or I/O.
 - `--outpost-timeout-ms` timeout in milliseconds for each outpost HTTP POST
   (default `4000`).
 - `--outpost-max-posts` maximum number of outpost POSTs per run (default:
@@ -322,7 +326,7 @@ subpaths; the package root is intentionally not exported.
 | `gh-delta/duration`    | `parseDuration`                                                                                                                                                                                                                                                                                                                                                                                                                                     | Shared duration grammar for every duration-valued flag        |
 | `gh-delta/list`        | `listMonitors`, `parseSnapshotFilename`, `parseSince`                                                                                                                                                                                                                                                                                                                                                                                               | Read-only monitor snapshot inventory                          |
 | `gh-delta/registry`    | `registerMonitor`, `readRegistry`, `defaultRegistryDir`, `registryEntryPath`, `canonicalStateFileKey`, `REGISTRY_VERSION`                                                                                                                                                                                                                                                                                                                           | Run-registry breadcrumbs for gh-delta list                    |
-| `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`                                                                                                                                                                                                                                                                                                                                                                          | Outpost payload and transport helpers                         |
+| `gh-delta/outpost`     | `buildOutpostPayload`, `outpostSignature`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`                                                                                                                                                                                                                                                                                                                                                      | Outpost payload and transport helpers                         |
 | `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`, `defaultStateDir`, `horizonCutoff`                                                                                                                                                                                                                                                                                                                                                           | Snapshot path and persistence helpers                         |
 | `gh-delta/lock`        | `acquireLock`, `releaseLock`, `assertLockOwned`, `lockPath`, `LOCK_EXPIRY_SLACK_MS`                                                                                                                                                                                                                                                                                                                                                                 | State-file lock: one writer per `(repo, monitorId, entities)` |
 | `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`, `canonicalEntityKey`, `defaultMonitorId`                                                                                                                                                                                                                                                                                                                                               | Shared argument parsing policies                              |
@@ -1138,6 +1142,11 @@ prior/next state (`from` is `null` for a `new` object; `to` is `null` for a
 `missing` object).
 
 The delivery sequence makes the at-most-once guarantee explicit: the snapshot is written before any POST, and a delivery failure leaves the exit code and report unchanged.
+
+When `--outpost-secret ENV_VARIABLE_NAME` is supplied, each POST adds
+`X-GhDelta-Signature: sha256=<lowercase hex HMAC-SHA256>`, computed over the
+exact UTF-8 `JSON.stringify(payload)` bytes sent in that request. The secret is
+never included in payloads, reports, warnings, logs, help, or process arguments.
 
 ```mermaid
 sequenceDiagram

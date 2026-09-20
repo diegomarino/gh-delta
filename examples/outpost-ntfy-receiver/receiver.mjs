@@ -14,11 +14,8 @@
 //      NTFY_CLASSES (comma list; empty = forward every class),
 //      SEEN_FILE (default ./seen-events.jsonl),
 //      SEEN_MAX_ENTRIES (default 5000; oldest entries are dropped past this cap),
-//      OUTPOST_SECRET (optional shared secret; when set, every POST must present
-//        it, either as `Authorization: Bearer <secret>` or `?secret=<secret>` on
-//        the request URL — the query form exists because the current gh-delta
-//        `--outpost-url` sender cannot attach custom headers, only a URL. See
-//        README.md for how to wire this up on both sides).
+//      OUTPOST_SECRET (optional shared secret; when set, every POST must carry
+//        an X-GhDelta-Signature HMAC over its raw body. See README.md).
 //
 // SECURITY: with OUTPOST_SECRET unset, this receiver accepts and forwards any
 // well-formed POST with no authentication. That is fine bound to 127.0.0.1
@@ -28,32 +25,23 @@
 // put a reverse proxy with its own auth in front — see README.md.
 import { createServer } from 'node:http';
 import { appendFileSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
-/**
- * Constant-time compare of two secrets of possibly-different length.
- *
- * timingSafeEqual throws on length mismatch, so that case is short-circuited
- * separately. The length check itself is not timing-sensitive — the secret's
- * length isn't confidential the way its content is — only the byte-by-byte
- * comparison needs to run in constant time.
- */
-function secretsMatch(provided, expected) {
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
-}
+const MAX_REQUEST_BODY_BYTES = 64 * 1024;
 
-function isAuthorized(req, url, outpostSecret) {
+/**
+ * Verify the exact SHA-256 HMAC over the raw request body.
+ *
+ */
+function isAuthorized(req, rawBody, outpostSecret) {
   if (!outpostSecret) return true;
-  const authHeader = req.headers['authorization'] ?? '';
-  const bearerMatch = /^Bearer (.+)$/.exec(authHeader);
-  if (bearerMatch && secretsMatch(bearerMatch[1], outpostSecret)) return true;
-  const querySecret = url.searchParams.get('secret') ?? '';
-  if (querySecret && secretsMatch(querySecret, outpostSecret)) return true;
-  return false;
+  const signature = req.headers['x-ghdelta-signature'];
+  const match = typeof signature === 'string' && /^sha256=([0-9a-f]{64})$/.exec(signature);
+  if (!match) return false;
+  const provided = Buffer.from(match[1], 'hex');
+  const expected = createHmac('sha256', outpostSecret).update(rawBody).digest();
+  return provided.length === expected.length && timingSafeEqual(provided, expected);
 }
 
 // Seen state is one record per (entity, number) item — the LAST id forwarded
@@ -169,6 +157,56 @@ async function forward(payload, ntfyBaseUrl, ntfyTopic) {
   if (!response.ok) throw new Error(`ntfy HTTP ${response.status}`);
 }
 
+/** Build the HTTP boundary with injectable state/forwarding for local testing. */
+function createReceiverHandler({
+  outpostSecret,
+  classes,
+  seen,
+  recordSeen,
+  forward: forwardPayload,
+}) {
+  return (req, res) => {
+    if (req.method !== 'POST') return respond(res, 405, { error: 'POST only' });
+    const chunks = [];
+    let bodyBytes = 0;
+    let rejectedForSize = false;
+    req.on('data', (chunk) => {
+      if (rejectedForSize) return;
+      bodyBytes += chunk.length;
+      if (bodyBytes > MAX_REQUEST_BODY_BYTES) {
+        rejectedForSize = true;
+        respond(res, 413, { error: 'request body too large' });
+        req.resume();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      if (rejectedForSize) return;
+      const rawBody = Buffer.concat(chunks);
+      if (!isAuthorized(req, rawBody, outpostSecret))
+        return respond(res, 401, { error: 'unauthorized' });
+      let payload;
+      try {
+        payload = JSON.parse(rawBody.toString('utf8'));
+      } catch {
+        return respond(res, 400, { error: 'invalid JSON' });
+      }
+      if (payload?.type !== 'gh-delta.delta' || payload?.schemaVersion !== 1) {
+        return respond(res, 400, { error: 'expected gh-delta.delta schemaVersion 1' });
+      }
+      const decision = shouldForward(seen, payload, classes);
+      if (decision.action === 'filtered') return respond(res, 202, { filtered: true });
+      if (decision.action === 'deduped') return respond(res, 202, { deduped: true });
+      recordSeen(decision.key, payload.id, payload.detectedAt);
+      respond(res, 202, { accepted: true });
+      forwardPayload(payload).catch((err) =>
+        console.error(`receiver: ntfy forward failed for ${payload.id}: ${err.message}`),
+      );
+    });
+  };
+}
+
 function main() {
   const PORT = Number(process.env.PORT ?? 8787);
   const HOST = process.env.HOST ?? '127.0.0.1';
@@ -234,52 +272,15 @@ function main() {
     appendFileSync(SEEN_FILE, `${JSON.stringify({ key, id, at: detectedAt })}\n`);
   }
 
-  const server = createServer((req, res) => {
-    if (req.method !== 'POST') return respond(res, 405, { error: 'POST only' });
-    // req.headers.host is client-controlled; a malformed value makes new URL()
-    // throw synchronously, which would crash the process on an exposed bind.
-    let url;
-    try {
-      url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
-    } catch {
-      return respond(res, 400, { error: 'invalid request URL or Host header' });
-    }
-    if (!isAuthorized(req, url, OUTPOST_SECRET))
-      return respond(res, 401, { error: 'unauthorized' });
-    let body = '';
-    req.setEncoding('utf8');
-    req.on('data', (chunk) => {
-      body += chunk;
-    });
-    req.on('end', () => {
-      let payload;
-      try {
-        payload = JSON.parse(body);
-      } catch {
-        return respond(res, 400, { error: 'invalid JSON' });
-      }
-      if (payload?.type !== 'gh-delta.delta' || payload?.schemaVersion !== 1) {
-        return respond(res, 400, { error: 'expected gh-delta.delta schemaVersion 1' });
-      }
-      const decision = shouldForward(seen, payload, CLASSES);
-      if (decision.action === 'filtered') return respond(res, 202, { filtered: true });
-      if (decision.action === 'deduped') return respond(res, 202, { deduped: true });
-      // Mark seen BEFORE forwarding: this mirrors the detector's at-most-once
-      // stance (a failed ntfy push is logged, never retried). This now runs
-      // only for payloads that already passed the class filter above, so a
-      // payload the filter drops never gets its id recorded — preserving
-      // that seen-before-forward intent for the payloads that do get
-      // forwarded, without letting a filtered-out payload poison dedupe for
-      // a later, allowed one that shares its id (see shouldForward above).
-      // Move this after forward() if you prefer at-least-once pings at the
-      // cost of duplicates.
-      recordSeen(decision.key, payload.id, payload.detectedAt);
-      respond(res, 202, { accepted: true });
-      forward(payload, NTFY_BASE_URL, NTFY_TOPIC).catch((err) =>
-        console.error(`receiver: ntfy forward failed for ${payload.id}: ${err.message}`),
-      );
-    });
-  });
+  const server = createServer(
+    createReceiverHandler({
+      outpostSecret: OUTPOST_SECRET,
+      classes: CLASSES,
+      seen,
+      recordSeen,
+      forward: (payload) => forward(payload, NTFY_BASE_URL, NTFY_TOPIC),
+    }),
+  );
 
   server.listen(PORT, HOST, () =>
     console.log(`gh-delta outpost receiver on ${HOST}:${PORT} -> ${NTFY_BASE_URL}/${NTFY_TOPIC}`),
@@ -313,4 +314,11 @@ if (isDirectlyExecuted()) {
   main();
 }
 
-export { itemKey, parseSeenLine, loadSeenState, shouldForward, secretsMatch, isAuthorized };
+export {
+  itemKey,
+  parseSeenLine,
+  loadSeenState,
+  shouldForward,
+  isAuthorized,
+  createReceiverHandler,
+};
