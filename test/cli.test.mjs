@@ -1695,6 +1695,8 @@ test('--help-json returns machine-readable help without fetching GitHub', () => 
   assert.ok(help.options.some((option) => option.name === '--state-dir'));
   assert.ok(help.options.some((option) => option.name === '--format'));
   assert.ok(help.options.some((option) => option.name === '--summary-line'));
+  assert.ok(help.options.some((option) => option.name === '--rate-limit-floor'));
+  assert.match(help.output.description, /resetAt.*rate-limit/i);
   assert.ok(help.options.some((option) => option.name === '--help-json'));
   assert.ok(help.options.some((option) => option.name === '--version'));
   assert.equal(help.version, packageJson.version);

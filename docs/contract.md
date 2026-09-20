@@ -805,11 +805,11 @@ Emitted with exit code `1` (transient) or `2` (permanent). It **does not** carry
 ```
 
 - `schemaVersion` (number), `error` (string), `at` (string): always present.
-- `kind` (string): one of `config`, `snapshot`, `github`, `io`, `busy`, `log`. This is
-  a closed set while `report.schemaVersion === 1`, but forward-compatible like
-  classes — treat unknown values as "something changed, inspect". `config` and
-  `snapshot`, and `log` kinds map to exit `2`; `github`, `io`, and `busy` kinds map to
-  exit `1`. This is where `--repo` derivation errors land too: no repo
+- `kind` (string): one of `config`, `snapshot`, `github`, `io`, `busy`, `log`,
+  `rate-limit`. This is a closed set while `report.schemaVersion === 1`, but
+  forward-compatible like classes — treat unknown values as "something changed,
+  inspect". `config`, `snapshot`, and `log` kinds map to exit `2`; `github`,
+  `io`, `busy`, and `rate-limit` kinds map to exit `1`. This is where `--repo` derivation errors land too: no repo
   derivable from git remotes or `gh` is `kind: "config"` (exit `2`, permanent);
   a `gh` timeout while deriving `--repo` is `kind: "github"` (exit `1`,
   transient) — see the `--repo` bullet in [CLI](#cli). `busy` means the
@@ -820,6 +820,10 @@ Emitted with exit code `1` (transient) or `2` (permanent). It **does not** carry
 - `repo`, `monitorId` (string): present once the corresponding flag has been
   parsed (absent for errors raised before that, e.g. an unknown option). `error`
   strings are human-readable and not a stable enum.
+- `resetAt` (ISO-8601 UTC string): present **only** when `kind` is `rate-limit`
+  because `--rate-limit-floor` found `resources.graphql.remaining` below the
+  configured floor. It is the API's reset epoch normalized to UTC; it is absent
+  for every other error, including a malformed or failed rate-limit request.
 
 ## Delta Log and Cursors
 
