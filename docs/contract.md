@@ -18,7 +18,7 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
          [--summary-line] [--detail] [--summaries] [--baseline-emit-state]
          [--outpost-url <url>]
          [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>]
-         [--gh-timeout-ms <ms>] [--no-registry]
+         [--gh-timeout-ms <ms>] [--no-registry] [--lock-stale-ms <duration>]
 ```
 
 - `--repo` is **optional**. An explicit value always wins. When omitted,
@@ -95,6 +95,12 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
 - `--no-registry` skips the best-effort [run-registry](#run-registry) breadcrumb
   this run would otherwise leave for `gh-delta list`. Equivalent to setting
   `GH_DELTA_NO_REGISTRY=1`. It never affects the report, exit code, or snapshot.
+- `--lock-stale-ms` is optional (default `10m`; grammar shared with `--since`,
+  see [`parseDuration`](#programmatic-api-surface)). It is a ceiling on how old
+  an **unreadable/corrupt** state-file lock must be before it is presumed
+  abandoned and stolen (with a warning). It does **not** apply to a readable
+  lock — that one is only ever stolen once its own `expiresAt` has passed. See
+  [Lock Semantics](#lock-semantics).
 
 **Repeated flags:** the last value wins. **`--help`, `--help-json`, and
 `--version` take precedence over all validation** — an agent probing with
@@ -221,9 +227,10 @@ deltas), the CLI writes one small breadcrumb per monitor:
   that observes at least one tracked open item: the report then carries
   `baseline: true` **and** a non-empty `deltas` array of `baseline-state` deltas.
   Watchers that chain on exit `10` feed this baseline report like any other.
-- `1`: **transient error** — GitHub CLI, network, timeout, or snapshot write
-  failure. The snapshot is not updated; the next scheduled tick should retry
-  automatically.
+- `1`: **transient error** — GitHub CLI, network, timeout, snapshot write
+  failure, or a busy state-file lock (`kind: "busy"`, see
+  [Lock Semantics](#lock-semantics)). The snapshot is not updated; the next
+  scheduled tick should retry automatically.
 - `2`: **permanent error** — invalid configuration or unreadable / invalid-shape
   snapshot. Retrying will not help; a human must fix the issue before the next
   tick.
@@ -233,18 +240,19 @@ deltas), the CLI writes one small breadcrumb per monitor:
 The package publishes a small, explicit ESM surface. Imports must use explicit
 subpaths; the package root is intentionally not exported.
 
-| Export path            | Symbols                                                                                                                                                                                                                                                                                        | Purpose                                                 |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| `gh-delta/detect`      | `detectDeltas`                                                                                                                                                                                                                                                                                 | Pure delta classification engine                        |
-| `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint`, `summarizeCiRollup`, `summarizeReviews`, `comparableFingerprint`, `stableValue`, `deltaIdentity`, `deltaId`                                                                                                        | Stable object fingerprint builders and delta-id hashing |
-| `gh-delta/duration`    | `parseDuration`                                                                                                                                                                                                                                                                                | Shared duration grammar for every duration-valued flag  |
-| `gh-delta/list`        | `listMonitors`, `parseSnapshotFilename`, `parseSince`                                                                                                                                                                                                                                          | Read-only monitor snapshot inventory                    |
-| `gh-delta/registry`    | `registerMonitor`, `readRegistry`, `defaultRegistryDir`, `registryEntryPath`, `canonicalStateFileKey`, `REGISTRY_VERSION`                                                                                                                                                                      | Run-registry breadcrumbs for gh-delta list              |
-| `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`                                                                                                                                                                                                                     | Outpost payload and transport helpers                   |
-| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`, `defaultStateDir`, `horizonCutoff`                                                                                                                                                                                                      | Snapshot path and persistence helpers                   |
-| `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`, `canonicalEntityKey`, `defaultMonitorId`                                                                                                                                                                                          | Shared argument parsing policies                        |
-| `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                                                                                                                                                                                                                                      | Package metadata and version output                     |
-| `gh-delta/contract`    | `REPORT_SCHEMA_VERSION`, `OUTPOST_SCHEMA_VERSION`, `REPORT_FIELDS`, `DELTA_FIELDS`, `DELTA_DETAIL_FIELDS`, `DELTA_DETAIL_FIELDS_BY_CLASS`, `DELTA_CLASSES`, `ERROR_KINDS`, `LIST_REPORT_FIELDS`, `LIST_MONITOR_FIELDS`, `REGISTRY_ENTRY_FIELDS`, `DELTA_SUMMARY_FIELDS`, `DELTA_SUMMARY_ENUMS` | Runtime contract constants and field catalogs           |
+| Export path            | Symbols                                                                                                                                                                                                                                                                                        | Purpose                                                       |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `gh-delta/detect`      | `detectDeltas`                                                                                                                                                                                                                                                                                 | Pure delta classification engine                              |
+| `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint`, `summarizeCiRollup`, `summarizeReviews`, `comparableFingerprint`, `stableValue`, `deltaIdentity`, `deltaId`                                                                                                        | Stable object fingerprint builders and delta-id hashing       |
+| `gh-delta/duration`    | `parseDuration`                                                                                                                                                                                                                                                                                | Shared duration grammar for every duration-valued flag        |
+| `gh-delta/list`        | `listMonitors`, `parseSnapshotFilename`, `parseSince`                                                                                                                                                                                                                                          | Read-only monitor snapshot inventory                          |
+| `gh-delta/registry`    | `registerMonitor`, `readRegistry`, `defaultRegistryDir`, `registryEntryPath`, `canonicalStateFileKey`, `REGISTRY_VERSION`                                                                                                                                                                      | Run-registry breadcrumbs for gh-delta list                    |
+| `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`                                                                                                                                                                                                                     | Outpost payload and transport helpers                         |
+| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`, `defaultStateDir`, `horizonCutoff`                                                                                                                                                                                                      | Snapshot path and persistence helpers                         |
+| `gh-delta/lock`        | `acquireLock`, `releaseLock`, `assertLockOwned`, `lockPath`, `LOCK_EXPIRY_SLACK_MS`                                                                                                                                                                                                            | State-file lock: one writer per `(repo, monitorId, entities)` |
+| `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`, `canonicalEntityKey`, `defaultMonitorId`                                                                                                                                                                                          | Shared argument parsing policies                              |
+| `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                                                                                                                                                                                                                                      | Package metadata and version output                           |
+| `gh-delta/contract`    | `REPORT_SCHEMA_VERSION`, `OUTPOST_SCHEMA_VERSION`, `REPORT_FIELDS`, `DELTA_FIELDS`, `DELTA_DETAIL_FIELDS`, `DELTA_DETAIL_FIELDS_BY_CLASS`, `DELTA_CLASSES`, `ERROR_KINDS`, `LIST_REPORT_FIELDS`, `LIST_MONITOR_FIELDS`, `REGISTRY_ENTRY_FIELDS`, `DELTA_SUMMARY_FIELDS`, `DELTA_SUMMARY_ENUMS` | Runtime contract constants and field catalogs                 |
 
 Behavioral notes for consumers:
 
@@ -277,6 +285,11 @@ Behavioral notes for consumers:
   the first 12 hex characters of the sha1 of `os.hostname()`).
 - `REGISTRY_VERSION` is the integer schema version stamped into every
   run-registry breadcrumb file.
+- `acquireLock`/`releaseLock`/`assertLockOwned` implement the state-file lock
+  described in [Lock Semantics](#lock-semantics); a library caller embedding
+  the detector directly (rather than through the CLI) is responsible for
+  calling them around its own read-fetch-write cycle if it wants the same
+  one-writer-per-state-file guarantee `gh-delta` enforces at the CLI layer.
 
 The exit code is the primary machine signal. Branch on it before reading stdout:
 codes `1` and `2` produce an [error report](#error-report-shape) with no
@@ -638,14 +651,18 @@ Emitted with exit code `1` (transient) or `2` (permanent). It **does not** carry
 ```
 
 - `schemaVersion` (number), `error` (string), `at` (string): always present.
-- `kind` (string): one of `config`, `snapshot`, `github`, `io`. This is a closed
-  set while `report.schemaVersion === 1`, but forward-compatible like classes —
-  treat unknown values as "something changed, inspect". `config` and `snapshot`
-  kinds map to exit `2`; `github` and `io` kinds map to exit `1`. This is where
-  `--repo` derivation errors land too: no repo derivable from git remotes or
-  `gh` is `kind: "config"` (exit `2`, permanent); a `gh` timeout while deriving
-  `--repo` is `kind: "github"` (exit `1`, transient) — see the `--repo` bullet
-  in [CLI](#cli).
+- `kind` (string): one of `config`, `snapshot`, `github`, `io`, `busy`. This is
+  a closed set while `report.schemaVersion === 1`, but forward-compatible like
+  classes — treat unknown values as "something changed, inspect". `config` and
+  `snapshot` kinds map to exit `2`; `github`, `io`, and `busy` kinds map to
+  exit `1`. This is where `--repo` derivation errors land too: no repo
+  derivable from git remotes or `gh` is `kind: "config"` (exit `2`, permanent);
+  a `gh` timeout while deriving `--repo` is `kind: "github"` (exit `1`,
+  transient) — see the `--repo` bullet in [CLI](#cli). `busy` means the
+  state-file lock is held by another run (or was unreadable and too recent to
+  presume abandoned) — see [Lock Semantics](#lock-semantics). A `busy` error is
+  raised **before any GitHub call**, so it is never mistaken for a failed
+  fetch, and the snapshot is untouched.
 - `repo`, `monitorId` (string): present once the corresponding flag has been
   parsed (absent for errors raised before that, e.g. an unknown option). `error`
   strings are human-readable and not a stable enum.
@@ -723,12 +740,15 @@ their derived filename or a registry entry.
   are outside this guarantee.
 - A partial `--entities` run preserves the omitted family's memory in the
   snapshot; it does not erase it.
-- **Do not run concurrent ticks against the same state file.** Writes are atomic
-  (temp file + rename), which prevents corruption, but overlapping runs still
-  race and one will clobber the other's result. Serialize ticks per
-  `(repo, monitor-id, entities)`. The same rule is exposed in
-  `gh-delta --help-json` as `stateConcurrency` so agents and schedulers do not
-  need to parse Markdown to discover the overlap risk.
+- **Concurrent ticks against the same state file are locked, not merely
+  discouraged.** Writes are atomic (temp file + rename), which prevents
+  corruption, but that alone does not prevent a lost update: two overlapping
+  runs can both read the old snapshot, both fetch GitHub, and both write —
+  the second write clobbers the first run's observations. A state-file lock
+  (see [Lock Semantics](#lock-semantics)) makes a second concurrent run exit
+  `1` with `kind: "busy"` instead of silently losing that update. The same
+  rule is exposed in `gh-delta --help-json` as `stateConcurrency` so agents
+  and schedulers do not need to parse Markdown to discover it.
 - **Downgrade caveat.** Snapshots are forward-written, not version-negotiated:
   rolling back to gh-delta 0.2.0 over a snapshot last written by 0.3.0 fires a
   bounded burst of spurious `updated` deltas — one per open PR — on the first
@@ -738,6 +758,73 @@ their derived filename or a registry entry.
   burst is self-correcting: the next tick re-establishes a clean baseline under
   the older binary. Prefer not to downgrade a monitor across a snapshot; if you
   must, expect and discard that one-time burst.
+
+## Lock Semantics
+
+One writer at a time per `(repo, monitorId, entities)` — i.e. per resolved
+`stateFile`. A lock file at `<stateFile>.lock` guards the read-fetch-write
+window; a second run contending for the same state file gets a visible
+`busy` error (exit `1`, transient) instead of a silent lost update.
+
+**Why a lock at all, given atomic writes.** `writeSnapshotAtomic` (temp file +
+rename) prevents a reader ever seeing partial JSON, but it does not prevent
+two independent writers from racing: both read the same old snapshot, both
+fetch GitHub, and both write — the second rename wins and the first run's
+observations vanish without a trace. The lock turns that into a loud,
+retryable error.
+
+**Contents:** `{ token, pid, host, acquiredAt, expiresAt }`, where `token` is
+a fresh `randomUUID()` identifying this one acquisition (not the process or
+monitor). `expiresAt` is computed **once, at acquire time** —
+`acquiredAt + numberOfFetches * --gh-timeout-ms + a fixed slack` — from
+timeouts the run already knows before it makes a single GitHub call. There is
+deliberately **no lease renewal**: GitHub fetches run through `execFileSync`,
+which blocks the single JS thread, so a renewal timer could never fire during
+a fetch anyway. `expiresAt` is a ceiling on the whole run, not a heartbeat.
+
+**Protocol:**
+
+1. **Acquire.** An atomic `open(path, 'wx')` — portable, no `flock`. If the
+   file already exists, its `expiresAt` is read: in the future means a live
+   holder (`busy`); in the past means an abandoned lock, stolen below.
+2. **Steal by rename, not read-verify-delete.** An expired (or, past
+   `--lock-stale-ms`, unreadable) lock is stolen with an atomic rename to a
+   throwaway name, never by reading it, checking, and then unlinking. Rename
+   is atomic, so of two simultaneous thieves exactly one succeeds; the other
+   gets `ENOENT` and reports `busy` — the winner proceeds.
+3. **A corrupt lock never deadlocks the state file.** A process killed
+   mid-write can leave a truncated, unreadable `.lock`. An unreadable lock
+   younger than `--lock-stale-ms` reports `busy` (it might still belong to a
+   live holder); older than that, it is presumed abandoned and stolen, with a
+   `{ label: "lock", reason }` entry in the report's `warnings` array so an
+   operator can see it happened.
+4. **Release verifies ownership first.** The holder unlinks the lock file
+   **only if** the on-disk token still matches its own. This is what makes
+   stealing safe: a slow-but-alive holder whose lock was stolen while it was
+   still fetching must never delete a lock that has since become someone
+   else's.
+5. **The fence is at the write, not the unlink.** Immediately before
+   `writeSnapshotAtomic`, the lock is re-read and the token re-verified. If it
+   no longer matches (ownership was lost during the fetch), the run fails with
+   `busy` and **writes nothing** — the stolen holder's fetch results are
+   discarded rather than clobbering the thief's already-written snapshot.
+
+**Honesty about the residual race.** The pre-write fence check and the
+snapshot rename are two syscalls against two different files, not one atomic
+operation — the OS scheduler can still preempt between them. This **narrows**
+the lost-update window from the entire fetch duration down to that scheduler
+gap; it does **not** eliminate the race. Treat the lock as a strong, loud
+guard against the common case (overlapping ticks, a slow holder outlasted by
+a faster one), not a formal mutual-exclusion proof.
+
+**`--lock-stale-ms`** (default `10m`) only bounds the unreadable/corrupt case
+above; a readable lock is stolen purely on its own `expiresAt`, regardless of
+this flag.
+
+**Deleting a `.lock` file by hand is always safe.** At worst, a live holder
+loses its fence check and its own next write attempt reports `busy` — the
+snapshot itself is never corrupted, because `writeSnapshotAtomic`'s atomicity
+is independent of the lock.
 
 ### schemaVersion policy
 

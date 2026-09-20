@@ -26,12 +26,26 @@ const basePr = {
   headRefOid: 'sha1',
 };
 
+// This suite is about detector behavior, not lock behavior (see
+// test/lock.test.mjs and test/cli-lock.test.mjs for that) -- and many tests
+// below intentionally share literal state-file paths (e.g. /tmp/x.json)
+// across independent runs. A real fs-backed lock at that shared path would
+// make cross-file test parallelism racy. Every deps() object here stubs the
+// lock as an always-uncontended no-op so run() exercises the full lock
+// call sequence (acquire -> fence -> release) without ever touching disk.
+const NOOP_LOCK_DEPS = {
+  acquireLock: () => ({ ok: true, token: 'test-lock-token' }),
+  releaseLock: () => ({ ok: true, released: true }),
+  assertLockOwned: () => true,
+};
+
 function deps(prSeq, { existing = null } = {}) {
   let writes = 0;
   let stored = existing;
   let readPath;
   let writePath;
   return {
+    ...NOOP_LOCK_DEPS,
     fetchPRs: () => prSeq.shift(),
     fetchIssues: () => [],
     readSnapshot: (p) => {
@@ -132,6 +146,7 @@ test('no change returns code 0 and still refreshes snapshot', () => {
 
 test('a gh failure returns code 1 and does NOT write the snapshot', () => {
   const d = {
+    ...NOOP_LOCK_DEPS,
     fetchPRs: () => {
       throw new Error('gh: rate limited');
     },
@@ -701,10 +716,12 @@ test('--help-json returns machine-readable help without fetching GitHub', () => 
   assert.match(help.exitCodes.find((entry) => entry.code === 10)?.meaning ?? '', /Deltas found/);
   assert.deepEqual(help.output.formats, ['json', 'text']);
   assert.deepEqual(help.stateConcurrency, {
-    sameStateFile: 'serialize',
-    overlapRisk: 'duplicate delta emission; last writer wins',
+    sameStateFile: 'locked: one writer at a time, others exit busy (1)',
+    overlapRisk:
+      'the pre-write fence narrows, but cannot fully close, a lost-update window to a scheduler gap between the fence check and the snapshot rename',
     corruptionRisk: 'atomic writes prevent partial JSON snapshots',
   });
+  assert.ok(help.options.some((option) => option.name === '--lock-stale-ms'));
 });
 
 test('--version returns package version without fetching GitHub', () => {
@@ -867,6 +884,7 @@ test('corrupt snapshot read failure returns code 2 and does NOT write', () => {
   const { code, report } = run(
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'],
     {
+      ...NOOP_LOCK_DEPS,
       fetchPRs: () => [basePr],
       fetchIssues: () => [],
       readSnapshot: () => {
@@ -889,6 +907,7 @@ test('invalid snapshot horizon returns code 2 before fetching', () => {
   const { code, report } = run(
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'],
     {
+      ...NOOP_LOCK_DEPS,
       fetchPRs: () => {
         fetched = true;
         return [];
@@ -936,6 +955,7 @@ test('existing snapshot is read before GitHub fetches', () => {
   const { code, report } = run(
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--entities', 'pr'],
     {
+      ...NOOP_LOCK_DEPS,
       fetchPRs: () => {
         fetched = true;
         throw new Error('should not fetch');
@@ -1134,6 +1154,7 @@ test('gh-delta rejects invalid --outpost-url before fetching GitHub', async () =
       'file:///tmp/outpost.json',
     ],
     {
+      ...NOOP_LOCK_DEPS,
       fetchPRs: () => {
         fetches++;
         throw new Error('should not fetch');
@@ -1369,9 +1390,9 @@ test('duplicate --outpost-url uses last-wins like every other flag', async () =>
   assert.ok(posts.every((url) => new URL(url).origin === 'https://second.example'));
 });
 
-test('error kinds map to exit codes: config/snapshot=2, github/io=1', () => {
+test('error kinds map to exit codes: config/snapshot=2, github/io/busy=1', () => {
   const base = ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'];
-  const noFetch = { now: () => '2026-07-01T12:00:00Z' };
+  const noFetch = { ...NOOP_LOCK_DEPS, now: () => '2026-07-01T12:00:00Z' };
   const config = run(
     ['--repo', 'o/r', '--monitor-id', '../bad', '--state-file', '/tmp/x.json'],
     noFetch,
@@ -1407,6 +1428,19 @@ test('error kinds map to exit codes: config/snapshot=2, github/io=1', () => {
   });
   assert.equal(io.code, 1);
   assert.equal(io.report.kind, 'io');
+  let fetched = false;
+  const busy = run(base, {
+    ...noFetch,
+    acquireLock: () => ({ ok: false, reason: 'held' }),
+    fetchPRs: () => {
+      fetched = true;
+      return [];
+    },
+    fetchIssues: () => [],
+  });
+  assert.equal(busy.code, 1);
+  assert.equal(busy.report.kind, 'busy');
+  assert.equal(fetched, false); // busy is raised before any GitHub call
 });
 
 test('sendOutposts stops after the configured max payload count', async () => {
@@ -1528,6 +1562,7 @@ test('--gh-timeout-ms abc is a config error (exit 2, kind config)', () => {
 test('--gh-timeout-ms threads into fetchers and defaults to 60000', () => {
   let receivedTimeoutMs;
   const makeDeps = () => ({
+    ...NOOP_LOCK_DEPS,
     fetchPRs: (_repo, opts) => {
       receivedTimeoutMs = opts.timeoutMs;
       return [];
@@ -1579,6 +1614,7 @@ test('non-numeric outpost flags are config errors (exit 2)', () => {
 test('the CLI threads the snapshot horizon into fetchers and stamps a new one', () => {
   let receivedCutoff = 'unset';
   const d = {
+    ...NOOP_LOCK_DEPS,
     fetchPRs: (_repo, opts) => {
       receivedCutoff = opts.horizonCutoff;
       return [];
@@ -1598,6 +1634,7 @@ test('the CLI threads the snapshot horizon into fetchers and stamps a new one', 
 
 test('--detail reports the current missing tick for still-missing', () => {
   const d = {
+    ...NOOP_LOCK_DEPS,
     fetchPRs: () => [],
     fetchIssues: () => [],
     readSnapshot: () => ({
@@ -1948,6 +1985,7 @@ test('list without --state-dir consults the run registry; --state-dir narrows to
 
 // Minimal deps that let run() reach the report without touching disk/network.
 const baseDeps = (over = {}) => ({
+  ...NOOP_LOCK_DEPS,
   fetchPRs: () => ({}),
   fetchIssues: () => ({}),
   readSnapshot: () => null,
