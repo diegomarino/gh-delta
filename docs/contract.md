@@ -22,7 +22,8 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
          [--outpost-url <url>]
          [--outpost-secret <ENV_VARIABLE_NAME>]
          [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>]
-         [--gh-timeout-ms <ms>] [--no-registry] [--lock-stale-ms <duration>]
+         [--gh-timeout-ms <ms>] [--rate-limit-floor <n>]
+         [--no-registry] [--lock-stale-ms <duration>]
 ```
 
 - `--repo` is **optional**. An explicit value always wins. When omitted,
@@ -136,6 +137,15 @@ monitorId>__<entities>.ndjson`, or `<state-file>.deltalog.ndjson` for an explici
   unlimited). Excess deltas are skipped with an outpost warning.
 - `--gh-timeout-ms` timeout in milliseconds for each `gh` subprocess call
   (default `60000`).
+- `--rate-limit-floor <n>` is an opt-in pre-fetch GraphQL quota floor. `n` is a
+  non-negative safe integer. After acquiring the state lock and validating the
+  current snapshot, the detector reads `resources.graphql.remaining` from one
+  `gh api rate_limit` call immediately before the observation fetch. Equality
+  proceeds. A lower remaining quota exits `1` with `kind: "rate-limit"`, a
+  stable message naming both values, and top-level ISO-8601 UTC `resetAt`; it
+  leaves the snapshot, log, outpost, and watch cleanup untouched. A malformed
+  or failed rate-limit request remains the ordinary transient `github` error.
+  Omitted means no rate-limit call and byte-identical legacy behavior.
 - `--no-registry` skips the best-effort [run-registry](#run-registry) breadcrumb
   this run would otherwise leave for `gh-delta list`. Equivalent to setting
   `GH_DELTA_NO_REGISTRY=1`. It never affects the report, exit code, or snapshot.
