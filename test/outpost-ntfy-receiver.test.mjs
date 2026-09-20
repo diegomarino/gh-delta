@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import {
   itemKey,
   parseSeenLine,
@@ -84,6 +84,47 @@ test('receiver rejects unsigned requests before parsing or recording and accepts
   assert.equal(records, 1);
   assert.equal(forwards, 1);
   assert.deepEqual([...seen], [['pr#1', 'sha']]);
+});
+
+test('receiver rejects an oversized chunked body before parsing, recording, or forwarding', async (t) => {
+  const seen = new Map();
+  let records = 0;
+  let forwards = 0;
+  const server = createServer(
+    createReceiverHandler({
+      outpostSecret: 'Jefe',
+      classes: [],
+      seen,
+      recordSeen: () => {
+        records++;
+      },
+      forward: async () => {
+        forwards++;
+      },
+    }),
+  );
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const { port } = server.address();
+  const body = 'x'.repeat(64 * 1024 + 1);
+
+  const status = await new Promise((resolve, reject) => {
+    const req = httpRequest(
+      { host: '127.0.0.1', port, method: 'POST', headers: { 'Transfer-Encoding': 'chunked' } },
+      (res) => {
+        res.resume();
+        res.on('end', () => resolve(res.statusCode));
+      },
+    );
+    req.on('error', reject);
+    req.write(body.slice(0, 1024));
+    req.end(body.slice(1024));
+  });
+
+  assert.equal(status, 413);
+  assert.equal(records, 0);
+  assert.equal(forwards, 0);
+  assert.equal(seen.size, 0);
 });
 
 function payload({ number = 42, id, classes = ['ci-changed'] } = {}) {

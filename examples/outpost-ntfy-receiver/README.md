@@ -42,6 +42,9 @@ anyone who can reach the port can use to spoof phone notifications, and it
 will log a loud warning to stderr on startup if you do this without a
 secret configured.
 
+The receiver accepts request bodies up to 64 KiB. Larger requests return HTTP
+413 before authentication, JSON parsing, dedupe, recording, or forwarding.
+
 You have two ways to secure a non-localhost deployment — pick at least one:
 
 1. **Shared secret (`OUTPOST_SECRET`).** Set `OUTPOST_SECRET` to a random

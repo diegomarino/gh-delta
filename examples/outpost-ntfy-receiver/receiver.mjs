@@ -28,6 +28,8 @@ import { appendFileSync, existsSync, readFileSync, realpathSync, writeFileSync }
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
+const MAX_REQUEST_BODY_BYTES = 64 * 1024;
+
 /**
  * Verify the exact SHA-256 HMAC over the raw request body.
  *
@@ -166,10 +168,21 @@ function createReceiverHandler({
   return (req, res) => {
     if (req.method !== 'POST') return respond(res, 405, { error: 'POST only' });
     const chunks = [];
+    let bodyBytes = 0;
+    let rejectedForSize = false;
     req.on('data', (chunk) => {
+      if (rejectedForSize) return;
+      bodyBytes += chunk.length;
+      if (bodyBytes > MAX_REQUEST_BODY_BYTES) {
+        rejectedForSize = true;
+        respond(res, 413, { error: 'request body too large' });
+        req.resume();
+        return;
+      }
       chunks.push(chunk);
     });
     req.on('end', () => {
+      if (rejectedForSize) return;
       const rawBody = Buffer.concat(chunks);
       if (!isAuthorized(req, rawBody, outpostSecret))
         return respond(res, 401, { error: 'unauthorized' });
