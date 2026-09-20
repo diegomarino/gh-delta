@@ -155,6 +155,45 @@ async function forward(payload, ntfyBaseUrl, ntfyTopic) {
   if (!response.ok) throw new Error(`ntfy HTTP ${response.status}`);
 }
 
+/** Build the HTTP boundary with injectable state/forwarding for local testing. */
+function createReceiverHandler({
+  outpostSecret,
+  classes,
+  seen,
+  recordSeen,
+  forward: forwardPayload,
+}) {
+  return (req, res) => {
+    if (req.method !== 'POST') return respond(res, 405, { error: 'POST only' });
+    const chunks = [];
+    req.on('data', (chunk) => {
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      const rawBody = Buffer.concat(chunks);
+      if (!isAuthorized(req, rawBody, outpostSecret))
+        return respond(res, 401, { error: 'unauthorized' });
+      let payload;
+      try {
+        payload = JSON.parse(rawBody.toString('utf8'));
+      } catch {
+        return respond(res, 400, { error: 'invalid JSON' });
+      }
+      if (payload?.type !== 'gh-delta.delta' || payload?.schemaVersion !== 1) {
+        return respond(res, 400, { error: 'expected gh-delta.delta schemaVersion 1' });
+      }
+      const decision = shouldForward(seen, payload, classes);
+      if (decision.action === 'filtered') return respond(res, 202, { filtered: true });
+      if (decision.action === 'deduped') return respond(res, 202, { deduped: true });
+      recordSeen(decision.key, payload.id, payload.detectedAt);
+      respond(res, 202, { accepted: true });
+      forwardPayload(payload).catch((err) =>
+        console.error(`receiver: ntfy forward failed for ${payload.id}: ${err.message}`),
+      );
+    });
+  };
+}
+
 function main() {
   const PORT = Number(process.env.PORT ?? 8787);
   const HOST = process.env.HOST ?? '127.0.0.1';
@@ -220,44 +259,15 @@ function main() {
     appendFileSync(SEEN_FILE, `${JSON.stringify({ key, id, at: detectedAt })}\n`);
   }
 
-  const server = createServer((req, res) => {
-    if (req.method !== 'POST') return respond(res, 405, { error: 'POST only' });
-    const chunks = [];
-    req.on('data', (chunk) => {
-      chunks.push(chunk);
-    });
-    req.on('end', () => {
-      const rawBody = Buffer.concat(chunks);
-      if (!isAuthorized(req, rawBody, OUTPOST_SECRET))
-        return respond(res, 401, { error: 'unauthorized' });
-      let payload;
-      try {
-        payload = JSON.parse(rawBody.toString('utf8'));
-      } catch {
-        return respond(res, 400, { error: 'invalid JSON' });
-      }
-      if (payload?.type !== 'gh-delta.delta' || payload?.schemaVersion !== 1) {
-        return respond(res, 400, { error: 'expected gh-delta.delta schemaVersion 1' });
-      }
-      const decision = shouldForward(seen, payload, CLASSES);
-      if (decision.action === 'filtered') return respond(res, 202, { filtered: true });
-      if (decision.action === 'deduped') return respond(res, 202, { deduped: true });
-      // Mark seen BEFORE forwarding: this mirrors the detector's at-most-once
-      // stance (a failed ntfy push is logged, never retried). This now runs
-      // only for payloads that already passed the class filter above, so a
-      // payload the filter drops never gets its id recorded — preserving
-      // that seen-before-forward intent for the payloads that do get
-      // forwarded, without letting a filtered-out payload poison dedupe for
-      // a later, allowed one that shares its id (see shouldForward above).
-      // Move this after forward() if you prefer at-least-once pings at the
-      // cost of duplicates.
-      recordSeen(decision.key, payload.id, payload.detectedAt);
-      respond(res, 202, { accepted: true });
-      forward(payload, NTFY_BASE_URL, NTFY_TOPIC).catch((err) =>
-        console.error(`receiver: ntfy forward failed for ${payload.id}: ${err.message}`),
-      );
-    });
-  });
+  const server = createServer(
+    createReceiverHandler({
+      outpostSecret: OUTPOST_SECRET,
+      classes: CLASSES,
+      seen,
+      recordSeen,
+      forward: (payload) => forward(payload, NTFY_BASE_URL, NTFY_TOPIC),
+    }),
+  );
 
   server.listen(PORT, HOST, () =>
     console.log(`gh-delta outpost receiver on ${HOST}:${PORT} -> ${NTFY_BASE_URL}/${NTFY_TOPIC}`),
@@ -291,4 +301,11 @@ if (isDirectlyExecuted()) {
   main();
 }
 
-export { itemKey, parseSeenLine, loadSeenState, shouldForward, isAuthorized };
+export {
+  itemKey,
+  parseSeenLine,
+  loadSeenState,
+  shouldForward,
+  isAuthorized,
+  createReceiverHandler,
+};

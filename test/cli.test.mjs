@@ -9,6 +9,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { run, runCommand } from '../lib/cli.mjs';
+import { outpostSignature } from '../lib/outpost.mjs';
 import { prFingerprint } from '../lib/fingerprint.mjs';
 import { DELTA_DETAIL_FIELDS_BY_CLASS } from '../lib/contract.mjs';
 
@@ -27,6 +28,13 @@ const basePr = {
   comments: [],
   headRefOid: 'sha1',
 };
+
+test('outpostSignature matches the published HMAC-SHA256 known vector', () => {
+  assert.equal(
+    outpostSignature('The quick brown fox jumps over the lazy dog', 'key'),
+    'sha256=f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8',
+  );
+});
 
 test('postOutpost signs the exact serialized body with the configured HMAC secret', async () => {
   const { postOutpost } = await import('../lib/outpost.mjs');
@@ -68,7 +76,22 @@ test('--outpost-secret validates its environment-variable name before repo deriv
 test('--outpost-secret reads the injected environment and does not leak its value', async () => {
   const { runWithOutpost } = await import('../lib/cli.mjs');
   const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
-    existing: { pr: { 42: { state: 'OPEN', updatedAt: '2026-07-01T10:00:00Z', isDraft: false, ci: 'x', review: 'REVIEW_REQUIRED', reviews: 'x', mergeable: 'UNKNOWN', comments: 0, head: 'sha1' } }, issue: {} },
+    existing: {
+      pr: {
+        42: {
+          state: 'OPEN',
+          updatedAt: '2026-07-01T10:00:00Z',
+          isDraft: false,
+          ci: 'x',
+          review: 'REVIEW_REQUIRED',
+          reviews: 'x',
+          mergeable: 'UNKNOWN',
+          comments: 0,
+          head: 'sha1',
+        },
+      },
+      issue: {},
+    },
   });
   let sent;
   d.env = { OUTPOST_SECRET: 'not-in-report' };
@@ -77,10 +100,21 @@ test('--outpost-secret reads the injected environment and does not leak its valu
     return { ok: true, status: 202 };
   };
 
-  const result = await runWithOutpost([
-    '--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json',
-    '--outpost-url', 'https://example.com/hook', '--outpost-secret', 'OUTPOST_SECRET',
-  ], d);
+  const result = await runWithOutpost(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/x.json',
+      '--outpost-url',
+      'https://example.com/hook',
+      '--outpost-secret',
+      'OUTPOST_SECRET',
+    ],
+    d,
+  );
 
   assert.match(sent.headers['X-GhDelta-Signature'], /^sha256=[0-9a-f]{64}$/);
   assert.doesNotMatch(JSON.stringify(result), /not-in-report/);
@@ -106,12 +140,16 @@ test('--outpost-secret requires an outpost URL and a non-empty injected value', 
 test('unsigned postOutpost keeps the legacy headers and body bytes', async () => {
   const { postOutpost } = await import('../lib/outpost.mjs');
   let sent;
-  await postOutpost('https://example.com/hook', { a: 1 }, {
-    fetchImpl: async (_url, options) => {
-      sent = options;
-      return { ok: true, status: 202 };
+  await postOutpost(
+    'https://example.com/hook',
+    { a: 1 },
+    {
+      fetchImpl: async (_url, options) => {
+        sent = options;
+        return { ok: true, status: 202 };
+      },
     },
-  });
+  );
   assert.deepEqual(sent.headers, { 'Content-Type': 'application/json' });
   assert.equal(sent.body, '{"a":1}');
 });

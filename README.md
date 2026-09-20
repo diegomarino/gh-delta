@@ -208,12 +208,17 @@ whose prompt runs one detector pass and stops.
 See [docs/watch-loop-prompt.md](docs/watch-loop-prompt.md) for a prompt template
 for cron-owned watcher ticks.
 
-`--outpost-url` sends one best-effort HTTP notification per delta. `gh-delta`
+`--outpost-url` sends one best-effort HTTP notification per delta.
+`--outpost-secret <ENV_VARIABLE_NAME>` optionally signs each exact JSON body
+with HMAC-SHA256 using the named environment value (the secret itself never
+appears in the command). `gh-delta`
 does not provide retries, an outbox, acknowledgement, replay, or action routing;
 the receiving endpoint owns filtering, dedupe, and downstream action. Read the
 [Usage Guide](docs/usage.md#outpost-delivery) for a worked command and the
 [Outpost Payload](docs/contract.md#outpost-payload-schema-v1) contract for the
-exact envelope.
+exact envelope and signing rule. The zero-dependency
+[ntfy receiver example](examples/outpost-ntfy-receiver/README.md) verifies the
+signature before parsing or forwarding.
 
 Worked schedulers and receivers live in
 [examples/](https://github.com/diegomarino/gh-delta/tree/main/examples) in the
