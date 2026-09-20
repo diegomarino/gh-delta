@@ -258,10 +258,16 @@ later sequence. Consumer cursors are a local at-most-once convenience, not
 acknowledgement; consumers deduplicate work by `id` when they need at-least-once
 action delivery.
 
-Manifest publication also fsyncs its parent directory after atomic rename and
-before returning to the snapshot path. A failed directory sync is surfaced as an
-I/O failure without removing the already-renamed manifest, so retry can recover
-from either durable state.
+Consumer mutation is separately scoped: `read --advance` and `cursor set` hold
+one `<cursor>.lock` through cursor read, log scan, and replacement. That prevents
+same-cursor duplicate delivery and cursor rewind while retaining parallel,
+lock-free non-advancing reads and independent cursor files.
+
+Manifest publication also fsyncs its parent directory after atomic rename on
+POSIX; Windows uses a writable non-truncating fsync of the final renamed manifest
+because Node core cannot portably open a writable directory handle. A failed
+durability sync is surfaced as an I/O failure without removing the renamed
+manifest, so retry can recover from either durable state.
 
 The initial manifest publishes an empty byte-zero prefix before the first record
 write. Legacy readers reconcile a manifest appearing during their read, and all

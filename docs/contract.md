@@ -792,7 +792,8 @@ renames that temp file, and fsyncs the manifest parent directory before append
 returns or a snapshot may publish. A directory open/fsync failure is an I/O
 failure: the renamed manifest remains for safe recovery and the snapshot stays
 unchanged. POSIX uses a non-mutating read handle; Windows uses a non-truncating
-writable directory handle for `FlushFileBuffers` compatibility.
+writable handle on the final renamed manifest as the Node-core-supported
+`FlushFileBuffers` fallback.
 
 For a legacy/manual log without a manifest, the first append fully validates its
 complete prefix and atomically bootstraps the manifest before appending new bytes.
@@ -818,7 +819,15 @@ A cursor is atomically replaced JSON with exactly
 non-negative safe integer (`0` means before the first record) and the absolute
 `logFile` binds one consumer to one journal. Give independent consumers distinct
 cursor files. `--advance` is an at-most-once convenience, not downstream
-acknowledgement.
+acknowledgement. `read --advance` and `cursor set` acquire the existing lock
+protocol at `<cursor>.lock` before reading the cursor and hold it through scan
+and atomic replacement; a concurrent mutator is `kind: "busy"` / exit `1` and
+does not read, deliver, or write. The fixed local lease is 5 seconds plus the
+lock slack and stale threshold is 30 seconds; it is renewed immediately before
+replacement. Non-advancing reads remain lock-free, and distinct cursor files can
+proceed independently. Explicit lower-sequence replay remains allowed under the
+same lock. `setCursorAtomic` itself remains a low-level atomic replacement, not a
+compare-and-swap primitive.
 
 Read report fields, in order, are `schemaVersion`, `command`, `logFile`, `at`,
 `cursor`, `deltas`, and `summary`; cursor fields are `path`, `from`, `to`, and

@@ -109,7 +109,9 @@ gh-delta read --cursor ./state/triage.cursor.json --advance --format text
 
 `read` does not contact GitHub or touch snapshots. Without `--advance`, it
 re-delivers matching deltas; with it, it moves the cursor to the published log
-tail scanned, including entries its filters rejected. See [Delta Log and
+tail scanned, including entries its filters rejected. `--advance` and `cursor
+set` serialize mutations of that one cursor and report busy if another mutator
+holds `<cursor>.lock`; non-advancing reads remain parallel. See [Delta Log and
 Cursors](contract.md#delta-log-and-cursors) for the cursor and crash contracts.
 
 Branch on the process exit code before reading stdout. Exit `10` is the

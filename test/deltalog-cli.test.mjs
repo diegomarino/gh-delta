@@ -14,7 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { run, runCommand } from '../lib/cli.mjs';
-import { appendDeltaLog, readDeltaLog, setCursorAtomic } from '../lib/deltalog.mjs';
+import { appendDeltaLog, readCursor, readDeltaLog, setCursorAtomic } from '../lib/deltalog.mjs';
 
 const before = {
   pr: {
@@ -404,6 +404,101 @@ test('read re-delivers without advance, filters by number, and advance records t
       .length,
     0,
   );
+});
+
+test('same-cursor advance contender is busy before read, delivery, or rewind', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-cursor-advance-lock-'));
+  const log = join(dir, 'events.ndjson');
+  const cursor = join(dir, 'worker.cursor.json');
+  appendDeltaLog(log, {
+    detectedAt: '2026-09-20T12:00:00.000Z',
+    deltas: [
+      { id: 'a'.repeat(64), entity: 'pr', number: 42, title: 'a', classes: ['new'] },
+      { id: 'b'.repeat(64), entity: 'pr', number: 7, title: 'b', classes: ['ci-changed'] },
+    ],
+  });
+  setCursorAtomic(cursor, { cursorVersion: 1, logFile: log, seq: 0 });
+  let nested;
+  let reads = 0;
+  let writes = 0;
+  const deps = {
+    now: () => '2026-09-20T12:05:00.000Z',
+    readCursor(path) {
+      reads++;
+      return readCursor(path);
+    },
+    readDeltaLog(file, options) {
+      if (!nested) nested = run(['read', '--cursor', cursor, '--advance'], deps);
+      return readDeltaLog(file, options);
+    },
+    setCursorAtomic(path, value) {
+      writes++;
+      return setCursorAtomic(path, value);
+    },
+  };
+  const outer = run(['read', '--cursor', cursor, '--advance'], deps);
+  assert.equal(outer.code, 10);
+  assert.equal(nested.code, 1);
+  assert.equal(nested.report.kind, 'busy');
+  assert.equal(reads, 1);
+  assert.equal(writes, 1);
+  assert.equal(readCursor(cursor).seq, 2);
+});
+
+test('cursor set contends with an advancing reader and non-advancing reads stay lock-free', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-cursor-set-lock-'));
+  const log = join(dir, 'events.ndjson');
+  const cursor = join(dir, 'worker.cursor.json');
+  appendDeltaLog(log, {
+    detectedAt: '2026-09-20T12:00:00.000Z',
+    deltas: [{ id: 'a'.repeat(64), entity: 'pr', number: 42, title: 'a', classes: ['new'] }],
+  });
+  setCursorAtomic(cursor, { cursorVersion: 1, logFile: log, seq: 0 });
+  let nested;
+  const deps = {
+    now: () => '2026-09-20T12:05:00.000Z',
+    readDeltaLog(file, options) {
+      if (!nested) nested = run(['cursor', 'set', cursor, '0'], deps);
+      return readDeltaLog(file, options);
+    },
+  };
+  assert.equal(run(['read', '--cursor', cursor, '--advance'], deps).code, 10);
+  assert.equal(nested.report.kind, 'busy');
+  assert.equal(readCursor(cursor).seq, 1);
+  assert.equal(
+    run(['read', '--cursor', cursor], {
+      acquireLock: () => assert.fail('non-advance read must not lock'),
+      now: () => '2026-09-20T12:05:00.000Z',
+    }).code,
+    0,
+  );
+});
+
+test('advance lock loss before cursor replacement is busy, preserves bytes, and releases', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-cursor-loss-lock-'));
+  const log = join(dir, 'events.ndjson');
+  const cursor = join(dir, 'worker.cursor.json');
+  appendDeltaLog(log, {
+    detectedAt: '2026-09-20T12:00:00.000Z',
+    deltas: [{ id: 'a'.repeat(64), entity: 'pr', number: 42, title: 'a', classes: ['new'] }],
+  });
+  setCursorAtomic(cursor, { cursorVersion: 1, logFile: log, seq: 0 });
+  const beforeBytes = readFileSync(cursor);
+  let released = 0;
+  const result = run(['read', '--cursor', cursor, '--advance'], {
+    acquireLock: () => ({ ok: true, token: 'owned' }),
+    assertLockOwned: () => false,
+    extendLockDeadline: () => ({ ok: false }),
+    releaseLock: () => {
+      released++;
+      return { ok: true };
+    },
+    now: () => '2026-09-20T12:05:00.000Z',
+  });
+  assert.equal(result.code, 1);
+  assert.equal(result.report.kind, 'busy');
+  assert.deepEqual(readFileSync(cursor), beforeBytes);
+  assert.equal(released, 1);
 });
 
 test('cursor set bootstraps, accepts replay, and rejects above the complete log tail', () => {

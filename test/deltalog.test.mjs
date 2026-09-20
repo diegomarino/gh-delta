@@ -146,15 +146,16 @@ test('manifest publication fsyncs its parent directory after rename before appen
   ]);
 });
 
-test('manifest parent durability selects a writable directory handle on simulated win32', () => {
+test('manifest durability targets the parent on POSIX and final manifest on win32', () => {
   for (const [platform, expectedFlags] of [
     ['darwin', 'r'],
     ['win32', 'r+'],
   ]) {
     const logFile = tempPath(`manifest-directory-${platform}.ndjson`);
     appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:00:00.000Z', deltas: [first] });
-    const parent = dirname(manifestPath(logFile));
-    const flags = [];
+    const manifest = manifestPath(logFile);
+    const parent = dirname(manifest);
+    const opened = [];
     appendDeltaLog(
       logFile,
       { detectedAt: '2026-09-20T12:01:00.000Z', deltas: [second] },
@@ -162,17 +163,24 @@ test('manifest parent durability selects a writable directory handle on simulate
         platform,
         fs: {
           openSync(path, mode) {
-            if (path === parent) {
-              flags.push(mode);
-              // Simulate the Windows directory-handle adapter on this POSIX host.
-              if (platform === 'win32') return openSync(logFile, 'r+');
+            if (path === parent || path === manifest) {
+              opened.push([path, mode]);
+              return 99;
             }
             return openSync(path, mode);
+          },
+          fsyncSync(fd) {
+            if (fd === 99) return undefined;
+            return fsyncSync(fd);
+          },
+          closeSync(fd) {
+            if (fd === 99) return undefined;
+            return closeSync(fd);
           },
         },
       },
     );
-    assert.deepEqual(flags, [expectedFlags]);
+    assert.deepEqual(opened, [[platform === 'win32' ? manifest : parent, expectedFlags]]);
   }
 });
 
