@@ -2335,6 +2335,133 @@ test('outpost payload has exactly the documented key set (shape/byte-stability g
   );
 });
 
+test('outpost mirrors optional transient enrichment without adding it to legacy payloads', async () => {
+  const { buildOutpostPayload } = await import('../lib/outpost.mjs');
+  const base = {
+    report: { repo: 'o/r', monitorId: 'main', at: 'now' },
+    delta: { entity: 'issue', number: 1, title: 'x', classes: ['new-comments'] },
+  };
+  assert.equal(Object.hasOwn(buildOutpostPayload(base), 'enrichment'), false);
+  const enrichment = {
+    comments: [{ id: 'C1', author: 'a', createdAt: 'now', body: 'hi', mentions: [] }],
+  };
+  assert.deepEqual(
+    buildOutpostPayload({ ...base, delta: { ...base.delta, enrichment } }).enrichment,
+    enrichment,
+  );
+});
+
+test('--enrich decorates surviving deltas only after snapshot publication and leaves the durable log canonical', () => {
+  const before = {
+    ...basePr,
+    latestReviews: [],
+    totalCommentsCount: 1,
+    conversationComments: 1,
+    commentNodes: [{ id: 'C1', author: 'old' }],
+    reviewThreadNodes: [{ id: 'T1', isResolved: true }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    reviewDecision: 'CHANGES_REQUESTED',
+    latestReviews: [
+      {
+        id: 'R1',
+        state: 'CHANGES_REQUESTED',
+        submittedAt: 'now',
+        author: { login: 'a' },
+        commit: { oid: 'b' },
+      },
+    ],
+    totalCommentsCount: 2,
+    conversationComments: 2,
+    commentNodes: [
+      { id: 'C1', author: 'old' },
+      { id: 'C2', author: 'new' },
+    ],
+    reviewThreadNodes: [{ id: 'T1', isResolved: false }],
+  };
+  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const order = [];
+  d.writeSnapshotAtomic = (_path, value) => {
+    order.push('snapshot');
+    d.snapshotBytes = JSON.stringify(value);
+  };
+  d.appendDeltaLog = (_path, value) => {
+    order.push('log');
+    d.logged = value;
+  };
+  d.fetchEnrichment = (kind, ids) => {
+    order.push(kind);
+    assert.equal(order[0], 'log');
+    assert.equal(order[1], 'snapshot');
+    if (kind === 'review')
+      return [
+        {
+          id: ids[0],
+          author: 'a',
+          state: 'CHANGES_REQUESTED',
+          submittedAt: 'now',
+          commit: 'b',
+          body: 'fix',
+        },
+      ];
+    if (kind === 'comments') return [{ id: ids[0], author: 'b', createdAt: 'now', body: '@alice' }];
+    return [
+      {
+        id: ids[0],
+        firstComment: {
+          id: 'TC',
+          author: 'c',
+          createdAt: 'now',
+          path: 'x',
+          line: 2,
+          originalLine: 1,
+          body: 'body',
+        },
+      },
+    ];
+  };
+  const result = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/x.json',
+      '--log',
+      '--enrich',
+      'review,comments,threads',
+    ],
+    d,
+  );
+  assert.equal(result.code, 10);
+  assert.deepEqual(order, ['log', 'snapshot', 'review', 'comments', 'threads']);
+  assert.deepEqual(Object.keys(result.report.deltas[0].enrichment).sort(), [
+    'comments',
+    'review',
+    'threads',
+  ]);
+  assert.equal(JSON.stringify(d.logged).includes('enrichment'), false);
+  assert.equal(d.snapshotBytes.includes('enrichment'), false);
+  assert.match(result.report.deltas[0].enrichment.comments[0].mentions[0], /alice/);
+});
+
+test('--enrich invalid selection is rejected before repository derivation', () => {
+  let derived = false;
+  const result = run(['--enrich', 'review,', '--state-file', '/tmp/x.json'], {
+    now: () => '2026-07-01T12:00:00Z',
+    resolveRepo: () => {
+      derived = true;
+      throw new Error('must not derive');
+    },
+  });
+  assert.equal(result.code, 2);
+  assert.equal(derived, false);
+  assert.match(result.report.error, /--enrich/);
+});
+
 test('--help wins over unknown flags and invalid outpost URLs', () => {
   const d = { now: () => '2026-07-01T12:00:00Z' };
   const helpWithBogus = run(['--help', '--bogus'], d);

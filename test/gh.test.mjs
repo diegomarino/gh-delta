@@ -1,7 +1,13 @@
 // GitHub GraphQL boundary tests: incremental fetch, cutoff, caps, and normalization.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchPRs, fetchPRsByNumber, fetchIssues, DEFAULT_GH_TIMEOUT_MS } from '../lib/gh.mjs';
+import {
+  fetchPRs,
+  fetchPRsByNumber,
+  fetchIssues,
+  fetchEnrichment,
+  DEFAULT_GH_TIMEOUT_MS,
+} from '../lib/gh.mjs';
 
 function prNode(over = {}) {
   return {
@@ -51,6 +57,94 @@ function page(nodes, hasNextPage = false, endCursor = null) {
     data: { repository: { items: { nodes, pageInfo: { hasNextPage, endCursor } } } },
   });
 }
+
+test('enrichment fetch uses one sorted nodes query and normalizes review bodies by requested id', () => {
+  const calls = [];
+  const rows = fetchEnrichment('review', ['R2', 'R1', 'R2'], {
+    exec: (_cmd, args, opts) => {
+      calls.push({ args, opts });
+      return JSON.stringify({
+        data: {
+          nodes: [
+            {
+              __typename: 'PullRequestReview',
+              id: 'R1',
+              body: 'please fix',
+              state: 'CHANGES_REQUESTED',
+              submittedAt: '2026-07-01T10:00:00Z',
+              author: { login: 'alice' },
+              commit: { oid: 'abc' },
+            },
+            {
+              __typename: 'PullRequestReview',
+              id: 'R2',
+              body: '',
+              state: 'CHANGES_REQUESTED',
+              submittedAt: null,
+              author: null,
+              commit: null,
+            },
+          ],
+        },
+      });
+    },
+    timeoutMs: 123,
+    onProgress: () => calls.push({ progress: true }),
+  });
+  assert.equal(calls.filter((call) => call.args).length, 1);
+  assert.deepEqual(
+    calls.find((call) => call.args).args.filter((arg) => arg.startsWith('ids[]=')),
+    ['ids[]=R1', 'ids[]=R2'],
+  );
+  assert.equal(calls.find((call) => call.args).opts.timeoutMs, 123);
+  assert.equal(calls.filter((call) => call.progress).length, 1);
+  assert.deepEqual(rows, [
+    {
+      id: 'R1',
+      author: 'alice',
+      state: 'CHANGES_REQUESTED',
+      submittedAt: '2026-07-01T10:00:00Z',
+      commit: 'abc',
+      body: 'please fix',
+    },
+    {
+      id: 'R2',
+      author: null,
+      state: 'CHANGES_REQUESTED',
+      submittedAt: null,
+      commit: null,
+      body: '',
+    },
+  ]);
+});
+
+test('enrichment fetch fails closed on node coverage, wrong type, and malformed thread connection', () => {
+  for (const body of [
+    { data: { nodes: [] } },
+    { data: { nodes: [{ __typename: 'IssueComment', id: 'R1' }] } },
+    {
+      data: {
+        nodes: [
+          {
+            __typename: 'PullRequestReviewThread',
+            id: 'T1',
+            comments: { nodes: [], pageInfo: { hasNextPage: false } },
+          },
+        ],
+      },
+    },
+  ]) {
+    assert.throws(
+      () =>
+        fetchEnrichment(
+          body.data.nodes[0]?.__typename === 'PullRequestReviewThread' ? 'threads' : 'review',
+          ['R1'],
+          { exec: () => JSON.stringify(body) },
+        ),
+      /unexpected shape|coverage/,
+    );
+  }
+});
 
 test('targeted PR fetch uses one aliased query and the canonical normalizer', () => {
   const calls = [];

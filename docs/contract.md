@@ -710,6 +710,30 @@ When `--summaries` and `--outpost-url` are combined, the same `summary` object i
 mirrored onto the [outpost payload](#outpost-payload-schema-v1) so webhook
 consumers see the identical field.
 
+### Opt-in emitted-delta enrichment
+
+`--enrich review,comments,threads` is a comma-separated, deduplicated selection
+of body fetches. It is off by default. Only final emitted deltas can trigger it:
+new/changed `CHANGES_REQUESTED` reviews on `review-changed`, identifiable new
+conversation comments on `new-comments`, and newly unresolved thread ids on
+`unresolved-threads-added`. Each selected `(delta, kind)` makes at most one
+GraphQL `nodes(ids:)` call after the snapshot write. Missing durable identities
+or a GitHub/shape failure produces a warning and no speculative fetch.
+
+Successful non-empty kinds attach this optional sibling:
+
+```json
+{ "enrichment": { "review": [], "comments": [], "threads": [] } }
+```
+
+Review rows contain `id`, `author`, `state`, `submittedAt`, `commit`, and `body`;
+comment rows contain `id`, `author`, `createdAt`, `body`, and deterministic
+case-insensitive-deduplicated `mentions`; thread rows contain `id` and a
+`firstComment` with id, author, createdAt, path, line, originalLine, and body.
+Nullable GitHub values remain `null`. Enrichment never changes ids, classes,
+exit codes, snapshots, or durable delta logs; `gh-delta read` does not replay it.
+Outpost payloads mirror it when present.
+
 ### Fingerprint fields (`from` / `to`)
 
 The fingerprint is the detector's stable-shaped but **semi-opaque** change-detection
@@ -790,8 +814,9 @@ Emitted with exit code `1` (transient) or `2` (permanent). It **does not** carry
 ## Delta Log and Cursors
 
 With `--log`, the producer holds its existing snapshot lock through this order:
-`detect -> ids/enrichment/attention filter -> assert lock -> append + fsync log
--> atomic manifest publish -> assert lock -> atomic snapshot -> registry/report/outpost`.
+`detect -> ids/attention filter -> assert lock -> append + fsync log -> atomic
+manifest publish -> assert lock -> atomic snapshot -> transient enrichment ->
+registry/report/outpost`.
 Append failure is
 `kind: "io"` / exit `1` (or `kind: "log"` / exit `2` for invalid committed log
 content), and leaves the snapshot unchanged. A crash after a durable append but
@@ -801,8 +826,9 @@ consumers deduplicate work by `id`.
 
 Each complete UTF-8 NDJSON line has exactly `seq`, `id`, `detectedAt`, and
 `delta`; `seq` starts at 1 and is strictly contiguous, and `id === delta.id`.
-The journal stores the exact delta the detector emits after attention filters and
-requested decoration. `<logFile>.published.json` is the small versioned
+The journal stores the exact pre-enrichment delta after attention filters and
+requested durable decoration; transient `--enrich` bodies are never logged.
+`<logFile>.published.json` is the small versioned
 publication manifest. Version 1 is exactly
 `{"version":1,"lastSeq":N,"byteLength":B}` and binds readers to the first `B`
 bytes of `<logFile>`. Version 2 additionally records `firstSeq`; version 3 also
