@@ -91,7 +91,8 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
   non-empty GitHub logins. It is a post-detection attention filter: it removes
   `new-comments` only when the positive count increment fits the observed final
   five comment rows and every inferred row has an id and a listed author. It
-  fails open on overflow, missing id/author, or other uncertainty. Snapshots
+  fails open on overflow, missing id/author, aggregate/conversation-count
+  mismatch, or other uncertainty. Snapshots
   still advance; `filteredDeltas` is present whenever this flag is supplied.
 - `--settled` is an attention filter that drops a delta whose normalized summary
   has `ciRollup: "pending"` or `mergeable: "unknown"`. It implies
@@ -102,6 +103,8 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
 for filtered changes, and filtered changes are not replayed later.** When flags
 are combined, their order is binding: `--only-classes`, then
 `--ignore-classes`, then `--ignore-authors`, then empty-delta removal, then `--settled`.
+`filteredDeltas` counts only deltas removed entirely; removing one class from a
+surviving multi-class delta does not increment it.
 
 - `--baseline-emit-state` is optional and off by default. On the run that seeds a
   baseline, it emits one synthetic `baseline-state` delta per tracked OPEN item

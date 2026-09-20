@@ -106,7 +106,7 @@ test('queries and normalizes bounded comment identities plus failed check URLs',
     horizonCutoff: null,
   });
   assert.match(prQuery, /CheckRun \{ name status conclusion detailsUrl \}/);
-  assert.match(prQuery, /comments\(last: 5\) \{ nodes \{ id author \{ login \} \} \}/);
+  assert.match(prQuery, /comments\(last: 5\) \{ totalCount nodes \{ id author \{ login \} \} \}/);
   assert.deepEqual(prs[0].commentNodes, [{ id: 'C1', author: 'Bot[bot]' }]);
   assert.equal(prs[0].statusCheckRollup[0].detailsUrl, 'https://ci/build');
 

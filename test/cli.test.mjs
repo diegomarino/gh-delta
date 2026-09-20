@@ -748,12 +748,14 @@ test('--ignore-authors suppresses fully covered bot comments but advances the sn
   const before = {
     ...basePr,
     totalCommentsCount: 1,
+    conversationComments: 1,
     commentNodes: [{ id: 'C0', author: 'human' }],
   };
   const after = {
     ...before,
     updatedAt: '2026-07-01T11:00:00Z',
     totalCommentsCount: 2,
+    conversationComments: 2,
     commentNodes: [
       { id: 'C0', author: 'human' },
       { id: 'C1', author: 'GitHub-Actions[bot]' },
@@ -771,12 +773,14 @@ test('--ignore-authors fails open and --detail is opaque for an unusable new com
   const before = {
     ...basePr,
     totalCommentsCount: 1,
+    conversationComments: 1,
     commentNodes: [{ id: 'C0', author: 'human' }],
   };
   const after = {
     ...before,
     updatedAt: '2026-07-01T11:00:00Z',
     totalCommentsCount: 2,
+    conversationComments: 2,
     commentNodes: [
       { id: 'C0', author: 'human' },
       { id: null, author: null },
@@ -795,6 +799,69 @@ test('--ignore-authors fails open and --detail is opaque for an unusable new com
   const comments = detailed.details.find((row) => row.class === 'new-comments');
   assert.equal(comments.opaque, true);
   assert.equal(comments.added, undefined);
+});
+
+test('--ignore-authors and --detail fail open when PR aggregate comments include non-conversation rows', () => {
+  const before = {
+    ...basePr,
+    totalCommentsCount: 4,
+    conversationComments: 1,
+    commentNodes: [{ id: 'C0', author: 'human' }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    totalCommentsCount: 5,
+    conversationComments: 1,
+    commentNodes: [{ id: 'C0', author: 'github-actions[bot]' }],
+  };
+  const existing = { pr: { 42: prFingerprint(before) }, issue: {} };
+  const filtered = run(
+    [...FILTER_ARGS, '--ignore-authors', 'github-actions[bot]'],
+    deps([[after]], { existing }),
+  );
+  assert.equal(filtered.code, 10);
+  assert.ok(filtered.report.deltas[0].classes.includes('new-comments'));
+  const detailed = run([...FILTER_ARGS, '--detail'], deps([[after]], { existing })).report
+    .deltas[0];
+  const comments = detailed.details.find((row) => row.class === 'new-comments');
+  assert.equal(comments.opaque, true);
+  assert.equal(comments.added, undefined);
+});
+
+test('class filters run before ignored authors and filteredDeltas excludes surviving class removal', () => {
+  const before = {
+    ...basePr,
+    totalCommentsCount: 1,
+    conversationComments: 1,
+    commentNodes: [{ id: 'C0', author: 'human' }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    headRefOid: 'sha2',
+    totalCommentsCount: 2,
+    conversationComments: 2,
+    commentNodes: [
+      { id: 'C0', author: 'human' },
+      { id: 'C1', author: 'github-actions[bot]' },
+    ],
+  };
+  const result = run(
+    [
+      ...FILTER_ARGS,
+      '--only-classes',
+      'new-comments',
+      '--ignore-classes',
+      'ci-changed',
+      '--ignore-authors',
+      'github-actions[bot]',
+    ],
+    deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } }),
+  );
+  assert.equal(result.code, 10);
+  assert.deepEqual(result.report.deltas[0].classes, ['head-changed', 'updated']);
+  assert.equal(result.report.filteredDeltas, 0);
 });
 
 test('--detail gates actionable check, review, and comment identity metadata', () => {
@@ -819,6 +886,7 @@ test('--detail gates actionable check, review, and comment identity metadata', (
       },
     ],
     totalCommentsCount: 1,
+    conversationComments: 1,
     commentNodes: [{ id: 'C0', author: 'human' }],
   };
   const after = {
@@ -843,6 +911,7 @@ test('--detail gates actionable check, review, and comment identity metadata', (
       },
     ],
     totalCommentsCount: 2,
+    conversationComments: 2,
     commentNodes: [
       { id: 'C0', author: 'human' },
       { id: 'C1', author: 'bot' },
