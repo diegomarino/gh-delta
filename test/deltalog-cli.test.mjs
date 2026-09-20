@@ -278,6 +278,36 @@ test('producer append failure is io and leaves snapshot publication untouched', 
   assert.deepEqual(deps.events, []);
 });
 
+test('lock loss from the append fence maps to busy and skips snapshot publication', () => {
+  const deps = producerDeps({
+    appendDeltaLog(_file, _payload, appendDeps) {
+      assert.equal(typeof appendDeps.onProgress, 'function');
+      assert.equal(typeof appendDeps.verifyBeforeMutation, 'function');
+      appendDeps.onProgress();
+      const error = new Error('lost');
+      error.code = 'LOCK_LOST';
+      throw error;
+    },
+  });
+  const result = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'm',
+      '--state-file',
+      '/tmp/state.json',
+      '--entities',
+      'pr',
+      '--log',
+    ],
+    deps,
+  );
+  assert.equal(result.code, 1);
+  assert.equal(result.report.kind, 'busy');
+  assert.deepEqual(deps.events, []);
+});
+
 test('read re-delivers without advance, filters by number, and advance records the scanned tail', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-read-'));
   const log = join(dir, 'events.ndjson');

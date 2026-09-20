@@ -20,6 +20,7 @@ import {
   readDeltaLog,
   setCursorAtomic,
 } from '../lib/deltalog.mjs';
+import { acquireLock, assertLockOwned, extendLockDeadline, releaseLock } from '../lib/lock.mjs';
 
 function tempPath(name) {
   return join(mkdtempSync(join(tmpdir(), 'gh-delta-log-')), name);
@@ -96,6 +97,83 @@ test('append rejects an invalid delta before changing existing log bytes', () =>
     /delta must include entity, number, and classes/,
   );
   assert.equal(readFileSync(logFile, 'utf8'), before);
+});
+
+test('append rejects sparse classes after serialization and preserves existing bytes', () => {
+  const logFile = tempPath('sparse.ndjson');
+  appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:00:00.000Z', deltas: [first] });
+  const before = readFileSync(logFile, 'utf8');
+  const sparse = { ...second, classes: Array(1) };
+
+  assert.throws(
+    () => appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:01:00.000Z', deltas: [sparse] }),
+    /delta must include entity, number, and classes/,
+  );
+  assert.equal(readFileSync(logFile, 'utf8'), before);
+});
+
+function assertStaleAppendCannotDeleteWinner({ partialTail }) {
+  const dir = mkdtempSync(join(tmpdir(), 'gh-delta-lock-log-'));
+  const stateFile = join(dir, 'state.json');
+  const logFile = `${stateFile}.deltalog.ndjson`;
+  appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:00:00.000Z', deltas: [first] });
+  if (partialTail) writeFileSync(logFile, `${readFileSync(logFile, 'utf8')}{"seq":2`);
+
+  const stale = acquireLock(stateFile, { ghTimeoutMs: 1, staleMs: 1000, now: () => 0 });
+  assert.equal(stale.ok, true);
+  let winner;
+  const winnerDelta = { ...second, id: 'c'.repeat(64) };
+  try {
+    assert.throws(
+      () =>
+        appendDeltaLog(
+          logFile,
+          { detectedAt: '2026-09-20T12:01:00.000Z', deltas: [second] },
+          {
+            onProgress: () =>
+              extendLockDeadline(stateFile, stale.token, {
+                ghTimeoutMs: 1,
+                now: () => 0,
+              }),
+            verifyBeforeMutation: () => {
+              if (!winner) {
+                winner = acquireLock(stateFile, {
+                  ghTimeoutMs: 1,
+                  staleMs: 1000,
+                  now: () => 10000,
+                });
+                assert.equal(winner.ok, true);
+                appendDeltaLog(logFile, {
+                  detectedAt: '2026-09-20T12:01:00.000Z',
+                  deltas: [winnerDelta],
+                });
+              }
+              return assertLockOwned(stateFile, stale.token);
+            },
+          },
+        ),
+      (error) => error?.code === 'LOCK_LOST',
+    );
+    const entries = readDeltaLog(logFile, { afterSeq: 0 }).entries;
+    assert.deepEqual(
+      entries.map((entry) => [entry.seq, entry.id]),
+      [
+        [1, first.id],
+        [2, winnerDelta.id],
+      ],
+    );
+  } finally {
+    if (winner?.ok) releaseLock(stateFile, winner.token);
+    releaseLock(stateFile, stale.token);
+  }
+}
+
+test('complete-tail lease theft preserves the winner journal record and rejects stale append', () => {
+  assertStaleAppendCannotDeleteWinner({ partialTail: false });
+});
+
+test('partial-tail lease theft preserves the winner journal record and rejects stale append', () => {
+  assertStaleAppendCannotDeleteWinner({ partialTail: true });
 });
 
 test('a retry after a durable append records the same id at a later sequence', () => {
