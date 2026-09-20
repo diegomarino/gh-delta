@@ -29,6 +29,7 @@ flowchart LR
     CLI --> Args[lib/args.mjs]
     CLI --> GH[lib/gh.mjs]
     CLI --> Snap[lib/snapshot.mjs]
+    CLI --> Log[lib/deltalog.mjs]
     CLI --> Det[lib/detect.mjs] --> FP[lib/fingerprint.mjs]
     CLI --> Out[lib/outpost.mjs]
     CLI --> Txt[lib/text-output.mjs]
@@ -37,6 +38,7 @@ flowchart LR
     GH -. gh api graphql .-> GitHub[(GitHub GraphQL)]
     Out -. HTTP POST .-> Endpoint[(outpost endpoint)]
     Snap -. read/atomic write .-> FS[(snapshot file)]
+    Log -. append/read/atomic cursor .-> FS
     Reg -. atomic breadcrumb write .-> RegFS[(run registry)]
     Lst -. read-only scan .-> FS
     Lst -. read-only scan .-> RegFS
@@ -144,6 +146,9 @@ The impure edges are isolated:
 - `gh.mjs` shells out to `gh api graphql` for incremental GraphQL fetches.
 - `snapshot.mjs` performs filesystem I/O, derives monitor-scoped snapshot paths,
   and computes the incremental-fetch horizon cutoff.
+- `deltalog.mjs` owns opt-in append-only NDJSON validation, sequencing, a
+  manifest-published reader boundary and crash-tail recovery, log path derivation,
+  and atomic consumer cursors.
 - `outpost.mjs` validates optional outpost URLs, builds payloads, and sends
   short-timeout HTTP POSTs.
 - `text-output.mjs` formats heartbeat text, list inventory text, and outpost
@@ -242,10 +247,32 @@ Do not run overlapping ticks against the same state file; use scheduler-level
 locking if overlap is possible. Atomic writes prevent partial JSON snapshots,
 but they do not make two concurrent detector passes a serialized workflow.
 
-Successful detections are at-most-once from the detector's perspective. The
-snapshot advances before an agent acts on deltas and before optional outpost
-delivery is attempted. Operators that need at-least-once action delivery should
-persist detector output or add an external pending/ack queue.
+Without `--log`, successful detections remain snapshot-at-most-once: the snapshot
+advances before an agent acts on deltas and before optional outpost delivery.
+With opt-in `--log`, the same existing snapshot lock serializes `append + fsync +
+manifest publication` before snapshot publication. The manifest binds the
+reader-visible NDJSON prefix, so bytes written before fsync/publication are not
+observable by consumers. A crash after a durable append but before snapshot still
+creates an at-least-once replay seam: a content-addressed delta id can recur at a
+later sequence. Consumer cursors are a local at-most-once convenience, not
+acknowledgement; consumers deduplicate work by `id` when they need at-least-once
+action delivery.
+
+Consumer mutation is separately scoped: `read --advance` and `cursor set` hold
+one `<cursor>.lock` through cursor read, log scan, and replacement. That prevents
+same-cursor duplicate delivery and cursor rewind while retaining parallel,
+lock-free non-advancing reads and independent cursor files.
+
+Manifest publication also fsyncs its parent directory after atomic rename on
+POSIX; Windows uses a writable non-truncating fsync of the final renamed manifest
+because Node core cannot portably open a writable directory handle. A failed
+durability sync is surfaced as an I/O failure without removing the renamed
+manifest, so retry can recover from either durable state.
+
+The initial manifest publishes an empty byte-zero prefix before the first record
+write. Legacy readers reconcile a manifest appearing during their read, and all
+record boundaries are raw strict-UTF-8 bytes so an invalid byte cannot alter a
+published offset through replacement-character decoding.
 
 Snapshot JSON shape and field semantics are specified in
 [Snapshot Semantics](contract.md#snapshot-semantics).

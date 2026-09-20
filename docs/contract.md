@@ -18,6 +18,7 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
          [--summary-line] [--detail] [--summaries]
          [--only-classes <classes>] [--ignore-classes <classes>] [--settled]
          [--baseline-emit-state]
+         [--log]
          [--outpost-url <url>]
          [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>]
          [--gh-timeout-ms <ms>] [--no-registry] [--lock-stale-ms <duration>]
@@ -103,6 +104,14 @@ are combined, their order is binding: `--only-classes`, then
   exits `10` with `baseline: true` and a non-empty `deltas` array; ids are stable
   across re-baselining. Without the flag, baseline behavior is byte-identical. See
   the [`baseline-state`](#delta-classes) class and [Exit Codes](#exit-codes).
+- `--log` is optional and off by default. It appends each surviving post-filter,
+  post-decoration delta to a monitor-bound NDJSON journal, fsyncs it, then
+  atomically publishes its reader-visible boundary before snapshot publication.
+  Its path is `<stateDir>/log-<encoded repo>__monitor-<encoded
+monitorId>__<entities>.ndjson`, or `<state-file>.deltalog.ndjson` for an explicit
+  state file. The success report adds absolute `logFile`, including on zero-delta
+  ticks; zero-delta ticks do not open the log. Without `--log` that field is
+  omitted and the log module is never opened.
 - `--outpost-url` is optional at-most-once HTTP delivery; see
   [Outpost Payload](#outpost-payload-schema-v1). It does not affect the JSON
   report, exit code, or snapshot.
@@ -211,6 +220,35 @@ directory unreadable), `2` permanent error (invalid arguments). `list` never
 exits `10`. Error reports use the standard
 [error report shape](#error-report-shape).
 
+### gh-delta read
+
+```
+gh-delta read --cursor <path>
+  [--only-classes <classes>] [--number <positive integer>]
+  [--advance] [--format json|text]
+```
+
+Reads only the existing cursor-bound log: no GitHub call, snapshot read/write,
+lock, or registry access. `--only-classes` accepts known `DELTA_CLASSES`; `--number`
+filters GitHub item number, not result count. It always scans complete records to
+EOF, so `cursor.to` includes entries rejected by consumer filters. Without
+`--advance` the cursor bytes are unchanged; with it, the cursor is atomically set
+to that scanned tail after the report is assembled. Exit `10` means returned
+`deltas` is nonempty. A missing cursor, invalid cursor, or malformed complete log
+record is `kind: "log"` / exit `2`; a missing log is empty only at cursor seq `0`.
+
+### gh-delta cursor set
+
+```
+gh-delta cursor set <cursor-path> <seq> [--log-file <path>] [--format json|text]
+```
+
+Initializes a missing cursor only with `--log-file` (normalized absolute). An
+existing cursor stays bound to its log; a supplied `--log-file` must match. `seq`
+is a non-negative safe integer and may move backwards for replay, but cannot be
+above the complete log tail. A missing log permits only seq `0`. Success is exit
+`0`; cursor replacement is atomic.
+
 ## Run Registry
 
 The registry is how `gh-delta list` sees monitors whose snapshots live outside
@@ -262,19 +300,20 @@ deltas), the CLI writes one small breadcrumb per monitor:
 The package publishes a small, explicit ESM surface. Imports must use explicit
 subpaths; the package root is intentionally not exported.
 
-| Export path            | Symbols                                                                                                                                                                                                                                                                                        | Purpose                                                       |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `gh-delta/detect`      | `detectDeltas`                                                                                                                                                                                                                                                                                 | Pure delta classification engine                              |
-| `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint`, `summarizeCiRollup`, `summarizeReviews`, `comparableFingerprint`, `stableValue`, `deltaIdentity`, `deltaId`                                                                                                        | Stable object fingerprint builders and delta-id hashing       |
-| `gh-delta/duration`    | `parseDuration`                                                                                                                                                                                                                                                                                | Shared duration grammar for every duration-valued flag        |
-| `gh-delta/list`        | `listMonitors`, `parseSnapshotFilename`, `parseSince`                                                                                                                                                                                                                                          | Read-only monitor snapshot inventory                          |
-| `gh-delta/registry`    | `registerMonitor`, `readRegistry`, `defaultRegistryDir`, `registryEntryPath`, `canonicalStateFileKey`, `REGISTRY_VERSION`                                                                                                                                                                      | Run-registry breadcrumbs for gh-delta list                    |
-| `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`                                                                                                                                                                                                                     | Outpost payload and transport helpers                         |
-| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`, `defaultStateDir`, `horizonCutoff`                                                                                                                                                                                                      | Snapshot path and persistence helpers                         |
-| `gh-delta/lock`        | `acquireLock`, `releaseLock`, `assertLockOwned`, `lockPath`, `LOCK_EXPIRY_SLACK_MS`                                                                                                                                                                                                            | State-file lock: one writer per `(repo, monitorId, entities)` |
-| `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`, `canonicalEntityKey`, `defaultMonitorId`                                                                                                                                                                                          | Shared argument parsing policies                              |
-| `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                                                                                                                                                                                                                                      | Package metadata and version output                           |
-| `gh-delta/contract`    | `REPORT_SCHEMA_VERSION`, `OUTPOST_SCHEMA_VERSION`, `REPORT_FIELDS`, `DELTA_FIELDS`, `DELTA_DETAIL_FIELDS`, `DELTA_DETAIL_FIELDS_BY_CLASS`, `DELTA_CLASSES`, `ERROR_KINDS`, `LIST_REPORT_FIELDS`, `LIST_MONITOR_FIELDS`, `REGISTRY_ENTRY_FIELDS`, `DELTA_SUMMARY_FIELDS`, `DELTA_SUMMARY_ENUMS` | Runtime contract constants and field catalogs                 |
+| Export path            | Symbols                                                                                                                                                                                                                                                                                                                                                                                                                                             | Purpose                                                       |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `gh-delta/detect`      | `detectDeltas`                                                                                                                                                                                                                                                                                                                                                                                                                                      | Pure delta classification engine                              |
+| `gh-delta/deltalog`    | `deltaLogPath`, `appendDeltaLog`, `readDeltaLog`, `readCursor`, `setCursorAtomic`                                                                                                                                                                                                                                                                                                                                                                   | Durable NDJSON journal and atomic consumer cursors            |
+| `gh-delta/fingerprint` | `canonicalizeCiRollup`, `hashReviews`, `issueFingerprint`, `prFingerprint`, `summarizeCiRollup`, `summarizeReviews`, `comparableFingerprint`, `stableValue`, `deltaIdentity`, `deltaId`                                                                                                                                                                                                                                                             | Stable object fingerprint builders and delta-id hashing       |
+| `gh-delta/duration`    | `parseDuration`                                                                                                                                                                                                                                                                                                                                                                                                                                     | Shared duration grammar for every duration-valued flag        |
+| `gh-delta/list`        | `listMonitors`, `parseSnapshotFilename`, `parseSince`                                                                                                                                                                                                                                                                                                                                                                                               | Read-only monitor snapshot inventory                          |
+| `gh-delta/registry`    | `registerMonitor`, `readRegistry`, `defaultRegistryDir`, `registryEntryPath`, `canonicalStateFileKey`, `REGISTRY_VERSION`                                                                                                                                                                                                                                                                                                                           | Run-registry breadcrumbs for gh-delta list                    |
+| `gh-delta/outpost`     | `buildOutpostPayload`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`                                                                                                                                                                                                                                                                                                                                                                          | Outpost payload and transport helpers                         |
+| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`, `defaultStateDir`, `horizonCutoff`                                                                                                                                                                                                                                                                                                                                                           | Snapshot path and persistence helpers                         |
+| `gh-delta/lock`        | `acquireLock`, `releaseLock`, `assertLockOwned`, `lockPath`, `LOCK_EXPIRY_SLACK_MS`                                                                                                                                                                                                                                                                                                                                                                 | State-file lock: one writer per `(repo, monitorId, entities)` |
+| `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`, `canonicalEntityKey`, `defaultMonitorId`                                                                                                                                                                                                                                                                                                                                               | Shared argument parsing policies                              |
+| `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                                                                                                                                                                                                                                                                                                                                                                                           | Package metadata and version output                           |
+| `gh-delta/contract`    | `REPORT_SCHEMA_VERSION`, `OUTPOST_SCHEMA_VERSION`, `REPORT_FIELDS`, `DELTA_FIELDS`, `DELTA_DETAIL_FIELDS`, `DELTA_DETAIL_FIELDS_BY_CLASS`, `DELTA_CLASSES`, `ERROR_KINDS`, `LIST_REPORT_FIELDS`, `LIST_MONITOR_FIELDS`, `REGISTRY_ENTRY_FIELDS`, `DELTA_SUMMARY_FIELDS`, `DELTA_SUMMARY_ENUMS`, `DELTA_LOG_RECORD_FIELDS`, `CURSOR_FILE_FIELDS`, `READ_REPORT_FIELDS`, `READ_CURSOR_FIELDS`, `CURSOR_SET_REPORT_FIELDS`, `CURSOR_SET_CURSOR_FIELDS` | Runtime contract constants and field catalogs                 |
 
 Behavioral notes for consumers:
 
@@ -288,6 +327,11 @@ Behavioral notes for consumers:
   grammar (a positive integer followed by `s`, `m`, `h`, or `d`). `parseSince` is
   a thin wrapper over it that fixes `flag` to `--since`; every future
   duration-valued flag must use `parseDuration` rather than restate the grammar.
+- `appendDeltaLog` fsyncs complete NDJSON records, then atomically publishes a
+  versioned reader boundary; `readDeltaLog` validates every published record and
+  never exposes an unpublished suffix. Complete malformed or noncontiguous
+  records are permanent errors. `setCursorAtomic` replaces a validated,
+  absolute-bound cursor through a same-directory atomic rename.
 - `snapshotPath` is deterministic and scoped by repo, monitor-id, and entity set.
 - `horizonCutoff` derives the incremental-fetch cutoff from a prior snapshot
   (`meta.horizon` minus the overlap, or the newest fingerprint `updatedAt` for
@@ -443,6 +487,8 @@ Field guarantees:
   bullet in [CLI](#cli) for the full precedence and error behavior.
 - `entities` (string[]): the selected families, always in canonical order
   `["pr", "issue"]` regardless of the `--entities` input order.
+- `logFile` (string, optional): absolute path of the opt-in durable delta log.
+  Present only when `--log` is supplied, including when `deltas` is empty.
 - `stateFile` (string): the resolved snapshot path — useful when the temp-dir
   default is in effect. The temp-dir default resolves under the OS temp dir —
   `/tmp/…` on Linux, `/var/folders/…/T/…` on macOS; trust this field rather
@@ -703,10 +749,10 @@ Emitted with exit code `1` (transient) or `2` (permanent). It **does not** carry
 ```
 
 - `schemaVersion` (number), `error` (string), `at` (string): always present.
-- `kind` (string): one of `config`, `snapshot`, `github`, `io`, `busy`. This is
+- `kind` (string): one of `config`, `snapshot`, `github`, `io`, `busy`, `log`. This is
   a closed set while `report.schemaVersion === 1`, but forward-compatible like
   classes — treat unknown values as "something changed, inspect". `config` and
-  `snapshot` kinds map to exit `2`; `github`, `io`, and `busy` kinds map to
+  `snapshot`, and `log` kinds map to exit `2`; `github`, `io`, and `busy` kinds map to
   exit `1`. This is where `--repo` derivation errors land too: no repo
   derivable from git remotes or `gh` is `kind: "config"` (exit `2`, permanent);
   a `gh` timeout while deriving `--repo` is `kind: "github"` (exit `1`,
@@ -718,6 +764,76 @@ Emitted with exit code `1` (transient) or `2` (permanent). It **does not** carry
 - `repo`, `monitorId` (string): present once the corresponding flag has been
   parsed (absent for errors raised before that, e.g. an unknown option). `error`
   strings are human-readable and not a stable enum.
+
+## Delta Log and Cursors
+
+With `--log`, the producer holds its existing snapshot lock through this order:
+`detect -> ids/enrichment/attention filter -> assert lock -> append + fsync log
+-> atomic manifest publish -> assert lock -> atomic snapshot -> registry/report/outpost`.
+Append failure is
+`kind: "io"` / exit `1` (or `kind: "log"` / exit `2` for invalid committed log
+content), and leaves the snapshot unchanged. A crash after a durable append but
+before snapshot publication may append the same content-addressed `delta.id` at a
+later `seq` on retry. This is intentionally at-least-once journal delivery;
+consumers deduplicate work by `id`.
+
+Each complete UTF-8 NDJSON line has exactly `seq`, `id`, `detectedAt`, and
+`delta`; `seq` starts at 1 and is strictly contiguous, and `id === delta.id`.
+The journal stores the exact delta the detector emits after attention filters and
+requested decoration. `<logFile>.published.json` is the small versioned
+publication manifest: exactly `{"version":1,"lastSeq":N,"byteLength":B}`. It
+binds readers to the first `B` bytes of the NDJSON file. Readers read it first,
+fully validate every line in that prefix, and ignore every suffix byte even when
+that suffix ends in a newline. A cursor or `afterSeq` above `lastSeq` is a
+permanent `log` error rather than an empty replay.
+
+Publication fsyncs the log, then a same-directory manifest temp file, atomically
+renames that temp file, and fsyncs the manifest parent directory before append
+returns or a snapshot may publish. A directory open/fsync failure is an I/O
+failure: the renamed manifest remains for safe recovery and the snapshot stays
+unchanged. POSIX uses a non-mutating read handle; Windows uses a non-truncating
+writable handle on the final renamed manifest as the Node-core-supported
+`FlushFileBuffers` fallback.
+
+For a legacy/manual log without a manifest, the first append fully validates its
+complete prefix and atomically bootstraps the manifest before appending new bytes.
+For a brand-new log, it first publishes the empty `{version:1,lastSeq:0,
+byteLength:0}` boundary; that boundary is valid even if the log file does not yet
+exist, so a failed first-record fsync remains invisible to readers. A reader that
+started a legacy read and discovers a newly published manifest after acquiring
+the old bytes restarts from that published boundary.
+For ordinary manifest-backed appends, the committed prefix is trusted by the
+writer and only the bounded unpublished suffix plus newly serialized records are
+validated; reads always validate the whole published prefix. On recovery, a valid
+contiguous complete suffix is fsynced and promoted, an unterminated suffix is
+truncated, and a malformed complete suffix fails closed without mutation. A
+manifest ahead of a missing/truncated log is a permanent `log` error.
+
+Byte lengths are raw UTF-8 byte offsets, not decoded-string lengths. Invalid
+UTF-8 in any complete published record or complete suffix is a permanent `log`
+error before mutation. Recovery opens its non-truncating fsync handle writable
+(`r+`) for Windows compatibility.
+
+A cursor is atomically replaced JSON with exactly
+`{"cursorVersion":1,"logFile":"/absolute/log.ndjson","seq":41}`. `seq` is a
+non-negative safe integer (`0` means before the first record) and the absolute
+`logFile` binds one consumer to one journal. Give independent consumers distinct
+cursor files. `--advance` is an at-most-once convenience, not downstream
+acknowledgement. `read --advance` and `cursor set` acquire the existing lock
+protocol at `<cursor>.lock` before reading the cursor and hold it through scan
+and atomic replacement; a concurrent mutator is `kind: "busy"` / exit `1` and
+does not read, deliver, or write. The fixed local lease is 5 seconds plus the
+lock slack and stale threshold is 30 seconds; it is renewed immediately before
+replacement. Non-advancing reads remain lock-free, and distinct cursor files can
+proceed independently. Explicit lower-sequence replay remains allowed under the
+same lock. `setCursorAtomic` itself remains a low-level atomic replacement, not a
+compare-and-swap primitive.
+
+Read report fields, in order, are `schemaVersion`, `command`, `logFile`, `at`,
+`cursor`, `deltas`, and `summary`; cursor fields are `path`, `from`, `to`, and
+`advanced`. Cursor-set report fields are `schemaVersion`, `command`, `at`,
+`cursor`, and `summary`; its cursor fields are `path`, `logFile`, `from`, and `to`.
+`warnings` is reserved for future retention handling and is absent in I-3a.
 
 ## Snapshot Semantics
 
