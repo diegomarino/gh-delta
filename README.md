@@ -159,6 +159,15 @@ that produced the fingerprints (no second GitHub fetch), and is a **sibling** of
 byte-identical whether or not the flag is set. Consumers may treat it as a hint
 and still re-derive authoritative facts themselves.
 
+### Opt-in body enrichment (`--enrich`)
+
+Use `--enrich review,comments,threads` only when the emitted delta needs the
+corresponding GitHub body text. It runs after the snapshot has been published,
+only for matching surviving delta classes, and adds a transient `enrichment`
+sibling to the report (and outpost payload when configured). Snapshot files and
+`gh-delta read` logs intentionally remain body-free; enrichment failures are
+warnings and do not change detection or exit codes.
+
 ```jsonc
 "summary": {
   // 'none' means ZERO checks ran — never conflated with 'green'. Fail-closed

@@ -9,6 +9,7 @@ import {
   validateRepo,
   canonicalEntityKey,
   defaultMonitorId,
+  parseEnrichmentSelection,
 } from '../lib/args.mjs';
 
 test('parseEntitySelection accepts pr, issue, or both and rejects empty selections', () => {
@@ -109,4 +110,14 @@ test('defaultMonitorId falls back to the resolved cwd when git worktree lookup f
     validateMonitorId(defaultMonitorId({ hostname: () => 'x', resolveWorktree: () => '/repo' })).ok,
     true,
   );
+});
+
+test('parseEnrichmentSelection canonicalizes allowed kinds and rejects empty or unknown members', () => {
+  assert.deepEqual(parseEnrichmentSelection('threads,review,threads'), {
+    ok: true,
+    kinds: ['review', 'threads'],
+  });
+  assert.equal(parseEnrichmentSelection('').ok, false);
+  assert.equal(parseEnrichmentSelection('review,').ok, false);
+  assert.equal(parseEnrichmentSelection('reviews').ok, false);
 });

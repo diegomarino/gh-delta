@@ -74,6 +74,17 @@ test('fully enriched deltas jointly cover exactly the frozen DELTA_FIELDS', () =
     classes: ['new-comments'],
     from: { state: 'OPEN', comments: 1 },
     to: { state: 'OPEN', comments: 3 },
+    enrichment: {
+      comments: [
+        {
+          id: 'C_1',
+          author: 'octo',
+          createdAt: '2026-07-01T12:00:00Z',
+          body: 'Please check @owner/team',
+          mentions: ['owner/team'],
+        },
+      ],
+    },
   };
   // `id` is attached at report assembly (with repo in scope), not by enrichDelta;
   // attach it to both representative deltas so the union also covers `id`.
