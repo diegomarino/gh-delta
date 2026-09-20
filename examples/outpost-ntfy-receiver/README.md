@@ -46,7 +46,7 @@ You have two ways to secure a non-localhost deployment — pick at least one:
 
 1. **Shared secret (`OUTPOST_SECRET`).** Set `OUTPOST_SECRET` to a random
    value. The receiver accepts only `X-GhDelta-Signature:
-   sha256=<lowercase-hex-hmac>` over the raw request body, validates its exact
+sha256=<lowercase-hex-hmac>` over the raw request body, validates its exact
    scheme and length, then compares it with `crypto.timingSafeEqual` before it
    parses, dedupes, records, or forwards the payload. The stock sender reads
    the same environment value by name; the secret never appears in a URL or
