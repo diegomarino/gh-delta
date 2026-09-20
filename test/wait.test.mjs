@@ -313,6 +313,53 @@ test('wait from-log derives --until-summary from delta.to rather than a rendered
   assert.equal(result.report.reason, 'already-satisfied');
 });
 
+test('wait interrupts a settling interval on signal without a further tick', async () => {
+  let elapsed = 0;
+  let signaled = false;
+  let reads = 0;
+  const result = await runCommand(
+    [
+      'wait',
+      '--from-log',
+      '--cursor',
+      '/tmp/signal-settle.cursor.json',
+      '--timeout',
+      '1m',
+      '--settle',
+      '30s',
+      '--until',
+      'ci-changed',
+    ],
+    {
+      ...noopLock,
+      readCursor: () => ({ logFile: '/tmp/signal-settle.ndjson', seq: 0 }),
+      readDeltaLog: () => {
+        reads++;
+        return {
+          entries: [
+            { seq: 1, delta: { id: 'd', entity: 'pr', number: 42, classes: ['ci-changed'] } },
+          ],
+          lastSeq: 1,
+          firstSeq: 1,
+        };
+      },
+      setCursorAtomic: () => {},
+      touchHeartbeat: () => {},
+      handleSignals: false,
+      isSignaled: () => signaled,
+      clock: () => elapsed,
+      sleep: (milliseconds) => {
+        elapsed += milliseconds;
+        signaled = true;
+      },
+      now: () => '2026-09-21T08:00:00.000Z',
+    },
+  );
+  assert.equal(result.code, 0);
+  assert.equal(result.report.reason, 'signal');
+  assert.equal(reads, 1);
+});
+
 test('wait rejects outpost flags and emits a standard error envelope for a failed tick', async () => {
   const rejected = await runCommand([
     'wait',
