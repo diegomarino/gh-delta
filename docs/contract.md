@@ -312,8 +312,8 @@ the array is not significant and not guaranteed stable.
 | `review-changed`              | pr only    | Review decision or latest review states changed.                                                                                                                                                                                                                                                                                                                                                              |
 | `became-mergeable`            | pr only    | PR moved from `CONFLICTING` to `MERGEABLE` (an `UNKNOWN` mid-recompute placeholder does not count). Best-effort edge trigger: a transition sampled through the `UNKNOWN` window surfaces as `updated` instead — gate decisions on the observed `mergeable` state, not on this class.                                                                                                                          |
 | `became-conflicting`          | pr only    | PR moved from `MERGEABLE` to `CONFLICTING` (an `UNKNOWN` mid-recompute placeholder does not count). The inverse of `became-mergeable`, with the same best-effort caveat: sampling through `UNKNOWN` yields `updated` instead.                                                                                                                                                                                 |
-| `unresolved-threads-added`    | pr only    | A review thread became unresolved: the unresolved count increased, OR a same-count identity diff found a thread newly unresolved (e.g. one thread resolved while another reopened in the same tick). See `threadDigest`/`threadStates` below.                                                                                                                                                                 |
-| `unresolved-threads-resolved` | pr only    | A review thread became resolved: the unresolved count decreased, OR a same-count identity diff found a thread newly resolved. See `threadDigest`/`threadStates` below.                                                                                                                                                                                                                                        |
+| `unresolved-threads-added`    | pr only    | A review thread became unresolved: the unresolved count increased, OR a same-count identity diff found a thread newly unresolved (e.g. one thread resolved while another reopened in the same tick). See `threadDigest`/`threadStates` below. When `--detail` is set, a `field: "threadStates"` row names the affected thread ids (`added`/`removed`) even when the count itself did not move.                |
+| `unresolved-threads-resolved` | pr only    | A review thread became resolved: the unresolved count decreased, OR a same-count identity diff found a thread newly resolved. See `threadDigest`/`threadStates` below. Same `field: "threadStates"` detail row as `unresolved-threads-added`.                                                                                                                                                                 |
 | `review-threads-changed`      | pr only    | PR review thread total changed while the unresolved count held steady.                                                                                                                                                                                                                                                                                                                                        |
 | `review-requests-changed`     | pr only    | Requested reviewers changed (review requested or a request withdrawn/satisfied). Detail names the added/removed logins (teams as `org/slug`). Note GitHub removes a user from `reviewRequests` once they submit a review, so a submitted review usually fires this together with `review-changed`.                                                                                                            |
 | `base-changed`                | pr only    | Base branch changed (PR retargeted). Prior CI and mergeability context refer to the old base; expect `mergeable: UNKNOWN` churn while GitHub recomputes.                                                                                                                                                                                                                                                      |
@@ -489,6 +489,27 @@ Detail entries use `class` to name the class being explained. Common shapes:
 - numeric transition: `{ "class": "new-comments", "field": "comments", "from": 1, "to": 3, "delta": 2 }`;
 - set transition (labels, assignees, requested reviewers): `{ "class": "relabeled", "field": "labels", "added": ["urgent"], "removed": [] }` — same `added`/`removed` shape for `assignees-changed` (`field: "assignees"`) and `review-requests-changed` (`field: "reviewRequests"`);
 - presence transition: `{ "class": "missing", "field": "presence", "from": "present", "to": "missing", "missingTicks": 1 }`.
+
+`unresolved-threads-added`/`unresolved-threads-resolved` may also carry a
+`field: "threadStates"` row naming the review-thread ids behind the class,
+independent of `unresolvedReviewThreads`'s numeric row:
+
+```json
+{
+  "class": "unresolved-threads-added",
+  "field": "threadStates",
+  "added": ["RT_2"],
+  "removed": ["RT_1"]
+}
+```
+
+This is the only detail row that survives a same-count thread swap (one thread
+resolves while another reopens in the same tick): the numeric
+`unresolvedReviewThreads` row is skipped in that case because the count itself
+did not move, so `added`/`removed` here are what names the swap. It is omitted
+entirely when there is no thread-identity swap to name (e.g. the class fired
+purely because the count moved, or either fingerprint side predates
+`threadStates`).
 
 `ci-changed` and `review-changed` details name the exact entries that changed
 when both fingerprint sides carry the persisted normalized summaries
