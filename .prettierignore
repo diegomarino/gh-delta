@@ -9,3 +9,10 @@ state/
 .superpowers/
 docs/superpowers/
 .claude/
+
+# Byte-exact golden fixtures for the contract-baseline test: these must hold
+# the real, unreformatted bytes lib/cli.mjs and lib/snapshot.mjs produce, not
+# Prettier's JSON style (e.g. Prettier collapses short arrays onto one line;
+# JSON.stringify(..., null, 2) does not).
+test/fixtures/baseline/*-expected-report.json
+test/fixtures/baseline/*-expected-snapshot.json

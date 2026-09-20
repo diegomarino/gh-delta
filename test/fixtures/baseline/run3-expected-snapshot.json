@@ -22,17 +22,28 @@
       "unresolvedReviewThreads": 0,
       "head": "aaaaaaa1",
       "base": "main",
-      "labels": ["enhancement", "priority-high"],
-      "assignees": ["alice"],
-      "reviewRequests": ["bob"]
+      "labels": [
+        "enhancement",
+        "priority-high"
+      ],
+      "assignees": [
+        "alice"
+      ],
+      "reviewRequests": [
+        "bob"
+      ]
     }
   },
   "issue": {
     "10": {
       "state": "CLOSED",
       "updatedAt": "2026-01-01T00:15:00Z",
-      "labels": ["bug"],
-      "assignees": ["carol"],
+      "labels": [
+        "bug"
+      ],
+      "assignees": [
+        "carol"
+      ],
       "comments": 1
     }
   },
@@ -40,6 +51,9 @@
     "horizon": "2026-01-01T02:00:00Z",
     "repo": "acme/widgets",
     "monitorId": "contract-baseline",
-    "entities": ["pr", "issue"]
+    "entities": [
+      "pr",
+      "issue"
+    ]
   }
 }
