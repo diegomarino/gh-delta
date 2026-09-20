@@ -226,6 +226,34 @@ test('error reports carry schemaVersion and omit deltas', () => {
   assert.equal(d.writes, 0);
 });
 
+test('watch add derives only a local repository and defaults monitor/state paths', () => {
+  let calls = 0;
+  const result = run(['watch', 'add', 'pr:42', '--until', 'merged'], {
+    now: () => '2026-07-01T12:00:00Z',
+    defaultMonitor: () => 'local',
+    resolveLocalRepo: () => {
+      calls++;
+      return { status: 'found', repo: 'o/r' };
+    },
+  });
+  assert.equal(calls, 1);
+  assert.equal(result.code, 0);
+  assert.match(result.report.watchDir, /watch-o%2Fr__local\.d$/);
+});
+
+test('watch add local derivation decline is config without GitHub fetches', () => {
+  let fetched = false;
+  const result = run(['watch', 'add', 'pr:42', '--until', 'merged'], {
+    resolveLocalRepo: () => ({ status: 'declined' }),
+    fetchPRs: () => {
+      fetched = true;
+      return [];
+    },
+  });
+  assert.equal(result.code, 2);
+  assert.equal(fetched, false);
+});
+
 test('--state-dir derives a monitor-scoped snapshot path', () => {
   const d = deps([[basePr]]);
   const { code } = run(
