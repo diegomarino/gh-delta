@@ -915,6 +915,19 @@ test('every emitted detail key is declared in the exported contract, across ever
   });
   deltas.push(...tH.deltas);
 
+  // stale (only under the explicit inactivity option)
+  const sStale = detectDeltas(
+    null,
+    { pr: [pr({ number: 95 })], issue: [] },
+    { at: '2026-07-01T00:00:00Z', staleAfterMs: 1 },
+  );
+  const tStale = detectDeltas(
+    sStale.snapshot,
+    { pr: [pr({ number: 95 })], issue: [] },
+    { at: '2026-07-02T00:00:00Z', staleAfterMs: 1 },
+  );
+  deltas.push(...tStale.deltas);
+
   // unresolved-threads-added / unresolved-threads-resolved (same-count swap)
   const sT = detectDeltas(null, {
     pr: [

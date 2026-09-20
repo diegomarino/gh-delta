@@ -102,7 +102,13 @@ test('fully enriched deltas jointly cover exactly the frozen DELTA_FIELDS', () =
   // the missing delta (to === null) correctly gets none, so the union covers it.
   enrichDelta(missing, { summaryLine: true, legacyLine: true, details: true, summaries: true });
   enrichDelta(change, { summaryLine: true, legacyLine: true, details: true, summaries: true });
-  const union = new Set([...keySet(missing), ...keySet(change)]);
+  // The public detail fixture contributes a representative stale delta, whose
+  // UTC period is a public field rather than fingerprint state.
+  const union = new Set([
+    ...keySet(missing),
+    ...keySet(change),
+    ...detailReport.deltas.flatMap((delta) => Object.keys(delta)),
+  ]);
   assert.deepEqual(
     [...union].sort(),
     [...DELTA_FIELDS].sort(),
@@ -176,16 +182,17 @@ test('every emitted detail row stays within the frozen detail contract', () => {
   }
 });
 
-test('the detail report is internally consistent: flag-free command, entities, and stateFile agree', () => {
-  // The `--format json --detail` cast in tools/examples/generate-cast.mjs
+test('the detail report is internally consistent: command, entities, and stateFile agree', () => {
+  // The `--format json --detail --stale-after 24h` cast in tools/examples/generate-cast.mjs
   // renders `detailReport` behind the literal command below, which carries no
   // `--entities` flag. A flag-free command defaults to monitoring both
   // entities, so the echoed `entities` must be `["pr", "issue"]` — matching
   // both the command and the `__pr-issue` segment of the state file name —
   // rather than the narrower `["pr"]` a `--entities pr` run would echo
   // (fixes audit finding F10.2, the "impossible --entities echo").
-  const command = 'gh-delta --repo owner/repo --format json --detail';
+  const command = 'gh-delta --repo owner/repo --format json --detail --stale-after 24h';
   assert.equal(command.includes('--entities'), false, 'the rendered command must stay flag-free');
+  assert.equal(command.includes('--stale-after 24h'), true, 'the stale fixture requires opt-in');
   assert.deepEqual(
     detailReport.entities,
     ['pr', 'issue'],
