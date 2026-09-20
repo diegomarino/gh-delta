@@ -92,6 +92,33 @@ test('enrichment skips opaque identities and turns one boundary failure into a w
   assert.equal(good.enrichment, undefined);
 });
 
+test('a zero-count prior comment fingerprint may use an absent identity window as empty', () => {
+  const delta = {
+    classes: ['new-comments'],
+    from: { conversationComments: 0 },
+    to: { conversationComments: 1, commentNodes: [{ id: 'C1' }] },
+  };
+  const calls = [];
+  const warnings = enrichEmittedDeltas([delta], ['comments'], {
+    fetch: (kind, ids) => {
+      calls.push({ kind, ids });
+      return [{ id: 'C1', author: 'a', createdAt: 'now', body: 'body' }];
+    },
+  });
+  assert.deepEqual(calls, [{ kind: 'comments', ids: ['C1'] }]);
+  assert.equal(warnings.length, 0);
+  assert.equal(delta.enrichment.comments[0].id, 'C1');
+
+  const opaque = {
+    classes: ['new-comments'],
+    from: { conversationComments: 1 },
+    to: { conversationComments: 2, commentNodes: [{ id: 'C2' }] },
+  };
+  enrichEmittedDeltas([opaque], ['comments'], { fetch: () => calls.push('must not fetch') });
+  assert.deepEqual(calls, [{ kind: 'comments', ids: ['C1'] }]);
+  assert.equal(opaque.enrichment, undefined);
+});
+
 test('selected kinds with no final matching class make no calls, while a failed sibling does not remove successful enrichment', () => {
   let calls = 0;
   const ignored = { classes: ['updated'], from: {}, to: {} };
