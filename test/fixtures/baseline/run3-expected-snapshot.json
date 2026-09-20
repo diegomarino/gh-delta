@@ -1,0 +1,45 @@
+{
+  "pr": {
+    "1": {
+      "state": "OPEN",
+      "updatedAt": "2026-01-01T00:30:00Z",
+      "isDraft": false,
+      "ci": "53d176557e2f",
+      "ciChecks": [
+        {
+          "name": "build",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS"
+        }
+      ],
+      "review": "REVIEW_REQUIRED",
+      "reviews": "da39a3ee5e6b",
+      "reviewSummary": [],
+      "mergeable": "MERGEABLE",
+      "mergeStateStatus": "CLEAN",
+      "comments": 5,
+      "reviewThreads": 0,
+      "unresolvedReviewThreads": 0,
+      "head": "aaaaaaa1",
+      "base": "main",
+      "labels": ["enhancement", "priority-high"],
+      "assignees": ["alice"],
+      "reviewRequests": ["bob"]
+    }
+  },
+  "issue": {
+    "10": {
+      "state": "CLOSED",
+      "updatedAt": "2026-01-01T00:15:00Z",
+      "labels": ["bug"],
+      "assignees": ["carol"],
+      "comments": 1
+    }
+  },
+  "meta": {
+    "horizon": "2026-01-01T02:00:00Z",
+    "repo": "acme/widgets",
+    "monitorId": "contract-baseline",
+    "entities": ["pr", "issue"]
+  }
+}

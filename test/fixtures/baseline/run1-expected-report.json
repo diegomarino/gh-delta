@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "baseline": true,
+  "repo": "acme/widgets",
+  "repoSource": "flag",
+  "monitorId": "contract-baseline",
+  "entities": ["pr", "issue"],
+  "stateFile": "/tmp/gh-delta-contract-baseline.json",
+  "at": "2026-01-01T00:00:00Z",
+  "deltas": [],
+  "summary": "baseline established: 1 PRs, 1 issues"
+}
