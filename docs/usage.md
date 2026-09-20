@@ -291,16 +291,18 @@ current command surface.
 
 `gh-delta watch add pr:42 --until merged --watch-dir ./state/watch` creates an
 atomic local entry; `watch ls` and `watch rm pr:42` never contact GitHub. A tick
-with an explicit `--watch-dir` automatically uses economical mode when the
-validated list has zero to ten PR entries: it makes one aliased GraphQL request
+with an explicit `--watch-dir` automatically uses economical mode when
+`--entities` includes `pr` and the validated list has zero to ten PR entries: it makes one aliased GraphQL request
 for unique PR numbers (or no GitHub request for an empty list), never fetches
-issues, and writes an independent watch snapshot. Derived paths end in
+issues, and writes an independent watch snapshot. Its log is derived from that
+same selected snapshot path. Derived paths end in
 `__watch-pr.json`; an explicit `--state-file x.json` uses
 `x.json.watch.json`. Removing an entry projects it out before diffing (no
 missing delta); a null result for an entry still watched follows the normal
 missing lifecycle. Re-adding a removed PR can therefore be `new` (or baseline
 on a fresh watch snapshot). A list containing an issue or more than ten entries
-falls back to the ordinary full fetch and ordinary snapshot. Use `--number
+falls back to the ordinary full fetch and ordinary snapshot; so does
+`--entities issue`. Use `--number
 42,99` for one ephemeral tick instead. Terminal items emit their final delta,
 then are removed after snapshot publication.
 

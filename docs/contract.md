@@ -1282,18 +1282,20 @@ GitHub call or snapshot write. `watch add|rm|ls` are local-only commands;
 terminal watched items are removed only after their final delta and successful
 snapshot write, guarded against concurrent replacement.
 
-With an explicit `--watch-dir`, a validated list with zero to ten entries and
-only `pr` entities automatically becomes an economical PR universe. It makes
+With an explicit `--watch-dir`, a validated list with zero to ten entries, only
+`pr` entities, and an `--entities` selection that includes `pr` automatically
+becomes an economical PR universe. It makes
 exactly one GraphQL request using `repository.pullRequest(number:)` aliases for
 the unique watched numbers (zero requests for an empty list), normalizes the
 same complete PR shape as broad polling, and never fetches issues. GraphQL
 errors, malformed aliases, and any nested connection overflow fail closed.
-`--number`, any issue entry, or more than ten entries retains broad fetching and
-the ordinary snapshot.
+`--number`, `--entities issue`, any issue entry, or more than ten entries retains
+broad fetching and the ordinary snapshot.
 
 Economical ticks use a separate identity: derived paths end in
 `__watch-pr.json`, while `--state-file x.json` becomes `x.json.watch.json`.
-Locks, logs, registry entries, reports, and writes use that selected path, so
+Locks, logs (the selected state file plus `.deltalog.ndjson`), registry entries,
+reports, and writes use that selected path, so
 crossing the eligibility boundary never reads or overwrites the other history.
 Before diffing, the old economical snapshot is projected to current watch
 membership: removing an entry is silent and prunes it on the next write; a null

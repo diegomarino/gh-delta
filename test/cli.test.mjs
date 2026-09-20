@@ -370,6 +370,83 @@ test('a null alias for a still-watched PR enters the normal missing lifecycle', 
   );
 });
 
+test('economical watch logs derive from the selected state identity for explicit and derived paths', () => {
+  const watch = mkdtempSync(join(tmpdir(), 'gd-economical-log-watch-'));
+  writeFileSync(
+    join(watch, 'pr-42.json'),
+    JSON.stringify({ entity: 'pr', number: 42, until: 'merged', addedAt: '2026-07-01T00:00:00Z' }),
+  );
+  const runEconomical = (stateArgs) => {
+    const d = deps([], { existing: { pr: { 42: prFingerprint(basePr) }, issue: {} } });
+    d.fetchPRsByNumber = () => [{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }];
+    let appended;
+    d.appendDeltaLog = (file) => {
+      appended = file;
+    };
+    d.removeWatchUnchanged = () => false;
+    const result = run(['--repo', 'o/r', '--watch-dir', watch, '--log', ...stateArgs], d);
+    return { result, appended };
+  };
+  const explicit = runEconomical(['--state-file', '/tmp/economical-log.json']);
+  assert.equal(explicit.result.report.stateFile, '/tmp/economical-log.json.watch.json');
+  assert.equal(
+    explicit.result.report.logFile,
+    '/tmp/economical-log.json.watch.json.deltalog.ndjson',
+  );
+  assert.equal(explicit.appended, explicit.result.report.logFile);
+
+  const derived = runEconomical(['--state-dir', '/tmp/economical-log-state']);
+  assert.match(derived.result.report.stateFile, /__watch-pr\.json$/);
+  assert.equal(derived.result.report.logFile, `${derived.result.report.stateFile}.deltalog.ndjson`);
+  assert.equal(derived.appended, derived.result.report.logFile);
+});
+
+test('--entities issue makes a PR-only watch list retain normal full-fetch state', () => {
+  const watch = mkdtempSync(join(tmpdir(), 'gd-economical-issue-watch-'));
+  writeFileSync(
+    join(watch, 'pr-42.json'),
+    JSON.stringify({ entity: 'pr', number: 42, until: 'merged', addedAt: '2026-07-01T00:00:00Z' }),
+  );
+  const d = deps([[]]);
+  d.fetchPRsByNumber = () => {
+    throw new Error('targeted fetch must not run without PR entity selection');
+  };
+  const result = run(
+    [
+      '--repo',
+      'o/r',
+      '--entities',
+      'issue',
+      '--state-file',
+      '/tmp/issue-watch.json',
+      '--watch-dir',
+      watch,
+    ],
+    d,
+  );
+  assert.equal(result.code, 0);
+  assert.equal(result.report.stateFile, '/tmp/issue-watch.json');
+  assert.deepEqual(d.stored.pr, {});
+  assert.deepEqual(d.stored.issue, {});
+});
+
+test('economical run registers PR-only watch identity and scope', () => {
+  const watch = mkdtempSync(join(tmpdir(), 'gd-economical-reg-watch-'));
+  writeFileSync(
+    join(watch, 'pr-42.json'),
+    JSON.stringify({ entity: 'pr', number: 42, until: 'merged', addedAt: '2026-07-01T00:00:00Z' }),
+  );
+  const d = deps([[]]);
+  d.fetchPRsByNumber = () => [{ ...basePr }];
+  const registered = [];
+  d.registerMonitor = (entry) => registered.push(entry);
+  d.env = { GH_DELTA_REGISTRY_DIR: '/tmp/economical-registry' };
+  run(['--repo', 'o/r', '--state-file', '/tmp/economical-reg.json', '--watch-dir', watch], d);
+  assert.deepEqual(registered[0].entities, ['pr']);
+  assert.equal(registered[0].scope, 'watch-pr');
+  assert.equal(registered[0].stateFile, '/tmp/economical-reg.json.watch.json');
+});
+
 test('watch add local derivation decline is config without GitHub fetches', () => {
   let fetched = false;
   const result = run(['watch', 'add', 'pr:42', '--until', 'merged'], {

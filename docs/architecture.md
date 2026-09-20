@@ -300,15 +300,16 @@ The exact payload envelope and event identity semantics are specified in
 ## I-6 watch selection and economical polling
 
 Watch files are monitor-private local JSON state and are validated before a
-GitHub fetch. An explicit `--watch-dir` containing zero to ten PR entries routes
-through `fetchPRsByNumber`: one aliased `pullRequest(number:)` GraphQL request
+GitHub fetch. An explicit `--watch-dir` whose `--entities` selection includes
+PRs and contains zero to ten PR entries routes through `fetchPRsByNumber`: one
+aliased `pullRequest(number:)` GraphQL request
 shares the broad PR selection and normalizer, while an empty watch list avoids
 GitHub entirely. The targeted universe has its own `__watch-pr.json` (or
 `.watch.json` explicit-file sibling), so its lock, delta log, registry record,
 report and snapshot never collide with broad polling. Before detection, old
 targeted state is projected to current membership: removal is silent, but a
 still-watched null alias follows the ordinary missing lifecycle. Lists with an
-issue or over ten entries retain broad repository fetches. Terminal cleanup
+issue, over ten entries, or `--entities issue` retain broad repository fetches. Terminal cleanup
 compares bytes read at tick start before unlinking after snapshot publication.
 
 The public contract currently supports only `pr`, `issue`, and `pr,issue`.

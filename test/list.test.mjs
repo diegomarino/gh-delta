@@ -235,6 +235,32 @@ test('listMonitors merges the registry, dedupes scanned paths, and marks stale e
   );
 });
 
+test('registry-only economical snapshots retain their PR scope and counts', () => {
+  const stateDir = mkdtempSync(join(tmpdir(), 'gd-state-'));
+  const registryDir = mkdtempSync(join(tmpdir(), 'gd-reg-'));
+  const externalDir = mkdtempSync(join(tmpdir(), 'gd-external-'));
+  const external = join(externalDir, 'custom.watch.json');
+  writeSnapshotAtomic(external, {
+    pr: { 42: { state: 'OPEN' } },
+    issue: {},
+    meta: { horizon: NOW, repo: 'o/r', monitorId: 'watch', entities: ['pr'], scope: 'watch-pr' },
+  });
+  registerMonitor({
+    repo: 'o/r',
+    monitorId: 'watch',
+    entities: ['pr'],
+    scope: 'watch-pr',
+    stateFile: external,
+    lastRun: NOW,
+    env: { GH_DELTA_REGISTRY_DIR: registryDir },
+  });
+  const { monitors } = listMonitors(stateDir, { now: () => NOW, registryDir });
+  assert.equal(monitors.length, 1);
+  assert.deepEqual(monitors[0].entities, ['pr']);
+  assert.equal(monitors[0].scope, 'watch-pr');
+  assert.equal(monitors[0].prCount, 1);
+});
+
 test('a newer snapshot observation supersedes a stale registry success timestamp', () => {
   const stateDir = mkdtempSync(join(tmpdir(), 'gd-list-'));
   const elsewhere = mkdtempSync(join(tmpdir(), 'gd-elsewhere-'));
