@@ -5,7 +5,7 @@ import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { addWatch, readWatch } from '../lib/watch.mjs';
-import { buildOutpostPayload } from '../lib/outpost.mjs';
+import { buildOutpostPayload, sendOutposts } from '../lib/outpost.mjs';
 
 const locks = {
   acquireLock: () => ({ ok: true, token: 'test-lock' }),
@@ -201,4 +201,44 @@ test('aggregate outposts use the delta repository for identity and links', () =>
   assert.equal(payload.repo, 'b/two');
   assert.match(payload.eventId, /:b\/two:/);
   assert.equal(payload.links.html, 'https://github.com/b/two/pull/2');
+});
+
+test('aggregate outpost failures qualify same-number items with their repository', async () => {
+  const { warnings } = await sendOutposts({
+    outpostUrl: 'https://example.test/hook',
+    report: {
+      repos: ['a/one', 'b/two'],
+      monitorId: 'i9',
+      deltas: [
+        { repo: 'a/one', entity: 'pr', number: 42, title: 'one', classes: ['new'] },
+        { repo: 'b/two', entity: 'pr', number: 42, title: 'two', classes: ['new'] },
+      ],
+    },
+    fetchImpl: async () => ({ ok: false, status: 500 }),
+  });
+  assert.deepEqual(warnings, [
+    { label: 'a/one: PR #42', reason: 'HTTP 500' },
+    { label: 'b/two: PR #42', reason: 'HTTP 500' },
+  ]);
+});
+
+test('aggregate outpost caps group skipped warnings by repository in flattened order', async () => {
+  const { warnings } = await sendOutposts({
+    outpostUrl: 'https://example.test/hook',
+    maxPosts: 1,
+    report: {
+      repos: ['a/one', 'b/two', 'c/three'],
+      monitorId: 'i9',
+      deltas: [
+        { repo: 'a/one', entity: 'pr', number: 1, title: 'one', classes: ['new'] },
+        { repo: 'b/two', entity: 'pr', number: 2, title: 'two', classes: ['new'] },
+        { repo: 'c/three', entity: 'pr', number: 3, title: 'three', classes: ['new'] },
+      ],
+    },
+    fetchImpl: async () => ({ ok: true, status: 202 }),
+  });
+  assert.deepEqual(warnings, [
+    { label: 'b/two: outpost', reason: 'skipped 1 delta(s) after max outpost post count 1' },
+    { label: 'c/three: outpost', reason: 'skipped 1 delta(s) after max outpost post count 1' },
+  ]);
 });
