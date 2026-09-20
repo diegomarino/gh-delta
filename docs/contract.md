@@ -87,7 +87,6 @@ draft-2020-12 schema. Published copies live under `schema/`; `npm run
 schema:check` detects drift. Compact/NDJSON never include legacy `from`, `to`,
 `summaryLine`, `line`, `details`, or `updatedAt`; each delta includes `url`,
 `summary`, and a bounded pure `changed` fingerprint diff.
-contract; automated consumers must use `json`.
 
 - `--summary-line` adds a human-readable `summaryLine` to each delta in JSON
   output. This is for logs and agent messages; do not parse it.

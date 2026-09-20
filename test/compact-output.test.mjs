@@ -73,3 +73,12 @@ test('ndjsonReport ends with an end record and newline', () => {
   });
   assert.ok(output.endsWith('\n'));
 });
+
+test('a representative compact ci change without detail stays bounded', () => {
+  const report = compactReport(
+    { schemaVersion: 1, repo: 'o/r', at: 'now', baseline: false, deltas: [delta] },
+    10,
+  );
+  assert.ok(JSON.stringify(report.deltas[0]).length <= 600);
+  assert.equal(Object.hasOwn(report.deltas[0], 'detail'), false);
+});

@@ -1703,7 +1703,7 @@ test('--help-json returns machine-readable help without fetching GitHub', () => 
   assert.equal(help.options.find((option) => option.name === '--repo')?.required, false);
   assert.equal(help.options.find((option) => option.name === '--monitor-id')?.required, false);
   assert.match(help.exitCodes.find((entry) => entry.code === 10)?.meaning ?? '', /Deltas found/);
-  assert.deepEqual(help.output.formats, ['json', 'text']);
+  assert.deepEqual(help.output.formats, ['json', 'text', 'compact', 'ndjson']);
   assert.deepEqual(help.stateConcurrency, {
     sameStateFile: 'locked: one writer at a time, others exit busy (1)',
     overlapRisk:
