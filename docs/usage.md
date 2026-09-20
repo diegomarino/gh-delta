@@ -114,6 +114,13 @@ set` serialize mutations of that one cursor and report busy if another mutator
 holds `<cursor>.lock`; non-advancing reads remain parallel. See [Delta Log and
 Cursors](contract.md#delta-log-and-cursors) for the cursor and crash contracts.
 
+Retention is explicit and local-only. Compact the log derived from the same
+producer identity; snapshots and consumer cursors are never changed:
+
+```bash
+gh-delta log compact --repo owner/repo --monitor-id prs-5m --state-dir ./state --entities pr --keep 7d
+```
+
 Branch on the process exit code before reading stdout. Exit `10` is the
 delta-found signal, not a process failure. See [Exit Codes](contract.md#exit-codes).
 
