@@ -4,7 +4,9 @@ import { isDirectEntrypoint } from './lib/entrypoint.mjs';
 import { runCommand } from './lib/cli.mjs';
 
 if (isDirectEntrypoint(import.meta.url)) {
-  const { code, output, stderr } = await runCommand(process.argv.slice(2));
+  const { code, output, stderr } = await runCommand(process.argv.slice(2), {
+    onProgress: (line) => process.stderr.write(line),
+  });
   if (stderr) process.stderr.write(stderr);
   process.stdout.write(output);
   // process.exitCode (not process.exit) lets the event loop drain stdio buffers;
