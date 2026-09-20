@@ -242,9 +242,13 @@ test('--detail suppresses additive-field rows the old snapshot predates (no phan
     d,
   );
   const delta = report.deltas[0];
-  assert.deepEqual(delta.classes, ['updated']);
+  // head genuinely moved (sha1 -> sha2), so `head-changed` now coexists with
+  // the `updated` catch-all (see lib/detect.mjs classifyPr). Each class
+  // explains itself independently, so `head` is named twice: once by
+  // `head-changed`, once by `updated`'s generic field sweep.
+  assert.deepEqual(delta.classes.sort(), ['head-changed', 'updated']);
   const detailFields = delta.details.map((row) => row.field).sort();
-  assert.deepEqual(detailFields, ['head', 'updatedAt']);
+  assert.deepEqual(detailFields, ['head', 'head', 'updatedAt']);
 });
 
 test('--detail explains the audit-driven classes: set diffs, base transition, comment removal', () => {

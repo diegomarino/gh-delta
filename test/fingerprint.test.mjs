@@ -5,10 +5,12 @@ import {
   canonicalizeCiRollup,
   comparableFingerprint,
   hashReviews,
+  hashReviewThreads,
   prFingerprint,
   issueFingerprint,
   summarizeCiRollup,
   summarizeReviews,
+  summarizeReviewThreads,
 } from '../lib/fingerprint.mjs';
 
 test('canonicalizeCiRollup is order-independent', () => {
@@ -197,6 +199,94 @@ test('prFingerprint defaults the new compared fields when input predates them', 
   assert.deepEqual(fp.labels, []);
   assert.deepEqual(fp.assignees, []);
   assert.deepEqual(fp.reviewRequests, []);
+});
+
+test('summarizeReviewThreads sorts by id and normalizes isResolved, dropping id-less rows', () => {
+  const nodes = [
+    { id: 'T_B', isResolved: true },
+    { id: 'T_A', isResolved: false },
+    { isResolved: true }, // no id: dropped
+  ];
+  assert.deepEqual(summarizeReviewThreads(nodes), [
+    { id: 'T_A', isResolved: false },
+    { id: 'T_B', isResolved: true },
+  ]);
+  assert.deepEqual(summarizeReviewThreads(), []);
+});
+
+test('hashReviewThreads is order-independent and reflects a resolution-state change', () => {
+  const one = [
+    { id: 'T_A', isResolved: false },
+    { id: 'T_B', isResolved: true },
+  ];
+  const reordered = [one[1], one[0]];
+  assert.equal(hashReviewThreads(one), hashReviewThreads(reordered));
+  const flipped = [
+    { id: 'T_A', isResolved: true },
+    { id: 'T_B', isResolved: true },
+  ];
+  assert.notEqual(hashReviewThreads(one), hashReviewThreads(flipped));
+});
+
+test('prFingerprint always carries threadDigest/threadStates, even with zero threads or no reviewThreadNodes at all', () => {
+  // Regression guard: threadDigest/threadStates must be unconditionally
+  // present -- never sometimes-present depending on whether the input happens
+  // to carry `reviewThreadNodes`. A PR with zero review threads still gets
+  // the digest of an empty list and an empty threadStates array; an input
+  // that omits `reviewThreadNodes` entirely (predating gh.mjs's field, or a
+  // caller building PR-shaped objects by hand) gets exactly the same thing,
+  // not an absent key.
+  const noThreadsField = prFingerprint({ state: 'OPEN', updatedAt: '2026-07-01T10:00:00Z' });
+  assert.equal(typeof noThreadsField.threadDigest, 'string');
+  assert.deepEqual(noThreadsField.threadStates, []);
+
+  const emptyThreads = prFingerprint({
+    state: 'OPEN',
+    updatedAt: '2026-07-01T10:00:00Z',
+    reviewThreadNodes: [],
+  });
+  assert.equal(typeof emptyThreads.threadDigest, 'string');
+  assert.deepEqual(emptyThreads.threadStates, []);
+  assert.equal(emptyThreads.threadDigest, noThreadsField.threadDigest);
+});
+
+test('prFingerprint never omits threadDigest/threadStates keys, regardless of input shape', () => {
+  // Direct key-presence assertion (Object.hasOwn), distinct from the value
+  // checks above: this is the guard against the conditional-presence
+  // (`...(pr.reviewThreadNodes !== undefined ? {...} : {})`) approach
+  // creeping back in.
+  const zeroThreads = prFingerprint({
+    state: 'OPEN',
+    updatedAt: '2026-07-01T10:00:00Z',
+    reviewThreadNodes: [],
+  });
+  assert.ok(Object.hasOwn(zeroThreads, 'threadDigest'));
+  assert.ok(Object.hasOwn(zeroThreads, 'threadStates'));
+
+  const noFieldAtAll = prFingerprint({ state: 'OPEN', updatedAt: '2026-07-01T10:00:00Z' });
+  assert.ok(Object.hasOwn(noFieldAtAll, 'threadDigest'));
+  assert.ok(Object.hasOwn(noFieldAtAll, 'threadStates'));
+});
+
+test('prFingerprint carries threadDigest/threadStates when reviewThreadNodes is present', () => {
+  const fp = prFingerprint({
+    state: 'OPEN',
+    updatedAt: '2026-07-01T10:00:00Z',
+    reviewThreadNodes: [{ id: 'T_A', isResolved: false }],
+  });
+  assert.equal(typeof fp.threadDigest, 'string');
+  assert.deepEqual(fp.threadStates, [{ id: 'T_A', isResolved: false }]);
+});
+
+test('comparableFingerprint drops threadDigest/threadStates so they never reach the delta id', () => {
+  const fp = prFingerprint({
+    state: 'OPEN',
+    updatedAt: '2026-07-01T10:00:00Z',
+    reviewThreadNodes: [{ id: 'T_A', isResolved: false }],
+  });
+  const comparable = comparableFingerprint(fp);
+  assert.equal('threadDigest' in comparable, false);
+  assert.equal('threadStates' in comparable, false);
 });
 
 test('issueFingerprint sorts assignees', () => {

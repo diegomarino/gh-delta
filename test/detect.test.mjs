@@ -375,6 +375,185 @@ test('review thread total changes emit review-threads-changed when unresolved co
   assert.deepEqual(r.deltas[0].classes, ['review-threads-changed']);
 });
 
+test('a push changes the head SHA, emitting head-changed alongside updated', () => {
+  const base = detectDeltas(null, { pr: [pr({ headRefOid: 'sha1' })], issue: [] });
+  const r = detectDeltas(base.snapshot, {
+    pr: [pr({ headRefOid: 'sha2', updatedAt: '2026-07-01T11:00:00Z' })],
+    issue: [],
+  });
+  const delta = r.deltas[0];
+  assert.deepEqual(delta.classes.sort(), ['head-changed', 'updated']);
+  assert.equal(delta.from.head, 'sha1');
+  assert.equal(delta.to.head, 'sha2');
+});
+
+test('a head SHA change alongside another specific class still carries head-changed', () => {
+  const base = detectDeltas(null, {
+    pr: [pr({ headRefOid: 'sha1', mergeable: 'CONFLICTING' })],
+    issue: [],
+  });
+  const r = detectDeltas(base.snapshot, {
+    pr: [pr({ headRefOid: 'sha2', mergeable: 'MERGEABLE', updatedAt: '2026-07-01T11:00:00Z' })],
+    issue: [],
+  });
+  const delta = r.deltas[0];
+  assert.ok(delta.classes.includes('head-changed'));
+  assert.ok(delta.classes.includes('became-mergeable'));
+});
+
+// --- Review-thread IDENTITY, not just counters (headline regression) -------
+//
+// reviewThreads/unresolvedReviewThreads are integer counters. If one thread is
+// resolved and a different one reopens in the same tick, the totals are
+// unchanged and the counter-only comparison emits nothing. threadStates (a
+// sorted `{id, isResolved}` list, kept OUT of comparableFingerprint) and the
+// threadDigest it drives are the additional trigger that catches this.
+
+const thread = (id, isResolved) => ({ id, isResolved });
+
+test('one thread resolved and another reopened with totals unchanged still emits a delta naming both threads', () => {
+  const base = detectDeltas(null, {
+    pr: [
+      pr({
+        reviewThreads: 2,
+        unresolvedReviewThreads: 1,
+        reviewThreadNodes: [thread('T_A', false), thread('T_B', true)],
+      }),
+    ],
+    issue: [],
+  });
+  // Swap: A resolves, B reopens. Same reviewThreads (2), same
+  // unresolvedReviewThreads (1), and even the same updatedAt -- every field the
+  // counter-only comparison looks at is identical. Only the thread-identity
+  // digest moved, and that alone must still be enough to trigger the delta.
+  const r = detectDeltas(base.snapshot, {
+    pr: [
+      pr({
+        reviewThreads: 2,
+        unresolvedReviewThreads: 1,
+        reviewThreadNodes: [thread('T_A', true), thread('T_B', false)],
+      }),
+    ],
+    issue: [],
+  });
+  assert.equal(r.deltas.length, 1, 'the swap must still be observed as a delta');
+  const delta = r.deltas[0];
+  assert.ok(delta.classes.includes('unresolved-threads-added'), 'T_B newly unresolved');
+  assert.ok(delta.classes.includes('unresolved-threads-resolved'), 'T_A newly resolved');
+  // Both thread ids are recoverable from the delta's from/to thread states.
+  const oldStates = new Map(delta.from.threadStates.map((t) => [t.id, t.isResolved]));
+  const newlyUnresolved = delta.to.threadStates
+    .filter((t) => !t.isResolved && oldStates.get(t.id) !== false)
+    .map((t) => t.id);
+  const newlyResolved = delta.to.threadStates
+    .filter((t) => t.isResolved && oldStates.get(t.id) === false)
+    .map((t) => t.id);
+  assert.deepEqual(newlyUnresolved, ['T_B']);
+  assert.deepEqual(newlyResolved, ['T_A']);
+});
+
+test('a same-count thread swap does NOT fire when threadStates is absent on either side (legacy safety)', () => {
+  const base = detectDeltas(null, {
+    pr: [pr({ reviewThreads: 2, unresolvedReviewThreads: 1 })], // no reviewThreadNodes
+    issue: [],
+  });
+  // Simulate a pre-upgrade snapshot: threadDigest/threadStates are now always
+  // emitted by prFingerprint, so strip them here to pin the legacy shape the
+  // guard in fingerprintChanged/threadSetDiff must still handle safely.
+  const legacyFp = { ...base.snapshot.pr['42'] };
+  delete legacyFp.threadDigest;
+  delete legacyFp.threadStates;
+  const legacySnapshot = { ...base.snapshot, pr: { ...base.snapshot.pr, 42: legacyFp } };
+  assert.ok(!('threadDigest' in legacySnapshot.pr['42']));
+  const r = detectDeltas(legacySnapshot, {
+    pr: [
+      pr({
+        reviewThreads: 2,
+        unresolvedReviewThreads: 1,
+        updatedAt: base.snapshot.pr['42'].updatedAt, // nothing else changes either
+        reviewThreadNodes: [thread('T_A', true), thread('T_B', false)],
+      }),
+    ],
+    issue: [],
+  });
+  // The old side has no threadStates to diff against, and nothing else about
+  // the fingerprint changed, so this must not manufacture a delta.
+  assert.deepEqual(r.deltas, []);
+});
+
+test('a genuinely new unresolved thread (identity-based) still emits unresolved-threads-added', () => {
+  const base = detectDeltas(null, {
+    pr: [
+      pr({
+        reviewThreads: 1,
+        unresolvedReviewThreads: 0,
+        reviewThreadNodes: [thread('T_A', true)],
+      }),
+    ],
+    issue: [],
+  });
+  const r = detectDeltas(base.snapshot, {
+    pr: [
+      pr({
+        reviewThreads: 2,
+        unresolvedReviewThreads: 1,
+        updatedAt: '2026-07-01T11:00:00Z',
+        reviewThreadNodes: [thread('T_A', true), thread('T_B', false)],
+      }),
+    ],
+    issue: [],
+  });
+  assert.ok(r.deltas[0].classes.includes('unresolved-threads-added'));
+  assert.ok(!r.deltas[0].classes.includes('unresolved-threads-resolved'));
+});
+
+test('a legacy snapshot with no digest on the old side converges after one tick (no phantom delta)', () => {
+  // Simulate a pre-upgrade snapshot: it was written before threadDigest/
+  // threadStates existed, so it lacks both keys even though the current
+  // fetch now carries thread data.
+  const base = detectDeltas(null, {
+    pr: [pr({ reviewThreads: 1, unresolvedReviewThreads: 1 })], // no reviewThreadNodes
+    issue: [],
+  });
+  // prFingerprint now always emits threadDigest/threadStates, so strip them
+  // to simulate a snapshot written before those keys existed.
+  const legacyFp = { ...base.snapshot.pr['42'] };
+  delete legacyFp.threadDigest;
+  delete legacyFp.threadStates;
+  const legacy = { ...base.snapshot, pr: { ...base.snapshot.pr, 42: legacyFp } };
+  assert.ok(!('threadDigest' in legacy.pr['42']));
+
+  const sameThreads = [thread('T_A', false)];
+  const tick1 = detectDeltas(legacy, {
+    pr: [
+      pr({
+        reviewThreads: 1,
+        unresolvedReviewThreads: 1,
+        reviewThreadNodes: sameThreads,
+      }),
+    ],
+    issue: [],
+  });
+  // First observation of the digest must not itself be read as a change.
+  assert.deepEqual(tick1.deltas, []);
+  assert.ok('threadDigest' in tick1.snapshot.pr['42']);
+
+  // Tick 2: now both sides carry the digest, so a genuine swap is caught.
+  const tick2 = detectDeltas(tick1.snapshot, {
+    pr: [
+      pr({
+        reviewThreads: 1,
+        unresolvedReviewThreads: 1,
+        updatedAt: '2026-07-01T12:00:00Z',
+        reviewThreadNodes: [thread('T_A', true), thread('T_B', false)],
+      }),
+    ],
+    issue: [],
+  });
+  assert.ok(tick2.deltas[0].classes.includes('unresolved-threads-added'));
+  assert.ok(tick2.deltas[0].classes.includes('unresolved-threads-resolved'));
+});
+
 test('issue label removal emits relabeled', () => {
   const issue = {
     number: 7,

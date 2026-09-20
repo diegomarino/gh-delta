@@ -20,6 +20,8 @@
       "comments": 2,
       "reviewThreads": 0,
       "unresolvedReviewThreads": 0,
+      "threadDigest": "da39a3ee5e6b",
+      "threadStates": [],
       "head": "aaaaaaa1",
       "base": "main",
       "labels": [
