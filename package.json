@@ -21,6 +21,9 @@
     "./list": {
       "import": "./lib/list.mjs"
     },
+    "./lock": {
+      "import": "./lib/lock.mjs"
+    },
     "./outpost": {
       "import": "./lib/outpost.mjs"
     },
