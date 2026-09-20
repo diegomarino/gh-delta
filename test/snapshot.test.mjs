@@ -114,6 +114,19 @@ test('snapshots reject an invalid meta.horizon', () => {
   );
 });
 
+test('snapshots reject an invalid persisted stale lastChangedAt but allow legacy fingerprints', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-'));
+  const invalid = join(dir, 'invalid-stale.json');
+  writeFileSync(
+    invalid,
+    JSON.stringify({ pr: { 42: { state: 'OPEN', lastChangedAt: 'not-a-date' } }, issue: {} }),
+  );
+  assert.throws(() => readSnapshot(invalid), /lastChangedAt must be an ISO date string/);
+  const legacy = join(dir, 'legacy.json');
+  writeFileSync(legacy, JSON.stringify({ pr: { 42: { state: 'OPEN' } }, issue: {} }));
+  assert.deepEqual(readSnapshot(legacy), { pr: { 42: { state: 'OPEN' } }, issue: {} });
+});
+
 test('horizonCutoff derives from meta, falls back to fingerprints, honors overlap', () => {
   assert.equal(horizonCutoff(null), null);
   assert.equal(

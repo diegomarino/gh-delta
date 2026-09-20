@@ -16,6 +16,7 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
          [--state-file <path> | --state-dir <dir>]
          [--entities pr,issue] [--format json|text|compact|ndjson]
          [--summary-line] [--detail] [--summaries]
+         [--stale-after <duration>]
          [--only-classes <classes>] [--ignore-classes <classes>] [--ignore-authors <logins>] [--settled]
          [--baseline-emit-state]
          [--log]
@@ -79,6 +80,25 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
   `ndjson` are agent formats and imply semantic summaries without changing ids.
   Compact deltas are ordered by requested repository, PR before issue, then
   number; NDJSON finishes with exactly one `end` record and newline.
+
+### gh-delta status
+
+`gh-delta status [--number <numbers>] [--watch-dir <path>] [--refresh]` reads
+the monitor snapshot and returns each selected open PR or issue with persisted
+`lastChangedAt` and `ticksSinceChange`; PRs also carry their normalized
+`summary` (issues have `summary: null`). Without `--refresh` it performs no
+GitHub call and writes nothing. `--refresh` performs exactly one normal detector
+tick before the local read, while the final status command still exits `0` on
+success. `--number` filters every returned entity. With `--watch-dir`, a local
+0-10 PR-only watch universe reads the detector's separate economical watch
+snapshot; all other watch lists use the normal snapshot. `text` renders the same
+returned items as the JSON report.
+
+`--stale-after <duration>` uses the shared duration grammar. An open item whose
+fingerprint has not changed past that threshold emits `stale` once per UTC-day
+period. The snapshot persists `staleEmittedFor` outside the comparable
+fingerprint and clears it on a real change; `staleAt` is included in the stale
+delta identity so distinct periods have distinct ids.
 
 ## Agent output schemas
 
@@ -492,6 +512,7 @@ the array is not significant and not guaranteed stable.
 | `review-requests-changed`     | pr only    | Requested reviewers changed (review requested or a request withdrawn/satisfied). Detail names the added/removed logins (teams as `org/slug`). Note GitHub removes a user from `reviewRequests` once they submit a review, so a submitted review usually fires this together with `review-changed`.                                                                                                            |
 | `base-changed`                | pr only    | Base branch changed (PR retargeted). Prior CI and mergeability context refer to the old base; expect `mergeable: UNKNOWN` churn while GitHub recomputes.                                                                                                                                                                                                                                                      |
 | `head-changed`                | pr only    | PR head commit SHA changed (push, rebase, or force-push cannot be told apart from the SHA alone). Coexists with `updated`; does not replace it. Detail carries `from`/`to` SHAs.                                                                                                                                                                                                                              |
+| `stale`                       | pr, issue  | Emitted only with `--stale-after`, once per UTC day after an OPEN item's unchanged fingerprint reaches the threshold. `staleAt` is that UTC day and is included in the delta id; `--detail` exposes it.                                                                                                                                                                                                       |
 
 **Forward compatibility:** new classes may be added in a later minor version.
 Consumers must treat an unrecognized class as "something changed, inspect,"

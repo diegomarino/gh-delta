@@ -156,13 +156,13 @@ text
   .prompt()
   .wait(0.8);
 
-// json-output.cast — the `--format json --detail | jq` report (still).
+// json-output.cast — the `--format json --detail --stale-after 24h | jq` report (still).
 // Width 100 so the longest lines (the resolved stateFile path and the
 // summaryLine) render on one line instead of wrapping mid-token.
 const json = cast({ width: 100, autoHeight: true, title: 'gh-delta — json output' });
 json
   .prompt()
-  .command('gh-delta --repo owner/repo --format json --detail ')
+  .command('gh-delta --repo owner/repo --format json --detail --stale-after 24h ')
   .out(`${GREY}| jq${RESET}`)
   .enter()
   .block(jsonColored, 0.02)

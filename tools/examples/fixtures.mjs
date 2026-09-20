@@ -61,6 +61,19 @@ const issue17 = withId({
   to: { state: 'OPEN', labels: ['backend', 'worker'] },
 });
 
+// An unchanged open PR that has crossed the explicit inactivity threshold. Its
+// UTC period is part of the public, content-addressed stale delta identity.
+const pr88Stale = withId({
+  entity: 'pr',
+  number: 88,
+  title: 'Refresh release notes',
+  headRefName: 'docs/release-notes',
+  classes: ['stale'],
+  staleAt: '2026-07-01',
+  from: { state: 'OPEN', head: 'd0c5' },
+  to: { state: 'OPEN', head: 'd0c5' },
+});
+
 // lib/cli.mjs never puts a `warnings` key on the base report object (see
 // run()); it is only spliced in by runCommand() when outpost delivery
 // returned at least one non-empty warning. A live run therefore *omits*
@@ -100,7 +113,7 @@ export const deltaReport = Object.freeze({
 // --detail` command rendered in generate-cast.mjs (no `--entities` flag) and
 // the `__pr-issue` segment of STATE_FILE (fixes audit finding F10.2, the
 // "impossible --entities echo").
-/** Run 3 — the same PR #42 tick, `--format json --detail`. */
+/** Run 3 — PR #42 plus inactivity, `--format json --detail --stale-after 24h`. */
 export const detailReport = Object.freeze({
   schemaVersion: 1,
   baseline: false,
@@ -110,6 +123,6 @@ export const detailReport = Object.freeze({
   entities: ['pr', 'issue'],
   stateFile: STATE_FILE,
   at: AT,
-  deltas: [pr42],
-  summary: '1 delta(s)',
+  deltas: [pr42, pr88Stale],
+  summary: '2 delta(s)',
 });

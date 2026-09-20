@@ -150,6 +150,10 @@
                   "type": "integer",
                   "minimum": 1
                 },
+                "stale": {
+                  "type": "integer",
+                  "minimum": 1
+                },
                 "unresolved-threads-added": {
                   "type": "integer",
                   "minimum": 1
@@ -251,6 +255,7 @@
                     "became-mergeable",
                     "became-conflicting",
                     "head-changed",
+                    "stale",
                     "unresolved-threads-added",
                     "unresolved-threads-resolved",
                     "review-threads-changed",
@@ -514,6 +519,10 @@
                   "type": "integer",
                   "minimum": 1
                 },
+                "stale": {
+                  "type": "integer",
+                  "minimum": 1
+                },
                 "unresolved-threads-added": {
                   "type": "integer",
                   "minimum": 1
@@ -615,6 +624,7 @@
                     "became-mergeable",
                     "became-conflicting",
                     "head-changed",
+                    "stale",
                     "unresolved-threads-added",
                     "unresolved-threads-resolved",
                     "review-threads-changed",
@@ -879,6 +889,10 @@
                   "type": "integer",
                   "minimum": 1
                 },
+                "stale": {
+                  "type": "integer",
+                  "minimum": 1
+                },
                 "unresolved-threads-added": {
                   "type": "integer",
                   "minimum": 1
@@ -980,6 +994,7 @@
                     "became-mergeable",
                     "became-conflicting",
                     "head-changed",
+                    "stale",
                     "unresolved-threads-added",
                     "unresolved-threads-resolved",
                     "review-threads-changed",
