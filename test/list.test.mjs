@@ -212,3 +212,44 @@ test('listMonitors merges the registry, dedupes scanned paths, and marks stale e
     ],
   );
 });
+
+test('list distinguishes a failed first attempt from a lost successful snapshot and filters by success', () => {
+  const stateDir = mkdtempSync(join(tmpdir(), 'gd-list-'));
+  const registryDir = mkdtempSync(join(tmpdir(), 'gd-reg-'));
+  const env = { GH_DELTA_REGISTRY_DIR: registryDir };
+  registerMonitor({
+    repo: 'o/failed',
+    monitorId: 'first',
+    entities: ['pr'],
+    stateFile: join(stateDir, 'first.json'),
+    machineId: 'host-a',
+    status: 'failure',
+    at: '2026-07-08T11:30:00.000Z',
+    error: { kind: 'github', message: 'offline' },
+    env,
+  });
+  registerMonitor({
+    repo: 'o/lost',
+    monitorId: 'old',
+    entities: ['pr'],
+    stateFile: join(stateDir, 'old.json'),
+    machineId: 'host-a',
+    status: 'ok',
+    at: '2026-07-08T11:00:00.000Z',
+    env,
+  });
+  const { monitors } = listMonitors(stateDir, {
+    registryDir,
+    now: () => '2026-07-08T12:00:00.000Z',
+    sinceMs: 45 * 60 * 1000,
+  });
+  assert.equal(monitors.length, 0);
+  const all = listMonitors(stateDir, {
+    registryDir,
+    now: () => '2026-07-08T12:00:00.000Z',
+  }).monitors;
+  assert.equal(all.find((m) => m.repo === 'o/failed').snapshotStatus, 'not-yet-created');
+  assert.equal(all.find((m) => m.repo === 'o/failed').observationAgeMs, null);
+  assert.equal(all.find((m) => m.repo === 'o/lost').snapshotStatus, 'expected-missing');
+  assert.equal(all.find((m) => m.repo === 'o/lost').stale, true);
+});

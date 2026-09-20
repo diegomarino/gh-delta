@@ -58,6 +58,38 @@ test('registerMonitor is idempotent: re-registering overwrites its own entry', (
   assert.equal(entries[0].stateFile, '/state/repo-o%2Fr__monitor-prs-5m__pr.json');
 });
 
+test('registerMonitor preserves the last successful observation across a failed attempt', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-reg-'));
+  const runArgs = {
+    repo: 'o/r',
+    monitorId: 'prs',
+    entities: ['pr'],
+    stateFile: '/state/x.json',
+    machineId: 'host-0123456789ab',
+    env: { GH_DELTA_REGISTRY_DIR: dir },
+  };
+  registerMonitor({ ...runArgs, status: 'ok', at: '2026-07-08T11:00:00.000Z' });
+  registerMonitor({
+    ...runArgs,
+    status: 'failure',
+    at: '2026-07-08T12:00:00.000Z',
+    error: { kind: 'github', message: 'offline' },
+  });
+  let entry = readRegistry(dir).entries[0];
+  assert.equal(entry.lastRun, '2026-07-08T11:00:00.000Z');
+  assert.equal(entry.lastOkAt, '2026-07-08T11:00:00.000Z');
+  assert.equal(entry.lastAttemptAt, '2026-07-08T12:00:00.000Z');
+  assert.deepEqual(entry.lastError, {
+    kind: 'github',
+    message: 'offline',
+    at: '2026-07-08T12:00:00.000Z',
+  });
+  registerMonitor({ ...runArgs, status: 'ok', at: '2026-07-08T13:00:00.000Z' });
+  entry = readRegistry(dir).entries[0];
+  assert.equal(entry.lastRun, '2026-07-08T13:00:00.000Z');
+  assert.equal(entry.lastError, null);
+});
+
 test('readRegistry skips corrupt and foreign files instead of failing', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-reg-'));
   registerMonitor({
