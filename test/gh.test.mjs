@@ -128,7 +128,10 @@ test('queries and normalizes bounded comment identities plus failed check URLs',
     },
     horizonCutoff: null,
   });
-  assert.match(issueQuery, /comments \{ totalCount nodes \{ id author \{ login \} \} \}/);
+  assert.match(
+    issueQuery,
+    /comments\(last: 5\) \{ totalCount nodes \{ id author \{ login \} \} \}/,
+  );
   assert.deepEqual(issues[0].commentNodes, [{ id: 'I1', author: 'bot' }]);
 });
 

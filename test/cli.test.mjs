@@ -767,6 +767,36 @@ test('--ignore-authors suppresses fully covered bot comments but advances the sn
   assert.equal(d.stored.pr['42'].comments, 2);
 });
 
+test('--ignore-authors fails open and --detail is opaque for an unusable new comment row', () => {
+  const before = {
+    ...basePr,
+    totalCommentsCount: 1,
+    commentNodes: [{ id: 'C0', author: 'human' }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    totalCommentsCount: 2,
+    commentNodes: [
+      { id: 'C0', author: 'human' },
+      { id: null, author: null },
+    ],
+  };
+  const existing = { pr: { 42: prFingerprint(before) }, issue: {} };
+  const filtered = run(
+    [...FILTER_ARGS, '--ignore-authors', 'human'],
+    deps([[after]], { existing }),
+  );
+  assert.equal(filtered.code, 10);
+  assert.ok(filtered.report.deltas[0].classes.includes('new-comments'));
+  assert.equal(filtered.report.filteredDeltas, 0);
+  const detailed = run([...FILTER_ARGS, '--detail'], deps([[after]], { existing })).report
+    .deltas[0];
+  const comments = detailed.details.find((row) => row.class === 'new-comments');
+  assert.equal(comments.opaque, true);
+  assert.equal(comments.added, undefined);
+});
+
 test('--detail gates actionable check, review, and comment identity metadata', () => {
   const before = {
     ...basePr,
