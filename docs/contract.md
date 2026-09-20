@@ -105,11 +105,13 @@ are combined, their order is binding: `--only-classes`, then
   across re-baselining. Without the flag, baseline behavior is byte-identical. See
   the [`baseline-state`](#delta-classes) class and [Exit Codes](#exit-codes).
 - `--log` is optional and off by default. It appends each surviving post-filter,
-  post-decoration delta to a monitor-bound NDJSON journal and fsyncs it before
-  snapshot publication. Its path is `<stateDir>/log-<encoded repo>__monitor-<encoded
+  post-decoration delta to a monitor-bound NDJSON journal, fsyncs it, then
+  atomically publishes its reader-visible boundary before snapshot publication.
+  Its path is `<stateDir>/log-<encoded repo>__monitor-<encoded
 monitorId>__<entities>.ndjson`, or `<state-file>.deltalog.ndjson` for an explicit
-  state file. The success report then adds `logFile`, including on zero-delta
-  ticks; without `--log` that field is omitted and the log module is never opened.
+  state file. The success report adds absolute `logFile`, including on zero-delta
+  ticks; zero-delta ticks do not open the log. Without `--log` that field is
+  omitted and the log module is never opened.
 - `--outpost-url` is optional at-most-once HTTP delivery; see
   [Outpost Payload](#outpost-payload-schema-v1). It does not affect the JSON
   report, exit code, or snapshot.
@@ -325,10 +327,11 @@ Behavioral notes for consumers:
   grammar (a positive integer followed by `s`, `m`, `h`, or `d`). `parseSince` is
   a thin wrapper over it that fixes `flag` to `--since`; every future
   duration-valued flag must use `parseDuration` rather than restate the grammar.
-- `appendDeltaLog` fsyncs complete NDJSON records; `readDeltaLog` ignores only an
-  unterminated final crash residue. Complete malformed or noncontiguous records
-  are permanent errors. `setCursorAtomic` replaces a validated, absolute-bound
-  cursor through a same-directory atomic rename.
+- `appendDeltaLog` fsyncs complete NDJSON records, then atomically publishes a
+  versioned reader boundary; `readDeltaLog` validates every published record and
+  never exposes an unpublished suffix. Complete malformed or noncontiguous
+  records are permanent errors. `setCursorAtomic` replaces a validated,
+  absolute-bound cursor through a same-directory atomic rename.
 - `snapshotPath` is deterministic and scoped by repo, monitor-id, and entity set.
 - `horizonCutoff` derives the incremental-fetch cutoff from a prior snapshot
   (`meta.horizon` minus the overlap, or the newest fingerprint `updatedAt` for
@@ -766,7 +769,8 @@ Emitted with exit code `1` (transient) or `2` (permanent). It **does not** carry
 
 With `--log`, the producer holds its existing snapshot lock through this order:
 `detect -> ids/enrichment/attention filter -> assert lock -> append + fsync log
--> assert lock -> atomic snapshot -> registry/report/outpost`. Append failure is
+-> atomic manifest publish -> assert lock -> atomic snapshot -> registry/report/outpost`.
+Append failure is
 `kind: "io"` / exit `1` (or `kind: "log"` / exit `2` for invalid committed log
 content), and leaves the snapshot unchanged. A crash after a durable append but
 before snapshot publication may append the same content-addressed `delta.id` at a
@@ -776,9 +780,21 @@ consumers deduplicate work by `id`.
 Each complete UTF-8 NDJSON line has exactly `seq`, `id`, `detectedAt`, and
 `delta`; `seq` starts at 1 and is strictly contiguous, and `id === delta.id`.
 The journal stores the exact delta the detector emits after attention filters and
-requested decoration. Readers ignore an unterminated final line as crash residue;
-the next append truncates only that suffix. Any malformed complete line is a
-permanent `log` error.
+requested decoration. `<logFile>.published.json` is the small versioned
+publication manifest: exactly `{"version":1,"lastSeq":N,"byteLength":B}`. It
+binds readers to the first `B` bytes of the NDJSON file. Readers read it first,
+fully validate every line in that prefix, and ignore every suffix byte even when
+that suffix ends in a newline. A cursor or `afterSeq` above `lastSeq` is a
+permanent `log` error rather than an empty replay.
+
+For a legacy/manual log without a manifest, the first append fully validates its
+complete prefix and atomically bootstraps the manifest before appending new bytes.
+For ordinary manifest-backed appends, the committed prefix is trusted by the
+writer and only the bounded unpublished suffix plus newly serialized records are
+validated; reads always validate the whole published prefix. On recovery, a valid
+contiguous complete suffix is fsynced and promoted, an unterminated suffix is
+truncated, and a malformed complete suffix fails closed without mutation. A
+manifest ahead of a missing/truncated log is a permanent `log` error.
 
 A cursor is atomically replaced JSON with exactly
 `{"cursorVersion":1,"logFile":"/absolute/log.ndjson","seq":41}`. `seq` is a

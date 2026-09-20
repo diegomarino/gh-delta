@@ -26,6 +26,14 @@ function tempPath(name) {
   return join(mkdtempSync(join(tmpdir(), 'gh-delta-log-')), name);
 }
 
+function manifestPath(logFile) {
+  return `${logFile}.published.json`;
+}
+
+function readManifest(logFile) {
+  return JSON.parse(readFileSync(manifestPath(logFile), 'utf8'));
+}
+
 const first = {
   id: 'a'.repeat(64),
   entity: 'pr',
@@ -84,6 +92,129 @@ test('append writes contiguous, exact NDJSON records and reader scans them', () 
     lastSeq: 2,
     trailingPartial: false,
   });
+  assert.deepEqual(readManifest(logFile), {
+    version: 1,
+    lastSeq: 2,
+    byteLength: Buffer.byteLength(readFileSync(logFile, 'utf8')),
+  });
+});
+
+test('reader advances only through the manifest prefix while fsync fails, then recovery re-delivers the suffix', () => {
+  const logFile = tempPath('publication.ndjson');
+  const cursorPath = `${logFile}.cursor.json`;
+  appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:00:00.000Z', deltas: [first] });
+  let observedDuringFailedFsync;
+  assert.throws(
+    () =>
+      appendDeltaLog(
+        logFile,
+        { detectedAt: '2026-09-20T12:01:00.000Z', deltas: [second] },
+        {
+          fs: {
+            fsyncSync() {
+              observedDuringFailedFsync = readDeltaLog(logFile, { afterSeq: 0 });
+              setCursorAtomic(cursorPath, {
+                cursorVersion: 1,
+                logFile,
+                seq: observedDuringFailedFsync.scannedTo,
+              });
+              throw new Error('fsync failed');
+            },
+          },
+        },
+      ),
+    /fsync failed/,
+  );
+  assert.deepEqual(
+    observedDuringFailedFsync.entries.map((entry) => entry.seq),
+    [1],
+  );
+  assert.equal(observedDuringFailedFsync.scannedTo, 1);
+  assert.equal(readCursor(cursorPath).seq, 1);
+  appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:02:00.000Z', deltas: [first] });
+  assert.deepEqual(
+    readDeltaLog(logFile, { afterSeq: readCursor(cursorPath).seq }).entries.map(
+      (entry) => entry.seq,
+    ),
+    [2, 3],
+  );
+});
+
+test('afterSeq beyond the published manifest tail is a log error even with a newline suffix', () => {
+  const logFile = tempPath('cursor-ahead.ndjson');
+  appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:00:00.000Z', deltas: [first] });
+  writeFileSync(
+    logFile,
+    `${readFileSync(logFile, 'utf8')}${JSON.stringify({ seq: 2, id: second.id, detectedAt: '2026-09-20T12:01:00.000Z', delta: second })}\n`,
+  );
+  assert.throws(() => readDeltaLog(logFile, { afterSeq: 2 }), /above published tail/);
+});
+
+test('manifest-backed append reads only the unpublished suffix, not the full log', () => {
+  const logFile = tempPath('bounded.ndjson');
+  appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:00:00.000Z', deltas: [first] });
+  appendDeltaLog(
+    logFile,
+    { detectedAt: '2026-09-20T12:01:00.000Z', deltas: [second] },
+    {
+      fs: {
+        readFileSync(path, ...rest) {
+          assert.notEqual(path, logFile, 'ordinary append must not read the committed log prefix');
+          return readFileSync(path, ...rest);
+        },
+      },
+    },
+  );
+  assert.equal(readManifest(logFile).lastSeq, 2);
+});
+
+test('valid complete suffix is promoted before the next append and preserves sequence', () => {
+  const logFile = tempPath('recover-complete.ndjson');
+  appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:00:00.000Z', deltas: [first] });
+  writeFileSync(
+    logFile,
+    `${readFileSync(logFile, 'utf8')}${JSON.stringify({ seq: 2, id: second.id, detectedAt: '2026-09-20T12:01:00.000Z', delta: second })}\n`,
+  );
+  appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:02:00.000Z', deltas: [first] });
+  assert.deepEqual(
+    readDeltaLog(logFile, { afterSeq: 0 }).entries.map((entry) => entry.seq),
+    [1, 2, 3],
+  );
+  assert.equal(readManifest(logFile).lastSeq, 3);
+});
+
+test('partial suffix is truncated during manifest recovery and malformed complete suffix is never mutated', () => {
+  const partial = tempPath('recover-partial.ndjson');
+  appendDeltaLog(partial, { detectedAt: '2026-09-20T12:00:00.000Z', deltas: [first] });
+  writeFileSync(partial, `${readFileSync(partial, 'utf8')}{"seq":2`);
+  appendDeltaLog(partial, { detectedAt: '2026-09-20T12:01:00.000Z', deltas: [second] });
+  assert.deepEqual(
+    readDeltaLog(partial, { afterSeq: 0 }).entries.map((entry) => entry.seq),
+    [1, 2],
+  );
+
+  const malformed = tempPath('recover-malformed.ndjson');
+  appendDeltaLog(malformed, { detectedAt: '2026-09-20T12:00:00.000Z', deltas: [first] });
+  writeFileSync(malformed, `${readFileSync(malformed, 'utf8')}{bad}\n`);
+  const before = readFileSync(malformed, 'utf8');
+  assert.throws(
+    () => appendDeltaLog(malformed, { detectedAt: '2026-09-20T12:01:00.000Z', deltas: [second] }),
+    /malformed complete JSON line/,
+  );
+  assert.equal(readFileSync(malformed, 'utf8'), before);
+});
+
+test('manifest ahead of or beyond a truncated log is a permanent log error', () => {
+  const logFile = tempPath('manifest-ahead.ndjson');
+  appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:00:00.000Z', deltas: [first] });
+  const manifest = readManifest(logFile);
+  writeFileSync(manifestPath(logFile), JSON.stringify({ ...manifest, lastSeq: 2 }));
+  assert.throws(() => readDeltaLog(logFile, { afterSeq: 0 }), /manifest/);
+  writeFileSync(
+    manifestPath(logFile),
+    JSON.stringify({ ...manifest, byteLength: manifest.byteLength + 1 }),
+  );
+  assert.throws(() => readDeltaLog(logFile, { afterSeq: 0 }), /manifest/);
 });
 
 test('append rejects an invalid delta before changing existing log bytes', () => {
@@ -162,6 +293,11 @@ function assertStaleAppendCannotDeleteWinner({ partialTail }) {
         [2, winnerDelta.id],
       ],
     );
+    assert.deepEqual(readManifest(logFile), {
+      version: 1,
+      lastSeq: 2,
+      byteLength: Buffer.byteLength(readFileSync(logFile, 'utf8')),
+    });
   } finally {
     if (winner?.ok) releaseLock(stateFile, winner.token);
     releaseLock(stateFile, stale.token);
@@ -190,7 +326,7 @@ test('a retry after a durable append records the same id at a later sequence', (
   );
 });
 
-test('reader ignores a crash partial tail and append removes only that suffix', () => {
+test('reader hides a crash partial tail behind the published boundary and append removes it', () => {
   const logFile = tempPath('events.ndjson');
   appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:00:00.000Z', deltas: [first] });
   writeFileSync(logFile, `${readFileSync(logFile, 'utf8')}{"seq":2`);
@@ -198,7 +334,7 @@ test('reader ignores a crash partial tail and append removes only that suffix', 
     readDeltaLog(logFile, { afterSeq: 0 }).entries.map((entry) => entry.seq),
     [1],
   );
-  assert.equal(readDeltaLog(logFile, { afterSeq: 0 }).trailingPartial, true);
+  assert.equal(readDeltaLog(logFile, { afterSeq: 0 }).trailingPartial, false);
   appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:01:00.000Z', deltas: [second] });
   assert.deepEqual(
     readDeltaLog(logFile, { afterSeq: 0 }).entries.map((entry) => entry.seq),

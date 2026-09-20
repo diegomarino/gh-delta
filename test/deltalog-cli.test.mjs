@@ -253,6 +253,31 @@ test('no --log leaves the log seam unopened and report omits logFile', () => {
   assert.equal(result.report.logFile, undefined);
 });
 
+test('a zero-delta --log tick reports logFile but never opens the append seam', () => {
+  const deps = producerDeps({
+    fetchPRs: () => [],
+    readSnapshot: () => ({ pr: {}, issue: {} }),
+    appendDeltaLog: () => assert.fail('empty ticks must not open the delta log'),
+  });
+  const result = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'm',
+      '--state-file',
+      '/tmp/empty.json',
+      '--entities',
+      'pr',
+      '--log',
+    ],
+    deps,
+  );
+  assert.equal(result.code, 0);
+  assert.equal(result.report.logFile, '/tmp/empty.json.deltalog.ndjson');
+  assert.deepEqual(deps.events, ['snapshot']);
+});
+
 test('producer append failure is io and leaves snapshot publication untouched', () => {
   const deps = producerDeps({
     appendDeltaLog: () => {

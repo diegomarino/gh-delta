@@ -96,9 +96,10 @@ gh-delta \
 
 Add `--log` when more than one consumer needs durable replay after a detector
 tick. The snapshot still advances normally, while each emitted post-filter delta
-is appended and fsynced before that snapshot publication. Consumers deduplicate
-by `delta.id`: a crash after append but before the snapshot can replay an id at a
-later sequence.
+is appended, fsynced, and published through a sibling `.published.json` boundary
+before snapshot publication. Consumers only see the manifest-published NDJSON
+prefix and deduplicate by `delta.id`: a crash after append but before the snapshot
+can replay an id at a later sequence.
 
 ```bash
 gh-delta --repo owner/repo --monitor-id prs-5m --state-dir ./state --entities pr --log
@@ -107,7 +108,7 @@ gh-delta read --cursor ./state/triage.cursor.json --advance --format text
 ```
 
 `read` does not contact GitHub or touch snapshots. Without `--advance`, it
-re-delivers matching deltas; with it, it moves the cursor to the complete log
+re-delivers matching deltas; with it, it moves the cursor to the published log
 tail scanned, including entries its filters rejected. See [Delta Log and
 Cursors](contract.md#delta-log-and-cursors) for the cursor and crash contracts.
 
