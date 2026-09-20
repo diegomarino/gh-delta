@@ -10,6 +10,9 @@
 // re-test of the protocol itself (see test/lock.test.mjs for that).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 process.env.GH_DELTA_NO_REGISTRY = '1';
 import { run } from '../lib/cli.mjs';
@@ -33,9 +36,10 @@ function makeFakeFs(initial = {}) {
   let nextFd = 1;
   return {
     files,
+    mkdirSync() {},
     openSync(path, flags) {
-      assert.equal(flags, 'wx');
-      if (files.has(path)) throw eexist();
+      assert.ok(flags === 'wx' || flags === 'w');
+      if (flags === 'wx' && files.has(path)) throw eexist();
       files.set(path, { content: '', mtimeMs: 0 });
       const fd = nextFd++;
       fds.set(fd, { path, buf: '' });
@@ -59,6 +63,12 @@ function makeFakeFs(initial = {}) {
       if (!f) throw enoent();
       files.set(to, f);
       files.delete(from);
+    },
+    linkSync(existingPath, newPath) {
+      const f = files.get(existingPath);
+      if (!f) throw enoent();
+      if (files.has(newPath)) throw eexist();
+      files.set(newPath, f);
     },
     unlinkSync(path) {
       if (!files.has(path)) throw enoent();
@@ -156,7 +166,6 @@ test('losing the lock mid-fetch fails at the pre-write fence and writes nothing'
       // decision, independent of the run's own lockNow (a valid but distant
       // future Date, since Number.MAX_SAFE_INTEGER overflows Date's range).
       const thief = acquireLock(STATE_FILE, {
-        numberOfFetches: 1,
         ghTimeoutMs: 1,
         staleMs: 1,
         fs,
@@ -218,4 +227,68 @@ test('a clean run acquires and releases the real lock around the whole tick', ()
   assert.equal(result.code, 0);
   assert.equal(heldDuringFetch, true, 'the lock must be held while fetching');
   assert.equal(fs.files.has(path), false, 'the lock must be released after a successful run');
+});
+
+// P1-1: a first run against a nonexistent explicit --state-dir must succeed
+// and seed a baseline. This exercises the whole real stack (real fs, real
+// lock.mjs, real writeSnapshotAtomic) end to end, not the fake fs, because
+// the bug was specifically that acquireLock's exclusive-create would fail
+// with ENOENT against a directory nothing had created yet. Against the old
+// code (lock acquired before any mkdir of an explicit --state-dir) this test
+// fails with code 1 / kind "io" instead of a baseline.
+test('a first run against a nonexistent explicit --state-dir creates it and seeds a baseline (P1-1)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-cli-lock-statedir-'));
+  const stateDir = join(dir, 'nested', 'does-not-exist-yet');
+  try {
+    const result = run(
+      ['--repo', 'o/r', '--monitor-id', 'main', '--state-dir', stateDir, '--entities', 'pr'],
+      {
+        fetchPRs: () => [basePr],
+        fetchIssues: () => [],
+        now: () => '2026-07-01T12:00:00Z',
+      },
+    );
+    assert.equal(result.code, 0);
+    assert.equal(result.report.baseline, true);
+    assert.equal(existsSync(stateDir), true);
+    assert.equal(existsSync(result.report.stateFile), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The shrunk fence window (P1-2's "also" item): writeSnapshotAtomic's
+// verifyBeforeCommit runs a SECOND ownership check immediately before its
+// final renameSync, narrower than the earlier assertLockOwned call in
+// lib/cli.mjs. Simulate ownership being lost strictly between the two checks
+// by making the injected assertLockOwned dep answer true the first time
+// (the early fence) and false the second (verifyBeforeCommit) -- proving
+// both checks actually run and that the late one aborts the write. Against
+// code without the verifyBeforeCommit wiring, assertCalls would stop at 1
+// and this run would incorrectly succeed and publish the snapshot.
+test('ownership lost strictly between the early fence and the snapshot rename still aborts with busy, and writes nothing', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-cli-lock-fence-'));
+  const stateFile = join(dir, 'state.json');
+  let assertCalls = 0;
+  try {
+    const result = run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', stateFile], {
+      fetchPRs: () => [basePr],
+      fetchIssues: () => [],
+      readSnapshot: () => null,
+      acquireLock: () => ({ ok: true, token: 'tok' }),
+      releaseLock: () => ({ ok: true, released: true }),
+      assertLockOwned: () => {
+        assertCalls++;
+        return assertCalls === 1; // early fence: still owned; verifyBeforeCommit: lost it
+      },
+      now: () => '2026-07-01T12:00:00Z',
+    });
+    assert.equal(assertCalls, 2, 'both the early fence and the late verifyBeforeCommit must run');
+    assert.equal(result.code, 1);
+    assert.equal(result.report.kind, 'busy');
+    assert.match(result.report.error, /lock lost before snapshot write/);
+    assert.equal(existsSync(stateFile), false, 'nothing must be published once ownership is lost');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
