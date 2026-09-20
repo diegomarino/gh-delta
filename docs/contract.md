@@ -67,6 +67,8 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
   monitors. `--state-file` is an explicit snapshot path; `--state-dir` derives a
   path scoped by repo, monitor id, and selected entities (see
   [Snapshot Semantics](#snapshot-semantics)). Both together exit `2` (config).
+  An eligible economical `--watch-dir` tick deliberately selects an independent
+  derived `__watch-pr.json` path (or `<state-file>.watch.json`) instead.
 - `--entities` defaults to `pr,issue`. Accepted: `pr`, `issue`, `pr,issue`.
 - `--format` defaults to `json`. `text` is an operator/log mode, not a machine
   contract; automated consumers must use `json`.
@@ -169,7 +171,8 @@ entries, so it is safe to run at any time, including while monitors tick.
 - A scan identifies a snapshot two ways: the derived filename (encodes repo,
   monitor id, and entities), or — for arbitrary filenames — the identity the
   detector stamps inside the snapshot (`meta.repo`, `meta.monitorId`,
-  `meta.entities`; see [Snapshot Semantics](#snapshot-semantics)). Files
+  `meta.entities`; see [Snapshot Semantics](#snapshot-semantics)). Economical
+  PR-watch entries additionally expose `scope: "watch-pr"`. Files
   identified neither way are counted in `skippedFiles`.
 - A missing state directory or registry is an empty inventory (exit `0`), not
   an error.
@@ -327,7 +330,7 @@ subpaths; the package root is intentionally not exported.
 | `gh-delta/list`        | `listMonitors`, `parseSnapshotFilename`, `parseSince`                                                                                                                                                                                                                                                                                                                                                                                               | Read-only monitor snapshot inventory                          |
 | `gh-delta/registry`    | `registerMonitor`, `readRegistry`, `defaultRegistryDir`, `registryEntryPath`, `canonicalStateFileKey`, `REGISTRY_VERSION`                                                                                                                                                                                                                                                                                                                           | Run-registry breadcrumbs for gh-delta list                    |
 | `gh-delta/outpost`     | `buildOutpostPayload`, `outpostSignature`, `postOutpost`, `sendOutposts`, `validateOutpostUrl`                                                                                                                                                                                                                                                                                                                                                      | Outpost payload and transport helpers                         |
-| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `writeSnapshotAtomic`, `defaultStateDir`, `horizonCutoff`                                                                                                                                                                                                                                                                                                                                                           | Snapshot path and persistence helpers                         |
+| `gh-delta/snapshot`    | `readSnapshot`, `snapshotPath`, `economicalSnapshotPath`, `writeSnapshotAtomic`, `defaultStateDir`, `horizonCutoff`                                                                                                                                                                                                                                                                                                                                 | Snapshot path and persistence helpers                         |
 | `gh-delta/lock`        | `acquireLock`, `releaseLock`, `assertLockOwned`, `lockPath`, `LOCK_EXPIRY_SLACK_MS`                                                                                                                                                                                                                                                                                                                                                                 | State-file lock: one writer per `(repo, monitorId, entities)` |
 | `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`, `canonicalEntityKey`, `defaultMonitorId`                                                                                                                                                                                                                                                                                                                                               | Shared argument parsing policies                              |
 | `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                                                                                                                                                                                                                                                                                                                                                                                           | Package metadata and version output                           |
@@ -350,7 +353,8 @@ Behavioral notes for consumers:
   never exposes an unpublished suffix. Complete malformed or noncontiguous
   records are permanent errors. `setCursorAtomic` replaces a validated,
   absolute-bound cursor through a same-directory atomic rename.
-- `snapshotPath` is deterministic and scoped by repo, monitor-id, and entity set.
+- `snapshotPath` is deterministic and scoped by repo, monitor-id, and entity set;
+  `economicalSnapshotPath` derives the independent bounded-watch sibling.
 - `horizonCutoff` derives the incremental-fetch cutoff from a prior snapshot
   (`meta.horizon` minus the overlap, or the newest fingerprint `updatedAt` for
   legacy snapshots without `meta`); a `null` snapshot yields `null` (open-items-
@@ -941,6 +945,10 @@ their derived filename or a registry entry.
 - A derived `--state-dir` path is scoped by repo, monitor id, **and** selected
   entities. A `--entities pr` run and a `--entities pr,issue` run use **different**
   files; keep `--entities` fixed per monitor so state is not split.
+- An eligible economical watch list is intentionally a separate PR-only history:
+  its derived path ends `__watch-pr.json` and its explicit-file path appends
+  `.watch.json`. Its metadata carries `scope: "watch-pr"`, so `list` reports it
+  instead of treating it as an unknown filename.
 - Filename segments are encoded with `encodeURIComponent` **plus `_` additionally
   encoded as `%5F`**, making derived names injective for CLI inputs. Library
   callers passing raw entity strings containing `__` to `snapshotPath` directly
@@ -1265,14 +1273,30 @@ actually emit today. A consumer validating against them is correct to reject
 anything absent, and adding a name to a catalog before the code emits it would
 break that guarantee.
 
-## Watch-directory selection (I-6a)
+## Watch-directory selection (I-6)
 
 `--watch-dir <path>` and `--number <positive,...>` are mutually exclusive
 post-fetch selectors. Watch entries are canonical `{entity,number,until,addedAt}`
 JSON files and malformed entries are permanent configuration errors before a
-GitHub call or snapshot write. Selection affects emitted deltas (including
-baseline-state), not `filteredDeltas`, fetches, fingerprints, or snapshot bytes.
-The ordinary missing lifecycle remains repository-wide. `watch add|rm|ls` are
-local-only commands; terminal watched items are removed only after their final
-delta and successful snapshot write, guarded against concurrent replacement.
-Economical fetching and a separate watch snapshot are I-6b, not I-6a.
+GitHub call or snapshot write. `watch add|rm|ls` are local-only commands;
+terminal watched items are removed only after their final delta and successful
+snapshot write, guarded against concurrent replacement.
+
+With an explicit `--watch-dir`, a validated list with zero to ten entries and
+only `pr` entities automatically becomes an economical PR universe. It makes
+exactly one GraphQL request using `repository.pullRequest(number:)` aliases for
+the unique watched numbers (zero requests for an empty list), normalizes the
+same complete PR shape as broad polling, and never fetches issues. GraphQL
+errors, malformed aliases, and any nested connection overflow fail closed.
+`--number`, any issue entry, or more than ten entries retains broad fetching and
+the ordinary snapshot.
+
+Economical ticks use a separate identity: derived paths end in
+`__watch-pr.json`, while `--state-file x.json` becomes `x.json.watch.json`.
+Locks, logs, registry entries, reports, and writes use that selected path, so
+crossing the eligibility boundary never reads or overwrites the other history.
+Before diffing, the old economical snapshot is projected to current watch
+membership: removing an entry is silent and prunes it on the next write; a null
+alias for an entry that remains watched enters the regular missing lifecycle.
+Re-adding a previously removed PR may consequently be `new` (or baseline on a
+fresh economical snapshot).

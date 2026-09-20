@@ -246,6 +246,32 @@ test('list text output prints the snapshot path so identical monitors are distin
   );
 });
 
+test('list text output identifies an economical watch snapshot scope', () => {
+  const output = formatListTextOutput({
+    report: {
+      command: 'list',
+      at: '2026-07-01T10:00:00.000Z',
+      stateDir: '/state',
+      registryDir: null,
+      since: null,
+      skippedFiles: 0,
+      monitors: [
+        {
+          repo: 'o/r',
+          monitorId: 'watch',
+          entities: ['pr'],
+          scope: 'watch-pr',
+          lastRun: '2026-07-01T09:00:00.000Z',
+          prCount: 1,
+          issueCount: 0,
+          stateFile: '/state/repo-o%2Fr__monitor-watch__watch-pr.json',
+        },
+      ],
+    },
+  });
+  assert.match(output, /scope: watch-pr/);
+});
+
 test('list error text output avoids snapshot/delta vocabulary', () => {
   const output = formatListTextOutput({
     report: {

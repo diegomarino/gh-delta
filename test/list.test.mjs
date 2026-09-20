@@ -34,6 +34,15 @@ test('parseSnapshotFilename round-trips snapshotPath for hostile identifiers', (
   assert.deepEqual(combined.entities, ['pr', 'issue']);
 });
 
+test('parseSnapshotFilename recognizes economical watch snapshots as a separate scope', () => {
+  assert.deepEqual(parseSnapshotFilename('repo-o%2Fr__monitor-main__watch-pr.json'), {
+    repo: 'o/r',
+    monitorId: 'main',
+    entities: ['pr'],
+    scope: 'watch-pr',
+  });
+});
+
 test('parseSnapshotFilename rejects files that are not derived snapshots', () => {
   assert.equal(parseSnapshotFilename('notes.json'), null);
   assert.equal(parseSnapshotFilename('repo-o%2Fr__monitor-m__pr.json.123.tmp'), null);
