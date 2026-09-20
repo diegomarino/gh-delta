@@ -42,6 +42,9 @@
     "./version": {
       "import": "./lib/version.mjs"
     },
+    "./watch": {
+      "import": "./lib/watch.mjs"
+    },
     "./package.json": "./package.json"
   },
   "bin": {
