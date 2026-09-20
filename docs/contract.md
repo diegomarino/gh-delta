@@ -293,6 +293,9 @@ gh-delta wait --timeout <duration>
   [detector options]
 ```
 
+`wait` supports only `--format json`; agent compact and NDJSON envelopes do not
+carry the wait command's required `reason` and `iterations` fields.
+
 `wait` is a bounded worker loop. It runs a normal detector tick per iteration,
 so snapshots advance and each state-file lock is acquired and released within
 that iteration; it is never held while sleeping. `--timeout` is required.

@@ -436,3 +436,134 @@ test('wait preserves --number scope for log consumers and catalogs its identity 
   assert.deepEqual(result.report.deltas, []);
   for (const field of ['repo', 'repos', 'monitorId']) assert.ok(WAIT_REPORT_FIELDS.includes(field));
 });
+
+test('wait keeps log records for --until-summary when --until names a different class', async () => {
+  const result = await runCommand(
+    [
+      'wait',
+      '--from-log',
+      '--cursor',
+      '/tmp/or.cursor.json',
+      '--timeout',
+      '1m',
+      '--until',
+      'ci-changed',
+      '--until-summary',
+      'isDraft=true',
+    ],
+    {
+      ...noopLock,
+      readCursor: () => ({ logFile: '/tmp/or.ndjson', seq: 0 }),
+      readDeltaLog: () => ({
+        entries: [
+          {
+            seq: 1,
+            delta: {
+              id: 'd',
+              entity: 'pr',
+              number: 42,
+              classes: ['updated'],
+              to: { state: 'OPEN', isDraft: true, ciChecks: [] },
+            },
+          },
+        ],
+        lastSeq: 1,
+        firstSeq: 1,
+      }),
+      setCursorAtomic: () => {},
+      touchHeartbeat: () => {},
+      now: () => '2026-09-21T08:00:00.000Z',
+    },
+  );
+  assert.equal(result.code, 10);
+  assert.equal(result.report.reason, 'already-satisfied');
+});
+
+test('wait parses typed summary predicates and rejects invalid typed values', async () => {
+  const invalid = await runCommand([
+    'wait',
+    '--timeout',
+    '1m',
+    '--until-summary',
+    'unresolvedReviewThreads=one',
+  ]);
+  assert.equal(invalid.code, 2);
+  assert.match(invalid.report.error, /non-negative integers/);
+});
+
+test('wait creates its derived default heartbeat before an aggregate first tick without undefined snapshot reads', async () => {
+  let elapsed = 0;
+  const heartbeats = [];
+  const result = await runCommand(
+    [
+      'wait',
+      '--repo',
+      'a/a,b/b',
+      '--state-dir',
+      '/tmp/wait-derived',
+      '--entities',
+      'pr',
+      '--timeout',
+      '1s',
+      '--until-summary',
+      'ciRollup=green',
+    ],
+    {
+      ...noopLock,
+      fetchPRs: () => [],
+      fetchIssues: () => [],
+      readSnapshot: (path) => {
+        assert.ok(path);
+        return null;
+      },
+      writeSnapshotAtomic: () => {},
+      touchHeartbeat: (path) => heartbeats.push(path),
+      clock: () => elapsed,
+      sleep: (milliseconds) => {
+        elapsed += milliseconds;
+      },
+      now: () => '2026-09-21T08:00:00.000Z',
+    },
+  );
+  assert.equal(result.code, 0);
+  assert.equal(result.report.reason, 'timeout');
+  assert.equal(heartbeats.length, 0, 'aggregate mode has no ambiguous shared heartbeat');
+});
+
+test('wait touches the derived normal state heartbeat before its first detector fetch', async () => {
+  let elapsed = 0;
+  const heartbeats = [];
+  const result = await runCommand(
+    [
+      'wait',
+      '--repo',
+      'o/r',
+      '--state-dir',
+      '/tmp/wait-default',
+      '--entities',
+      'pr',
+      '--timeout',
+      '1s',
+      '--until',
+      'ci-changed',
+    ],
+    {
+      ...noopLock,
+      fetchPRs: () => {
+        assert.equal(heartbeats.length, 1);
+        return [];
+      },
+      fetchIssues: () => [],
+      readSnapshot: () => null,
+      writeSnapshotAtomic: () => {},
+      touchHeartbeat: (path) => heartbeats.push(path),
+      clock: () => elapsed,
+      sleep: (milliseconds) => {
+        elapsed += milliseconds;
+      },
+      now: () => '2026-09-21T08:00:00.000Z',
+    },
+  );
+  assert.equal(result.code, 0);
+  assert.match(heartbeats[0], /repo-o%2Fr__monitor-.*__pr\.json\.hb$/);
+});
