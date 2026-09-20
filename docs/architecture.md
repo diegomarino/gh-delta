@@ -297,6 +297,15 @@ The exact payload envelope and event identity semantics are specified in
 
 ## Future Entity and Selector Research
 
+## I-6a watch selection
+
+Watch files are monitor-private local JSON state. They are read and validated
+before GitHub fetches, but selection occurs only after the normal broad fetch
+and detector transition. Thus snapshots, fingerprints, and missing lifecycle
+remain authoritative for the complete repository. Terminal cleanup compares the
+bytes read at tick start before unlinking after the successful snapshot write.
+I-6b may introduce an economical query path only with a distinct snapshot.
+
 The public contract currently supports only `pr`, `issue`, and `pr,issue`.
 Research notes under `docs/entities-research/` inventory future entities and
 selector applicability. A selector such as `branch` must be validated per entity

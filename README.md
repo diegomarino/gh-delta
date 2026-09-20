@@ -305,4 +305,12 @@ delta classes, snapshot behavior, or any outpost path, update:
 
 ## License
 
+## Local watch lists
+
+Use `--watch-dir <path>` to emit only selected post-fetch deltas, or manage a
+monitor-private list with `gh-delta watch add pr:42 --until merged`, `watch rm`,
+and `watch ls`. The full repository is still fetched and the persisted snapshot
+is unchanged; missing lifecycle detection remains repository-wide. I-6b will
+add economical fetching and its separate snapshot identity.
+
 [MIT](LICENSE) © diegomarino

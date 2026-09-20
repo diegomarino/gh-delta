@@ -287,6 +287,17 @@ current command surface.
 
 ## Troubleshooting Pointers
 
+## Watch a small set of items
+
+`gh-delta watch add pr:42 --until merged --watch-dir ./state/watch` creates an
+atomic local entry; `watch ls` and `watch rm pr:42` never contact GitHub. A tick
+with `--watch-dir ./state/watch` fetches normally but emits only watched deltas;
+its snapshot is identical to an unselected tick, so removing and re-adding an
+item cannot manufacture a `new` delta and missing detection stays repo-wide.
+Use `--number 42,99` for one ephemeral tick instead. Terminal items emit their
+final delta, then are removed after snapshot publication. Economical fetching is
+reserved for I-6b and is not implemented here.
+
 Common symptoms:
 
 - A monitor re-baselines after reboot: use explicit `--state-dir`.

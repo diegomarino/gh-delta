@@ -8,6 +8,7 @@ import { basename, join } from 'node:path';
 import { listMonitors, parseSince, parseSnapshotFilename } from '../lib/list.mjs';
 import { registerMonitor } from '../lib/registry.mjs';
 import { snapshotPath, writeSnapshotAtomic } from '../lib/snapshot.mjs';
+import { addWatch, watchDirPath } from '../lib/watch.mjs';
 
 const NOW = '2026-07-08T12:00:00.000Z';
 
@@ -126,6 +127,18 @@ test('listMonitors treats a missing directory as an empty inventory', () => {
     monitors: [],
     skippedFiles: 0,
   });
+});
+
+test('listMonitors reports derived watch counts and surfaces corrupt watch state', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-list-'));
+  seed(dir, 'o/r', 'main', 'pr', { pr: {}, issue: {}, meta: { horizon: NOW } });
+  const watchDir = watchDirPath('o/r', 'main', dir);
+  addWatch(watchDir, 'pr:42', 'merged', { now: () => NOW });
+  assert.equal(listMonitors(dir, { now: () => NOW }).monitors[0].watched, 1);
+  writeFileSync(join(watchDir, 'issue-1.json'), '{bad');
+  const monitor = listMonitors(dir, { now: () => NOW }).monitors[0];
+  assert.equal(monitor.watched, null);
+  assert.match(monitor.watchError, /issue-1\.json/);
 });
 
 test('listMonitors identifies self-describing snapshots with arbitrary filenames', () => {

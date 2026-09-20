@@ -1264,3 +1264,15 @@ catalogs exported from `gh-delta/contract`: they list what the detector can
 actually emit today. A consumer validating against them is correct to reject
 anything absent, and adding a name to a catalog before the code emits it would
 break that guarantee.
+
+## Watch-directory selection (I-6a)
+
+`--watch-dir <path>` and `--number <positive,...>` are mutually exclusive
+post-fetch selectors. Watch entries are canonical `{entity,number,until,addedAt}`
+JSON files and malformed entries are permanent configuration errors before a
+GitHub call or snapshot write. Selection affects emitted deltas (including
+baseline-state), not `filteredDeltas`, fetches, fingerprints, or snapshot bytes.
+The ordinary missing lifecycle remains repository-wide. `watch add|rm|ls` are
+local-only commands; terminal watched items are removed only after their final
+delta and successful snapshot write, guarded against concurrent replacement.
+Economical fetching and a separate watch snapshot are I-6b, not I-6a.
