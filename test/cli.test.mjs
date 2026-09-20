@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { run, runCommand } from '../lib/cli.mjs';
 import { prFingerprint } from '../lib/fingerprint.mjs';
+import { DELTA_DETAIL_FIELDS_BY_CLASS } from '../lib/contract.mjs';
 
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -257,9 +258,13 @@ test('--detail suppresses additive-field rows the old snapshot predates (no phan
     d,
   );
   const delta = report.deltas[0];
-  assert.deepEqual(delta.classes, ['updated']);
+  // head genuinely moved (sha1 -> sha2), so `head-changed` now coexists with
+  // the `updated` catch-all (see lib/detect.mjs classifyPr). Each class
+  // explains itself independently, so `head` is named twice: once by
+  // `head-changed`, once by `updated`'s generic field sweep.
+  assert.deepEqual(delta.classes.sort(), ['head-changed', 'updated']);
   const detailFields = delta.details.map((row) => row.field).sort();
-  assert.deepEqual(detailFields, ['head', 'updatedAt']);
+  assert.deepEqual(detailFields, ['head', 'head', 'updatedAt']);
 });
 
 test('--detail explains the audit-driven classes: set diffs, base transition, comment removal', () => {
@@ -332,6 +337,116 @@ test('--detail explains the audit-driven classes: set diffs, base transition, co
       removed: [],
     },
   );
+});
+
+test('--detail names the added and removed thread ids for a same-count thread swap (P2-1)', () => {
+  // The swap case this feature exists for: totals are unchanged (one thread
+  // resolves while another reopens), so pushNumericDelta returns nothing for
+  // unresolvedReviewThreads. Without a dedicated thread-identity detail row,
+  // `--detail` would name nothing at all for either class.
+  const before = {
+    ...basePr,
+    reviewThreads: 2,
+    unresolvedReviewThreads: 1,
+    reviewThreadNodes: [
+      { id: 'RT_1', isResolved: false },
+      { id: 'RT_2', isResolved: true },
+    ],
+  };
+  const after = {
+    ...basePr,
+    updatedAt: '2026-07-01T11:00:00Z',
+    reviewThreads: 2,
+    unresolvedReviewThreads: 1,
+    reviewThreadNodes: [
+      { id: 'RT_1', isResolved: true },
+      { id: 'RT_2', isResolved: false },
+    ],
+  };
+  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--detail'],
+    d,
+  );
+  assert.equal(code, 10);
+  const delta = report.deltas[0];
+  assert.ok(delta.classes.includes('unresolved-threads-added'));
+  assert.ok(delta.classes.includes('unresolved-threads-resolved'));
+
+  const addedRow = delta.details.find(
+    (row) => row.class === 'unresolved-threads-added' && row.field === 'threadStates',
+  );
+  const resolvedRow = delta.details.find(
+    (row) => row.class === 'unresolved-threads-resolved' && row.field === 'threadStates',
+  );
+  assert.ok(addedRow, 'unresolved-threads-added must name the swap even though the count held');
+  assert.ok(
+    resolvedRow,
+    'unresolved-threads-resolved must name the swap even though the count held',
+  );
+  assert.deepEqual(addedRow.added, ['RT_2']);
+  assert.deepEqual(addedRow.removed, ['RT_1']);
+  assert.deepEqual(resolvedRow.added, ['RT_2']);
+  assert.deepEqual(resolvedRow.removed, ['RT_1']);
+
+  // The numeric row is genuinely absent: the count did not move.
+  assert.ok(!delta.details.some((row) => row.field === 'unresolvedReviewThreads'));
+});
+
+test('--detail does not leak threadDigest/threadStates into generic updated rows (P2-2)', () => {
+  // Head SHA and thread states change in the same tick: threadDigest/
+  // threadStates differ between from/to, but they are detail-only mirrors --
+  // their meaningful expression is the dedicated threadStates row on
+  // unresolved-threads-*, not a generic `updated` field row (which the
+  // exported contract does not declare for the `updated` class).
+  const before = {
+    ...basePr,
+    headRefOid: 'sha1',
+    reviewThreads: 2,
+    unresolvedReviewThreads: 1,
+    reviewThreadNodes: [
+      { id: 'RT_1', isResolved: false },
+      { id: 'RT_2', isResolved: true },
+    ],
+  };
+  const after = {
+    ...basePr,
+    updatedAt: '2026-07-01T11:00:00Z',
+    headRefOid: 'sha2',
+    reviewThreads: 2,
+    unresolvedReviewThreads: 1,
+    reviewThreadNodes: [
+      { id: 'RT_1', isResolved: true },
+      { id: 'RT_2', isResolved: false },
+    ],
+  };
+  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--detail'],
+    d,
+  );
+  assert.equal(code, 10);
+  const delta = report.deltas[0];
+  assert.ok(delta.classes.includes('updated'));
+  assert.ok(delta.classes.includes('head-changed'));
+
+  const updatedFields = delta.details
+    .filter((row) => row.class === 'updated')
+    .map((row) => row.field);
+  assert.ok(!updatedFields.includes('threadDigest'));
+  assert.ok(!updatedFields.includes('threadStates'));
+
+  // Every emitted key must fall within the declared contract for its class.
+  for (const row of delta.details) {
+    const allowed = DELTA_DETAIL_FIELDS_BY_CLASS[row.class];
+    assert.ok(allowed, `no field map for class "${row.class}"`);
+    if (!['presence', 'unknown'].includes(row.field)) {
+      assert.ok(
+        allowed.includes(row.field),
+        `field "${row.field}" not declared for class "${row.class}"`,
+      );
+    }
+  }
 });
 
 test('--detail names the exact checks and reviews that changed when the snapshot carries summaries', () => {
