@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   appendDeltaLog,
+  compactDeltaLog,
   deltaLogPath,
   readCursor,
   readDeltaLog,
@@ -98,6 +99,143 @@ test('append writes contiguous, exact NDJSON records and reader scans them', () 
     lastSeq: 2,
     byteLength: Buffer.byteLength(readFileSync(logFile, 'utf8')),
   });
+});
+
+test('compaction keeps original sequence numbers and an empty prefix appends from the old tail', () => {
+  const logFile = tempPath('compact-sequences.ndjson');
+  appendDeltaLog(logFile, {
+    detectedAt: '2026-09-20T12:00:00.000Z',
+    deltas: [first, second],
+  });
+  appendDeltaLog(logFile, {
+    detectedAt: '2026-09-20T12:01:00.000Z',
+    deltas: [first],
+  });
+
+  assert.deepEqual(compactDeltaLog(logFile, { keep: { count: 1 } }), {
+    previous: { firstSeq: 1, lastSeq: 3, count: 3 },
+    retained: { firstSeq: 3, lastSeq: 3, count: 1 },
+  });
+  assert.deepEqual(
+    readDeltaLog(logFile, { afterSeq: 0 }).entries.map((entry) => entry.seq),
+    [3],
+  );
+  assert.deepEqual(
+    appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:02:00.000Z', deltas: [second] }),
+    { fromSeq: 4, toSeq: 4, appended: 1 },
+  );
+
+  compactDeltaLog(logFile, { keep: { count: 0 } });
+  assert.deepEqual(readDeltaLog(logFile, { afterSeq: 4 }).entries, []);
+  assert.deepEqual(
+    appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:03:00.000Z', deltas: [first] }),
+    { fromSeq: 5, toSeq: 5, appended: 1 },
+  );
+});
+
+test('duration compaction keeps a contiguous suffix when detectedAt moves backward', () => {
+  const logFile = tempPath('compact-clock-skew.ndjson');
+  appendDeltaLog(logFile, {
+    detectedAt: '2026-09-20T10:00:00.000Z',
+    deltas: [first],
+  });
+  appendDeltaLog(logFile, {
+    detectedAt: '2026-09-20T13:00:00.000Z',
+    deltas: [second],
+  });
+  appendDeltaLog(logFile, {
+    detectedAt: '2026-09-20T11:00:00.000Z',
+    deltas: [first],
+  });
+
+  compactDeltaLog(logFile, { keep: { sinceMs: Date.parse('2026-09-20T12:00:00.000Z') } });
+  assert.deepEqual(
+    readDeltaLog(logFile, { afterSeq: 0 }).entries.map((entry) => entry.seq),
+    [2, 3],
+  );
+  assert.deepEqual(
+    appendDeltaLog(logFile, { detectedAt: '2026-09-20T14:00:00.000Z', deltas: [second] }),
+    { fromSeq: 4, toSeq: 4, appended: 1 },
+  );
+});
+
+test('a manifest durability failure leaves one complete compacted publication readable', () => {
+  const logFile = tempPath('compact-manifest-fsync.ndjson');
+  appendDeltaLog(logFile, {
+    detectedAt: '2026-09-20T12:00:00.000Z',
+    deltas: [first, second],
+  });
+  const parent = dirname(manifestPath(logFile));
+  const descriptors = new Map();
+  assert.throws(
+    () =>
+      compactDeltaLog(
+        logFile,
+        { keep: { count: 1 } },
+        {
+          fs: {
+            closeSync(fd) {
+              descriptors.delete(fd);
+              return closeSync(fd);
+            },
+            openSync(path, flags) {
+              const fd = openSync(path, flags);
+              descriptors.set(fd, path);
+              return fd;
+            },
+            fsyncSync(fd) {
+              if (descriptors.get(fd) === parent) throw new Error('directory fsync failed');
+              return fsyncSync(fd);
+            },
+          },
+          uniqueSuffix: () => 'durability-failure',
+        },
+      ),
+    /directory fsync failed/,
+  );
+  assert.deepEqual(
+    readDeltaLog(logFile, { afterSeq: 0 }).entries.map((entry) => entry.seq),
+    [2],
+  );
+});
+
+test('a reader that selected a cleaned generation retries against the current manifest', () => {
+  const logFile = tempPath('compact-reader-race.ndjson');
+  appendDeltaLog(logFile, {
+    detectedAt: '2026-09-20T12:00:00.000Z',
+    deltas: [first, second],
+  });
+  compactDeltaLog(logFile, { keep: { count: 1 } }, { uniqueSuffix: () => 'current' });
+  const currentManifest = readFileSync(manifestPath(logFile), 'utf8');
+  const missingManifest = JSON.stringify({
+    version: 3,
+    dataFile: 'cleaned-generation.ndjson',
+    firstSeq: 1,
+    lastSeq: 2,
+    byteLength: 10,
+  });
+  let manifestReads = 0;
+  const result = readDeltaLog(
+    logFile,
+    { afterSeq: 0 },
+    {
+      fs: {
+        readFileSync(path, encoding) {
+          if (path === manifestPath(logFile)) {
+            manifestReads++;
+            if (manifestReads <= 2) return missingManifest;
+            return currentManifest;
+          }
+          return readFileSync(path, encoding);
+        },
+      },
+    },
+  );
+  assert.deepEqual(
+    result.entries.map((entry) => entry.seq),
+    [2],
+  );
+  assert.equal(manifestReads, 4);
 });
 
 test('manifest publication fsyncs its parent directory after rename before append returns', () => {

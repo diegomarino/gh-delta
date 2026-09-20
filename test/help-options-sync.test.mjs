@@ -40,6 +40,14 @@ test('registry command keys match help.mjs HELP_SPECS command keys exactly', () 
   );
 });
 
+test('log compact help requires an explicit repo without promising derivation', () => {
+  const repo = getHelpSpec('gh-delta log compact').options.find(
+    (option) => option.name === '--repo',
+  );
+  assert.equal(repo.required, true);
+  assert.doesNotMatch(repo.description, /derived|optional/i);
+});
+
 for (const command of Object.keys(PARSER_OPTIONS_BY_COMMAND)) {
   test(`"${command}" parser flags match its --help option list`, () => {
     const parserFlags = parserFlagSet(PARSER_OPTIONS_BY_COMMAND[command]);

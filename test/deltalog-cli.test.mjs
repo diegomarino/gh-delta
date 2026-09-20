@@ -91,6 +91,113 @@ test('main --log appends emitted post-filter delta before snapshot and exposes l
   assert.equal(deps.events[0][2].deltas[0].id, result.report.deltas[0].id);
 });
 
+test('log compact retains a producer-derived suffix and read warns a cursor behind retention', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-compact-cli-'));
+  const stateFile = join(dir, 'state.json');
+  const log = `${stateFile}.deltalog.ndjson`;
+  appendDeltaLog(log, {
+    detectedAt: '2026-09-20T10:00:00.000Z',
+    deltas: [{ id: 'a'.repeat(64), entity: 'pr', number: 1, title: 'old', classes: ['new'] }],
+  });
+  appendDeltaLog(log, {
+    detectedAt: '2026-09-20T12:00:00.000Z',
+    deltas: [{ id: 'b'.repeat(64), entity: 'pr', number: 2, title: 'new', classes: ['new'] }],
+  });
+  const compacted = run(
+    [
+      'log',
+      'compact',
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'm',
+      '--state-file',
+      stateFile,
+      '--entities',
+      'pr',
+      '--keep',
+      '1',
+    ],
+    { now: () => '2026-09-20T13:00:00.000Z' },
+  );
+  assert.equal(compacted.code, 0);
+  assert.equal(compacted.report.retained.count, 1);
+  assert.equal(compacted.report.retained.firstSeq, 2);
+  const cursor = join(dir, 'cursor.json');
+  setCursorAtomic(cursor, { cursorVersion: 1, logFile: log, seq: 0 });
+  const read = run(['read', '--cursor', cursor, '--format', 'text'], {
+    now: () => '2026-09-20T13:00:00.000Z',
+  });
+  assert.equal(read.code, 10);
+  assert.deepEqual(
+    read.report.deltas.map((delta) => delta.number),
+    [2],
+  );
+  assert.deepEqual(read.warnings, [{ label: 'retention', reason: 'cursor behind retention' }]);
+
+  const safeCursor = join(dir, 'safe.cursor.json');
+  setCursorAtomic(safeCursor, { cursorVersion: 1, logFile: log, seq: 1 });
+  const safe = run(['read', '--cursor', safeCursor], {
+    now: () => '2026-09-20T13:00:00.000Z',
+  });
+  assert.deepEqual(safe.warnings, []);
+});
+
+test('duration compaction can retain zero records and warnings render in JSON and text', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-compact-duration-'));
+  const stateFile = join(dir, 'state.json');
+  const log = `${stateFile}.deltalog.ndjson`;
+  appendDeltaLog(log, {
+    detectedAt: '2026-09-20T10:00:00.000Z',
+    deltas: [{ id: 'a'.repeat(64), entity: 'pr', number: 1, title: 'old', classes: ['new'] }],
+  });
+  const args = [
+    'log',
+    'compact',
+    '--repo',
+    'o/r',
+    '--monitor-id',
+    'm',
+    '--state-file',
+    stateFile,
+    '--keep',
+    '30m',
+  ];
+  const compacted = run(args, { now: () => '2026-09-20T13:00:00.000Z' });
+  assert.equal(compacted.code, 0);
+  assert.equal(compacted.report.retained.count, 0);
+  assert.deepEqual(readDeltaLog(log, { afterSeq: 1 }).entries, []);
+
+  const behind = join(dir, 'behind.cursor.json');
+  setCursorAtomic(behind, { cursorVersion: 1, logFile: log, seq: 0 });
+  const json = await runCommand(['read', '--cursor', behind], {
+    now: () => '2026-09-20T13:00:00.000Z',
+  });
+  assert.match(json.output, /"label": "retention"/);
+  const text = await runCommand(['read', '--cursor', behind, '--format', 'text'], {
+    now: () => '2026-09-20T13:00:00.000Z',
+  });
+  assert.match(text.output, /warning \[retention\]: cursor behind retention/);
+});
+
+test('compact rejects unsafe duration before locking and reports lock contention as busy', () => {
+  const common = ['log', 'compact', '--repo', 'o/r', '--state-file', '/tmp/state.json', '--keep'];
+  const invalid = run([...common, '9007199254740992d'], {
+    acquireLock: () => assert.fail('invalid keep must fail before lock acquisition'),
+    now: () => '2026-09-20T13:00:00.000Z',
+  });
+  assert.equal(invalid.code, 2);
+  assert.equal(invalid.report.kind, 'config');
+
+  const busy = run([...common, '1'], {
+    acquireLock: () => ({ ok: false, reason: 'held' }),
+    compactDeltaLog: () => assert.fail('busy compact must not read or mutate the log'),
+    now: () => '2026-09-20T13:00:00.000Z',
+  });
+  assert.equal(busy.code, 1);
+  assert.equal(busy.report.kind, 'busy');
+});
+
 test('--log resolves only opt-in log paths while preserving relative snapshot paths', () => {
   const stateFile = 'relative-state.json';
   const byFile = run(

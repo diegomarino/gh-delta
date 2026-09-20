@@ -147,8 +147,8 @@ The impure edges are isolated:
 - `snapshot.mjs` performs filesystem I/O, derives monitor-scoped snapshot paths,
   and computes the incremental-fetch horizon cutoff.
 - `deltalog.mjs` owns opt-in append-only NDJSON validation, sequencing, a
-  manifest-published reader boundary and crash-tail recovery, log path derivation,
-  and atomic consumer cursors.
+  manifest-published reader boundary, generation-based retention compaction,
+  crash-tail recovery, log path derivation, and atomic consumer cursors.
 - `outpost.mjs` validates optional outpost URLs, builds payloads, and sends
   short-timeout HTTP POSTs.
 - `text-output.mjs` formats heartbeat text, list inventory text, and outpost

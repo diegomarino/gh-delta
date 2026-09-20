@@ -781,11 +781,28 @@ Each complete UTF-8 NDJSON line has exactly `seq`, `id`, `detectedAt`, and
 `delta`; `seq` starts at 1 and is strictly contiguous, and `id === delta.id`.
 The journal stores the exact delta the detector emits after attention filters and
 requested decoration. `<logFile>.published.json` is the small versioned
-publication manifest: exactly `{"version":1,"lastSeq":N,"byteLength":B}`. It
-binds readers to the first `B` bytes of the NDJSON file. Readers read it first,
-fully validate every line in that prefix, and ignore every suffix byte even when
-that suffix ends in a newline. A cursor or `afterSeq` above `lastSeq` is a
-permanent `log` error rather than an empty replay.
+publication manifest. Version 1 is exactly
+`{"version":1,"lastSeq":N,"byteLength":B}` and binds readers to the first `B`
+bytes of `<logFile>`. Version 2 additionally records `firstSeq`; version 3 also
+records a same-directory `dataFile` generation. Readers fully validate every
+line in the selected prefix and ignore suffix bytes even when they end in a
+newline. A cursor or `afterSeq` above `lastSeq` is a permanent `log` error rather
+than an empty replay.
+
+`gh-delta log compact --keep <positive-count|duration>` is the only retention
+operation. It requires one producer state location and takes that state-file
+lock through a fenced, same-directory generation publication. Version-1 and
+version-2 manifests remain readable; compacted version-3 manifests add
+`firstSeq` and a same-directory `dataFile` generation, preserving original
+sequence numbers. The immutable generation is fsynced before the manifest
+atomically selects it, so lock-free readers resolve to either the old or new
+complete publication; a reader racing best-effort cleanup retries against the
+current manifest. A failure after the manifest rename leaves that selected
+generation intact and readable. Empty retention stores `firstSeq: lastSeq + 1`,
+so a later append uses `lastSeq + 1`. A cursor behind the retained prefix
+receives retained records and one
+`{label:"retention",reason:"cursor behind retention"}` warning; a cursor at
+`firstSeq - 1` is safe, and a cursor above `lastSeq` remains a `log` error.
 
 Publication fsyncs the log, then a same-directory manifest temp file, atomically
 renames that temp file, and fsyncs the manifest parent directory before append
