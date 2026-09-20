@@ -10,7 +10,7 @@ gh-delta tick (cron, CI, systemd — anything)      exit 10
    │  one POST per delta (payload schema v1)
    ▼
 receiver.mjs :8787
-   ├─ check shared secret (OUTPOST_SECRET), if configured
+   ├─ verify raw-body HMAC (OUTPOST_SECRET), if configured
    ├─ validate type + schemaVersion
    ├─ optional class filter (NTFY_CLASSES)
    ├─ dedupe by id, scoped to the most recent id per item (size-capped seen-events.jsonl)
@@ -21,9 +21,10 @@ ntfy.sh/<topic> ──> phone: "owner/repo PR #42 — merged"
 ## Install
 
 ```bash
+export OUTPOST_SECRET=$(openssl rand -hex 32)
 NTFY_TOPIC=my-gh-deltas node receiver.mjs &
 gh-delta --repo owner/repo --monitor-id push --state-dir ./state \
-  --outpost-url http://127.0.0.1:8787/
+  --outpost-url http://127.0.0.1:8787/ --outpost-secret OUTPOST_SECRET
 ```
 
 Subscribe to the topic in the ntfy app. `NTFY_CLASSES=merged,ci-changed`
@@ -44,20 +45,12 @@ secret configured.
 You have two ways to secure a non-localhost deployment — pick at least one:
 
 1. **Shared secret (`OUTPOST_SECRET`).** Set `OUTPOST_SECRET` to a random
-   value and the receiver rejects any POST that doesn't present it (`401`),
-   compared with `crypto.timingSafeEqual` to avoid timing side channels.
-   Because the current `gh-delta --outpost-url` sender (`lib/outpost.mjs`)
-   only POSTs JSON with a `Content-Type` header and cannot attach custom
-   headers, the secret can be supplied either way:
-   - **Header** (preferred, for a reverse proxy or a custom sender that can
-     set headers): `Authorization: Bearer <secret>`.
-   - **Query string** (works today with the stock `gh-delta` CLI, since
-     `--outpost-url` is just a URL): append `?secret=<secret>` to the URL you
-     pass to `--outpost-url`, e.g.
-     `--outpost-url "http://receiver.example.com:8787/?secret=<secret>"`.
-     Prefer HTTPS in front of the receiver if you use the query-string form,
-     since URLs (and thus the secret) can end up in proxy/access logs
-     otherwise.
+   value. The receiver accepts only `X-GhDelta-Signature:
+   sha256=<lowercase-hex-hmac>` over the raw request body, validates its exact
+   scheme and length, then compares it with `crypto.timingSafeEqual` before it
+   parses, dedupes, records, or forwards the payload. The stock sender reads
+   the same environment value by name; the secret never appears in a URL or
+   command argument.
 
    ```bash
    # Export the secret first so BOTH the receiver and the sender below see it.
@@ -66,7 +59,8 @@ You have two ways to secure a non-localhost deployment — pick at least one:
    export OUTPOST_SECRET=$(openssl rand -hex 32)
    NTFY_TOPIC=my-gh-deltas HOST=0.0.0.0 node receiver.mjs &
    gh-delta --repo owner/repo --monitor-id push --state-dir ./state \
-     --outpost-url "http://receiver.example.com:8787/?secret=$OUTPOST_SECRET"
+     --outpost-url "http://receiver.example.com:8787/" \
+     --outpost-secret OUTPOST_SECRET
    ```
 
 2. **Reverse proxy.** Put the receiver behind a proxy (nginx, Caddy,

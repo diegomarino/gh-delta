@@ -14,11 +14,8 @@
 //      NTFY_CLASSES (comma list; empty = forward every class),
 //      SEEN_FILE (default ./seen-events.jsonl),
 //      SEEN_MAX_ENTRIES (default 5000; oldest entries are dropped past this cap),
-//      OUTPOST_SECRET (optional shared secret; when set, every POST must present
-//        it, either as `Authorization: Bearer <secret>` or `?secret=<secret>` on
-//        the request URL — the query form exists because the current gh-delta
-//        `--outpost-url` sender cannot attach custom headers, only a URL. See
-//        README.md for how to wire this up on both sides).
+//      OUTPOST_SECRET (optional shared secret; when set, every POST must carry
+//        an X-GhDelta-Signature HMAC over its raw body. See README.md).
 //
 // SECURITY: with OUTPOST_SECRET unset, this receiver accepts and forwards any
 // well-formed POST with no authentication. That is fine bound to 127.0.0.1
@@ -28,32 +25,21 @@
 // put a reverse proxy with its own auth in front — see README.md.
 import { createServer } from 'node:http';
 import { appendFileSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 /**
- * Constant-time compare of two secrets of possibly-different length.
+ * Verify the exact SHA-256 HMAC over the raw request body.
  *
- * timingSafeEqual throws on length mismatch, so that case is short-circuited
- * separately. The length check itself is not timing-sensitive — the secret's
- * length isn't confidential the way its content is — only the byte-by-byte
- * comparison needs to run in constant time.
  */
-function secretsMatch(provided, expected) {
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
-}
-
-function isAuthorized(req, url, outpostSecret) {
+function isAuthorized(req, rawBody, outpostSecret) {
   if (!outpostSecret) return true;
-  const authHeader = req.headers['authorization'] ?? '';
-  const bearerMatch = /^Bearer (.+)$/.exec(authHeader);
-  if (bearerMatch && secretsMatch(bearerMatch[1], outpostSecret)) return true;
-  const querySecret = url.searchParams.get('secret') ?? '';
-  if (querySecret && secretsMatch(querySecret, outpostSecret)) return true;
-  return false;
+  const signature = req.headers['x-ghdelta-signature'];
+  const match = typeof signature === 'string' && /^sha256=([0-9a-f]{64})$/.exec(signature);
+  if (!match) return false;
+  const provided = Buffer.from(match[1], 'hex');
+  const expected = createHmac('sha256', outpostSecret).update(rawBody).digest();
+  return provided.length === expected.length && timingSafeEqual(provided, expected);
 }
 
 // Seen state is one record per (entity, number) item — the LAST id forwarded
@@ -236,25 +222,17 @@ function main() {
 
   const server = createServer((req, res) => {
     if (req.method !== 'POST') return respond(res, 405, { error: 'POST only' });
-    // req.headers.host is client-controlled; a malformed value makes new URL()
-    // throw synchronously, which would crash the process on an exposed bind.
-    let url;
-    try {
-      url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
-    } catch {
-      return respond(res, 400, { error: 'invalid request URL or Host header' });
-    }
-    if (!isAuthorized(req, url, OUTPOST_SECRET))
-      return respond(res, 401, { error: 'unauthorized' });
-    let body = '';
-    req.setEncoding('utf8');
+    const chunks = [];
     req.on('data', (chunk) => {
-      body += chunk;
+      chunks.push(chunk);
     });
     req.on('end', () => {
+      const rawBody = Buffer.concat(chunks);
+      if (!isAuthorized(req, rawBody, OUTPOST_SECRET))
+        return respond(res, 401, { error: 'unauthorized' });
       let payload;
       try {
-        payload = JSON.parse(body);
+        payload = JSON.parse(rawBody.toString('utf8'));
       } catch {
         return respond(res, 400, { error: 'invalid JSON' });
       }
@@ -313,4 +291,4 @@ if (isDirectlyExecuted()) {
   main();
 }
 
-export { itemKey, parseSeenLine, loadSeenState, shouldForward, secretsMatch, isAuthorized };
+export { itemKey, parseSeenLine, loadSeenState, shouldForward, isAuthorized };

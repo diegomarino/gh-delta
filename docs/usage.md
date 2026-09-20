@@ -206,13 +206,18 @@ gh-delta \
   --state-dir ./state \
   --entities pr \
   --format text \
-  --outpost-url https://example.com/gh-delta
+  --outpost-url https://example.com/gh-delta \
+  --outpost-secret OUTPOST_SECRET
 ```
 
 Outposts are best-effort notifications. The detector snapshot advances before
 delivery is attempted, and downstream systems own filtering, dedupe, retries,
 queues, and actions. Keep scheduler logs or add an external queue if you need
 at-least-once action delivery.
+
+`--outpost-secret` takes the name of an environment variable, not the secret
+itself. When set, gh-delta signs each exact JSON request body with HMAC-SHA256
+in `X-GhDelta-Signature`; use the same `OUTPOST_SECRET` value at the receiver.
 
 The exact payload, `eventId`, `deliveryId`, and warning semantics are specified
 in [Outpost Payload](contract.md#outpost-payload-schema-v1).

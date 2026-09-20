@@ -20,6 +20,7 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
          [--baseline-emit-state]
          [--log]
          [--outpost-url <url>]
+         [--outpost-secret <ENV_VARIABLE_NAME>]
          [--outpost-timeout-ms <ms>] [--outpost-max-posts <n>]
          [--gh-timeout-ms <ms>] [--no-registry] [--lock-stale-ms <duration>]
 ```
@@ -124,6 +125,9 @@ monitorId>__<entities>.ndjson`, or `<state-file>.deltalog.ndjson` for an explici
 - `--outpost-url` is optional at-most-once HTTP delivery; see
   [Outpost Payload](#outpost-payload-schema-v1). It does not affect the JSON
   report, exit code, or snapshot.
+- `--outpost-secret` names (never contains) an environment variable holding the
+  shared HMAC secret. It requires `--outpost-url`; invalid names and unset or
+  empty values are configuration errors before repository derivation or I/O.
 - `--outpost-timeout-ms` timeout in milliseconds for each outpost HTTP POST
   (default `4000`).
 - `--outpost-max-posts` maximum number of outpost POSTs per run (default:
@@ -1138,6 +1142,11 @@ prior/next state (`from` is `null` for a `new` object; `to` is `null` for a
 `missing` object).
 
 The delivery sequence makes the at-most-once guarantee explicit: the snapshot is written before any POST, and a delivery failure leaves the exit code and report unchanged.
+
+When `--outpost-secret ENV_VARIABLE_NAME` is supplied, each POST adds
+`X-GhDelta-Signature: sha256=<lowercase hex HMAC-SHA256>`, computed over the
+exact UTF-8 `JSON.stringify(payload)` bytes sent in that request. The secret is
+never included in payloads, reports, warnings, logs, help, or process arguments.
 
 ```mermaid
 sequenceDiagram

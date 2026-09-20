@@ -280,10 +280,14 @@ Snapshot JSON shape and field semantics are specified in
 
 ## Outpost Edge
 
-`--outpost-url` is an optional edge on `gh-delta.mjs`. It is not part of
+`--outpost-url` is an optional edge on `gh-delta.mjs`. `--outpost-secret` may
+opt it into HMAC-SHA256 request-body signatures using a named environment
+variable; the resolved secret stays on the delivery path and never enters the
+report. It is not part of
 `lib/detect.mjs`; the detector still only returns facts.
 
-The outpost path is deliberately small: validate the endpoint, send one payload
+The outpost path is deliberately small: validate the endpoint and secret
+configuration, serialize/sign/send one payload
 per delta after a successful detection, collect warnings, and leave the detector
 exit result unchanged. Authentication, retry policy, durable queues, endpoint
 filtering, dedupe, and action execution belong downstream.

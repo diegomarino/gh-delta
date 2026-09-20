@@ -8,12 +8,30 @@
 // check (see the bottom of the file).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import {
   itemKey,
   parseSeenLine,
   loadSeenState,
   shouldForward,
+  isAuthorized,
 } from '../examples/outpost-ntfy-receiver/receiver.mjs';
+
+test('receiver authorization accepts only the exact HMAC of the raw body when a secret is configured', () => {
+  const body = '{"title":"snowman ☃"}';
+  const signature = `sha256=${createHmac('sha256', 'Jefe').update(body, 'utf8').digest('hex')}`;
+
+  assert.equal(isAuthorized({ headers: { 'x-ghdelta-signature': signature } }, body, 'Jefe'), true);
+  assert.equal(isAuthorized({ headers: {} }, body, 'Jefe'), false);
+  assert.equal(
+    isAuthorized({ headers: { 'x-ghdelta-signature': 'sha256=not-hex' } }, body, 'Jefe'),
+    false,
+  );
+  assert.equal(
+    isAuthorized({ headers: { 'x-ghdelta-signature': signature } }, '{"title":"changed"}', 'Jefe'),
+    false,
+  );
+});
 
 function payload({ number = 42, id, classes = ['ci-changed'] } = {}) {
   return {

@@ -1,6 +1,7 @@
 // CLI contract tests: exit codes, snapshot safety, and user-facing detail output.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 
 // Tests must never leave breadcrumbs in the developer's real run registry.
 process.env.GH_DELTA_NO_REGISTRY = '1';
@@ -26,6 +27,94 @@ const basePr = {
   comments: [],
   headRefOid: 'sha1',
 };
+
+test('postOutpost signs the exact serialized body with the configured HMAC secret', async () => {
+  const { postOutpost } = await import('../lib/outpost.mjs');
+  const payload = { type: 'gh-delta.delta', title: 'snowman ☃' };
+  let sent;
+
+  await postOutpost('https://example.com/hook', payload, {
+    secret: 'Jefe',
+    fetchImpl: async (_url, options) => {
+      sent = options;
+      return { ok: true, status: 202 };
+    },
+  });
+
+  const expectedBody = '{"type":"gh-delta.delta","title":"snowman ☃"}';
+  assert.equal(sent.body, expectedBody, 'the signed bytes must be the bytes sent');
+  assert.equal(
+    sent.headers['X-GhDelta-Signature'],
+    `sha256=${createHmac('sha256', 'Jefe').update(expectedBody, 'utf8').digest('hex')}`,
+  );
+});
+
+test('--outpost-secret validates its environment-variable name before repo derivation', () => {
+  let derived = false;
+  const { code, report } = run(['--outpost-secret', 'not-valid'], {
+    now: () => '2026-07-01T12:00:00Z',
+    resolveRepo: () => {
+      derived = true;
+      throw new Error('must not derive');
+    },
+  });
+
+  assert.equal(code, 2);
+  assert.equal(report.kind, 'config');
+  assert.match(report.error, /--outpost-secret must name an environment variable/);
+  assert.equal(derived, false);
+});
+
+test('--outpost-secret reads the injected environment and does not leak its value', async () => {
+  const { runWithOutpost } = await import('../lib/cli.mjs');
+  const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
+    existing: { pr: { 42: { state: 'OPEN', updatedAt: '2026-07-01T10:00:00Z', isDraft: false, ci: 'x', review: 'REVIEW_REQUIRED', reviews: 'x', mergeable: 'UNKNOWN', comments: 0, head: 'sha1' } }, issue: {} },
+  });
+  let sent;
+  d.env = { OUTPOST_SECRET: 'not-in-report' };
+  d.outpostFetch = async (_url, options) => {
+    sent = options;
+    return { ok: true, status: 202 };
+  };
+
+  const result = await runWithOutpost([
+    '--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json',
+    '--outpost-url', 'https://example.com/hook', '--outpost-secret', 'OUTPOST_SECRET',
+  ], d);
+
+  assert.match(sent.headers['X-GhDelta-Signature'], /^sha256=[0-9a-f]{64}$/);
+  assert.doesNotMatch(JSON.stringify(result), /not-in-report/);
+  assert.doesNotMatch(sent.body, /not-in-report/);
+});
+
+test('--outpost-secret requires an outpost URL and a non-empty injected value', () => {
+  const missingUrl = run(['--repo', 'o/r', '--outpost-secret', 'OUTPOST_SECRET'], {
+    now: () => '2026-07-01T12:00:00Z',
+    env: { OUTPOST_SECRET: 'value' },
+  });
+  assert.equal(missingUrl.code, 2);
+  assert.match(missingUrl.report.error, /requires --outpost-url/);
+
+  const emptyValue = run(
+    ['--repo', 'o/r', '--outpost-url', 'https://example.com', '--outpost-secret', 'OUTPOST_SECRET'],
+    { now: () => '2026-07-01T12:00:00Z', env: { OUTPOST_SECRET: '' } },
+  );
+  assert.equal(emptyValue.code, 2);
+  assert.match(emptyValue.report.error, /OUTPOST_SECRET.*unset or empty/);
+});
+
+test('unsigned postOutpost keeps the legacy headers and body bytes', async () => {
+  const { postOutpost } = await import('../lib/outpost.mjs');
+  let sent;
+  await postOutpost('https://example.com/hook', { a: 1 }, {
+    fetchImpl: async (_url, options) => {
+      sent = options;
+      return { ok: true, status: 202 };
+    },
+  });
+  assert.deepEqual(sent.headers, { 'Content-Type': 'application/json' });
+  assert.equal(sent.body, '{"a":1}');
+});
 
 // This suite is about detector behavior, not lock behavior (see
 // test/lock.test.mjs and test/cli-lock.test.mjs for that) -- and many tests
