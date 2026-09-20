@@ -3485,3 +3485,16 @@ test('schema rejects an unknown format as configuration error', () => {
   assert.equal(result.code, 2);
   assert.match(result.report.error, /json, compact, or ndjson/);
 });
+
+test('single-repo compact output derives per-delta repo and URL from the report', async () => {
+  const before = { ...basePr, updatedAt: '2026-07-01T10:00:00Z' };
+  const after = { ...basePr, updatedAt: '2026-07-01T11:00:00Z', state: 'CLOSED' };
+  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const result = await runCommand(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--format', 'compact'],
+    d,
+  );
+  const report = JSON.parse(result.output);
+  assert.equal(report.deltas[0].repo, 'o/r');
+  assert.equal(report.deltas[0].url, 'https://github.com/o/r/pull/42');
+});

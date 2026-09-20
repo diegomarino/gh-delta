@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { schemaFor } from '../lib/schema.mjs';
+import { runCommand } from '../lib/cli.mjs';
 
 // Test-only subset validator for precisely the keywords emitted by schema.mjs.
 function validates(schema, value) {
@@ -128,4 +129,18 @@ test('schemas reject incomplete, unknown, invalid, and forbidden fixtures', () =
     }),
     false,
   );
+});
+
+test('early repository-free compact and NDJSON errors validate without undefined fields', async () => {
+  const compact = await runCommand(['--unknown', '--format', 'compact'], { now: () => 'now' });
+  const compactReport = JSON.parse(compact.output);
+  assert.equal(Object.hasOwn(compactReport, 'repo'), false);
+  assert.equal(Object.hasOwn(compactReport, 'repos'), false);
+  assert.ok(validates(schemaFor('compact'), compactReport));
+
+  const ndjson = await runCommand(['--unknown', '--format', 'ndjson'], { now: () => 'now' });
+  const end = JSON.parse(ndjson.output);
+  assert.equal(Object.hasOwn(end, 'repo'), false);
+  assert.equal(Object.hasOwn(end, 'repos'), false);
+  assert.ok(validates(schemaFor('ndjson'), end));
 });
