@@ -8,11 +8,12 @@ import {
   mkdtempSync,
   openSync,
   readFileSync,
+  renameSync,
   writeFileSync,
   writeSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   appendDeltaLog,
   deltaLogPath,
@@ -97,6 +98,82 @@ test('append writes contiguous, exact NDJSON records and reader scans them', () 
     lastSeq: 2,
     byteLength: Buffer.byteLength(readFileSync(logFile, 'utf8')),
   });
+});
+
+test('manifest publication fsyncs its parent directory after rename before append returns', () => {
+  const logFile = tempPath('manifest-directory-order.ndjson');
+  appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:00:00.000Z', deltas: [first] });
+  const manifest = manifestPath(logFile);
+  const parent = dirname(manifest);
+  const descriptors = new Map();
+  const events = [];
+  appendDeltaLog(
+    logFile,
+    { detectedAt: '2026-09-20T12:01:00.000Z', deltas: [second] },
+    {
+      fs: {
+        closeSync(fd) {
+          if (descriptors.get(fd) === parent) events.push('directory-close');
+          return closeSync(fd);
+        },
+        fsyncSync(fd) {
+          const path = descriptors.get(fd);
+          if (path === logFile) events.push('log-fsync');
+          if (path.startsWith(`${manifest}.`)) events.push('manifest-temp-fsync');
+          if (path === parent) events.push('directory-fsync');
+          return fsyncSync(fd);
+        },
+        openSync(path, flags) {
+          const fd = openSync(path, flags);
+          descriptors.set(fd, path);
+          if (path === parent) events.push(`directory-open:${flags}`);
+          return fd;
+        },
+        renameSync(from, to) {
+          if (from.startsWith(`${manifest}.`) && to === manifest) events.push('manifest-rename');
+          return renameSync(from, to);
+        },
+      },
+    },
+  );
+  assert.deepEqual(events, [
+    'log-fsync',
+    'manifest-temp-fsync',
+    'manifest-rename',
+    'directory-open:r',
+    'directory-fsync',
+    'directory-close',
+  ]);
+});
+
+test('manifest parent durability selects a writable directory handle on simulated win32', () => {
+  for (const [platform, expectedFlags] of [
+    ['darwin', 'r'],
+    ['win32', 'r+'],
+  ]) {
+    const logFile = tempPath(`manifest-directory-${platform}.ndjson`);
+    appendDeltaLog(logFile, { detectedAt: '2026-09-20T12:00:00.000Z', deltas: [first] });
+    const parent = dirname(manifestPath(logFile));
+    const flags = [];
+    appendDeltaLog(
+      logFile,
+      { detectedAt: '2026-09-20T12:01:00.000Z', deltas: [second] },
+      {
+        platform,
+        fs: {
+          openSync(path, mode) {
+            if (path === parent) {
+              flags.push(mode);
+              // Simulate the Windows directory-handle adapter on this POSIX host.
+              if (platform === 'win32') return openSync(logFile, 'r+');
+            }
+            return openSync(path, mode);
+          },
+        },
+      },
+    );
+    assert.deepEqual(flags, [expectedFlags]);
+  }
 });
 
 test('reader advances only through the manifest prefix while fsync fails, then recovery re-delivers the suffix', () => {

@@ -8,10 +8,11 @@ import {
   mkdtempSync,
   openSync,
   readFileSync,
+  writeFileSync,
   writeSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { run, runCommand } from '../lib/cli.mjs';
 import { appendDeltaLog, readDeltaLog, setCursorAtomic } from '../lib/deltalog.mjs';
 
@@ -185,6 +186,43 @@ test('actual append write and fsync finish before snapshot publication, and fsyn
   );
   assert.equal(failure.code, 1);
   assert.deepEqual(failedEvents, ['fsync']);
+});
+
+test('manifest directory fsync failure prevents snapshot publication and preserves prior snapshot bytes', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-manifest-directory-failure-'));
+  const stateFile = join(dir, 'state.json');
+  writeFileSync(stateFile, JSON.stringify(before));
+  const beforeBytes = readFileSync(stateFile);
+  let snapshotCalls = 0;
+  const result = run(
+    ['--repo', 'o/r', '--monitor-id', 'm', '--state-file', stateFile, '--entities', 'pr', '--log'],
+    producerDeps({
+      appendDeltaLog(file, payload) {
+        const parent = dirname(`${file}.published.json`);
+        const descriptors = new Map();
+        return appendDeltaLog(file, payload, {
+          fs: {
+            fsyncSync(fd) {
+              if (descriptors.get(fd) === parent) throw new Error('directory fsync failed');
+              return fsyncSync(fd);
+            },
+            openSync(path, flags) {
+              const fd = openSync(path, flags);
+              descriptors.set(fd, path);
+              return fd;
+            },
+          },
+        });
+      },
+      writeSnapshotAtomic: () => {
+        snapshotCalls++;
+      },
+    }),
+  );
+  assert.equal(result.code, 1);
+  assert.equal(result.report.kind, 'io');
+  assert.equal(snapshotCalls, 0);
+  assert.deepEqual(readFileSync(stateFile), beforeBytes);
 });
 
 test('snapshot failure after durable append retries the same id at a later sequence', () => {

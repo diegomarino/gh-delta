@@ -787,6 +787,13 @@ fully validate every line in that prefix, and ignore every suffix byte even when
 that suffix ends in a newline. A cursor or `afterSeq` above `lastSeq` is a
 permanent `log` error rather than an empty replay.
 
+Publication fsyncs the log, then a same-directory manifest temp file, atomically
+renames that temp file, and fsyncs the manifest parent directory before append
+returns or a snapshot may publish. A directory open/fsync failure is an I/O
+failure: the renamed manifest remains for safe recovery and the snapshot stays
+unchanged. POSIX uses a non-mutating read handle; Windows uses a non-truncating
+writable directory handle for `FlushFileBuffers` compatibility.
+
 For a legacy/manual log without a manifest, the first append fully validates its
 complete prefix and atomically bootstraps the manifest before appending new bytes.
 For a brand-new log, it first publishes the empty `{version:1,lastSeq:0,
