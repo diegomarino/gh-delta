@@ -1214,6 +1214,101 @@ test('outpost eventId is stable across detector timestamps while deliveryId chan
   assert.notEqual(first.deliveryId, second.deliveryId);
 });
 
+test('outpost eventId repeats across different observed states while id does not (regression: id is the dedupe key, not eventId)', async () => {
+  const { buildOutpostPayload } = await import('../lib/outpost.mjs');
+  const report = { repo: 'o/r', monitorId: 'main', at: '2026-07-01T12:00:00Z' };
+  // Same PR, same class set (ci-changed), two successive observed states —
+  // e.g. CI went red, then green. A receiver that dedupes by eventId would
+  // silently drop the second one; this is exactly the bug being fixed.
+  const first = buildOutpostPayload({
+    report,
+    delta: {
+      entity: 'pr',
+      number: 42,
+      title: 'x',
+      classes: ['ci-changed'],
+      to: { state: 'OPEN', ciRollup: 'red' },
+    },
+  });
+  const second = buildOutpostPayload({
+    report,
+    delta: {
+      entity: 'pr',
+      number: 42,
+      title: 'x',
+      classes: ['ci-changed'],
+      to: { state: 'OPEN', ciRollup: 'green' },
+    },
+  });
+  assert.equal(first.eventId, second.eventId);
+  assert.notEqual(first.id, second.id);
+});
+
+test('outpost id is stable across runs and across monitorId values for the same observed change', async () => {
+  const { buildOutpostPayload } = await import('../lib/outpost.mjs');
+  const delta = {
+    entity: 'pr',
+    number: 42,
+    title: 'x',
+    classes: ['merged'],
+    to: { state: 'MERGED' },
+  };
+  const a = buildOutpostPayload({
+    report: { repo: 'o/r', monitorId: 'main', at: '2026-07-01T12:00:00Z' },
+    delta,
+  });
+  const b = buildOutpostPayload({
+    report: { repo: 'o/r', monitorId: 'main', at: '2026-08-01T00:00:00Z' },
+    delta,
+  });
+  const c = buildOutpostPayload({
+    report: { repo: 'o/r', monitorId: 'other-monitor', at: '2026-07-01T12:00:00Z' },
+    delta,
+  });
+  assert.equal(a.id, b.id);
+  assert.equal(a.id, c.id);
+  // eventId and deliveryId both include monitorId, so they diverge where id doesn't.
+  assert.notEqual(a.eventId, c.eventId);
+});
+
+test('outpost payload has exactly the documented key set (shape/byte-stability guard)', async () => {
+  const { buildOutpostPayload } = await import('../lib/outpost.mjs');
+  const payload = buildOutpostPayload({
+    report: { repo: 'o/r', monitorId: 'main', at: '2026-07-01T12:00:00Z' },
+    delta: {
+      entity: 'pr',
+      number: 42,
+      title: 'x',
+      classes: ['merged'],
+      headRefName: 'feature',
+      to: { state: 'MERGED', labels: [] },
+    },
+  });
+  assert.deepEqual(
+    Object.keys(payload).sort(),
+    [
+      'classes',
+      'delta',
+      'deliveryId',
+      'detectedAt',
+      'entity',
+      'eventId',
+      'headRefName',
+      'id',
+      'labels',
+      'line',
+      'links',
+      'monitorId',
+      'number',
+      'repo',
+      'schemaVersion',
+      'state',
+      'title',
+      'type',
+    ].sort(),
+  );
+});
+
 test('--help wins over unknown flags and invalid outpost URLs', () => {
   const d = { now: () => '2026-07-01T12:00:00Z' };
   const helpWithBogus = run(['--help', '--bogus'], d);
