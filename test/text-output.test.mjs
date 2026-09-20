@@ -38,6 +38,26 @@ test('baseline text output prints a heartbeat and baseline note', () => {
   assert.match(output, /Baseline seeded for owner\/repo \(monitor: watch\)/);
 });
 
+test('text output makes suppressed attention-filter deltas visible to operators', () => {
+  // Omitting this notice makes an exit-0 filtered run indistinguishable from a
+  // no-change run even though the snapshot advanced past real changes.
+  const output = formatTextOutput({
+    code: 0,
+    report: {
+      baseline: false,
+      repo: 'owner/repo',
+      monitorId: 'watch',
+      at: '2026-07-01T10:00:00.000Z',
+      deltas: [],
+      filteredDeltas: 2,
+    },
+    now: () => '2026-07-01T10:00:00.000Z',
+  });
+
+  assert.match(output, /Attention filters suppressed 2 delta\(s\)/);
+  assert.match(output, /snapshot advanced and they will not be replayed/);
+});
+
 test('delta text output prints each delta with suggested action', () => {
   const output = formatTextOutput({
     code: 10,

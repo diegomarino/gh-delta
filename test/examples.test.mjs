@@ -24,12 +24,13 @@ const keySet = (obj) => new Set(Object.keys(obj));
 test('every example report covers exactly the frozen REPORT_FIELDS, minus the omit-when-empty ones', () => {
   // lib/cli.mjs's run() never puts `warnings` on the base report object; it is
   // only spliced in by runCommand() when outpost delivery returned at least
-  // one warning (see the `!result.warnings?.length` guard there). A live run
-  // on the common path these fixtures depict therefore omits `warnings`
-  // entirely, so the frozen field list minus that key is what a real report
-  // covers here — asserting the raw REPORT_FIELDS set would require a key no
-  // live run actually emits (audit finding F10.1).
-  const OMIT_WHEN_EMPTY = new Set(['warnings']);
+  // one warning (see the `!result.warnings?.length` guard there).
+  // `filteredDeltas` is similarly absent without an attention-filter flag.
+  // A live run on the common no-warning/no-filter path these fixtures depict
+  // therefore omits both keys, so the frozen field list minus those keys is
+  // what a real report covers here — asserting the raw REPORT_FIELDS set would
+  // require a key no live run actually emits (audit finding F10.1).
+  const OMIT_WHEN_EMPTY = new Set(['warnings', 'filteredDeltas']);
   const expected = [...REPORT_FIELDS].filter((field) => !OMIT_WHEN_EMPTY.has(field));
   for (const [name, report] of Object.entries({ baselineReport, deltaReport, detailReport })) {
     assert.deepEqual(
