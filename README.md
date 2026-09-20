@@ -303,8 +303,6 @@ delta classes, snapshot behavior, or any outpost path, update:
 | [CONTRIBUTING.md](CONTRIBUTING.md)                                               | Contributing changes                                                    |
 | [CHANGELOG.md](CHANGELOG.md)                                                     | Checking what changed between versions                                  |
 
-## License
-
 ## Local watch lists
 
 Use `--watch-dir <path>` to manage a monitor-private list with `gh-delta watch
@@ -315,5 +313,7 @@ uses `x.json.watch.json`. Removing a watch silently removes it from that
 snapshot; a still-watched PR absent from GitHub follows the normal missing
 lifecycle. Lists with an issue or more than ten entries retain the ordinary
 full-repository fetch and snapshot history.
+
+## License
 
 [MIT](LICENSE) © diegomarino
