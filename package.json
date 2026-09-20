@@ -54,6 +54,9 @@
     "./watch": {
       "import": "./lib/watch.mjs"
     },
+    "./wait": {
+      "import": "./lib/wait.mjs"
+    },
     "./package.json": "./package.json"
   },
   "bin": {
