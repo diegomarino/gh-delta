@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "baseline": false,
+  "repo": "acme/widgets",
+  "repoSource": "flag",
+  "monitorId": "contract-baseline",
+  "entities": [
+    "pr",
+    "issue"
+  ],
+  "stateFile": "<STATE_FILE>",
+  "at": "2026-01-01T01:00:00Z",
+  "deltas": [
+    {
+      "id": "faf95b91087b9869312d6348d6ed06eb10e6376374cee306b7e4ceb93e2fbb11",
+      "entity": "pr",
+      "number": 1,
+      "title": "Add widget factory",
+      "headRefName": "feature/widget-factory",
+      "classes": [
+        "new-comments",
+        "relabeled"
+      ],
+      "from": {
+        "state": "OPEN",
+        "updatedAt": "2025-12-01T10:00:00Z",
+        "isDraft": false,
+        "ci": "53d176557e2f",
+        "ciChecks": [
+          {
+            "name": "build",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS"
+          }
+        ],
+        "review": "REVIEW_REQUIRED",
+        "reviews": "da39a3ee5e6b",
+        "reviewSummary": [],
+        "mergeable": "MERGEABLE",
+        "mergeStateStatus": "CLEAN",
+        "comments": 2,
+        "reviewThreads": 0,
+        "unresolvedReviewThreads": 0,
+        "head": "aaaaaaa1",
+        "base": "main",
+        "labels": [
+          "enhancement"
+        ],
+        "assignees": [
+          "alice"
+        ],
+        "reviewRequests": [
+          "bob"
+        ]
+      },
+      "to": {
+        "state": "OPEN",
+        "updatedAt": "2026-01-01T00:30:00Z",
+        "isDraft": false,
+        "ci": "53d176557e2f",
+        "ciChecks": [
+          {
+            "name": "build",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS"
+          }
+        ],
+        "review": "REVIEW_REQUIRED",
+        "reviews": "da39a3ee5e6b",
+        "reviewSummary": [],
+        "mergeable": "MERGEABLE",
+        "mergeStateStatus": "CLEAN",
+        "comments": 5,
+        "reviewThreads": 0,
+        "unresolvedReviewThreads": 0,
+        "head": "aaaaaaa1",
+        "base": "main",
+        "labels": [
+          "enhancement",
+          "priority-high"
+        ],
+        "assignees": [
+          "alice"
+        ],
+        "reviewRequests": [
+          "bob"
+        ]
+      }
+    },
+    {
+      "id": "df53663dc3af2435b16aaa763c54c38b70d451e306ac48aa4400c584cc0fcda3",
+      "entity": "issue",
+      "number": 10,
+      "title": "Widgets sometimes squeak",
+      "classes": [
+        "closed"
+      ],
+      "from": {
+        "state": "OPEN",
+        "updatedAt": "2025-12-01T09:00:00Z",
+        "labels": [
+          "bug"
+        ],
+        "assignees": [
+          "carol"
+        ],
+        "comments": 1
+      },
+      "to": {
+        "state": "CLOSED",
+        "updatedAt": "2026-01-01T00:15:00Z",
+        "labels": [
+          "bug"
+        ],
+        "assignees": [
+          "carol"
+        ],
+        "comments": 1
+      }
+    }
+  ],
+  "summary": "2 delta(s)"
+}

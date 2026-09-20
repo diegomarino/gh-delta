@@ -1,0 +1,53 @@
+{
+  "pr": [
+    {
+      "number": 1,
+      "title": "Add widget factory",
+      "state": "OPEN",
+      "updatedAt": "2026-01-01T00:30:00Z",
+      "isDraft": false,
+      "mergeable": "MERGEABLE",
+      "mergeStateStatus": "CLEAN",
+      "reviewDecision": "REVIEW_REQUIRED",
+      "statusCheckRollup": [
+        {
+          "name": "build",
+          "status": "COMPLETED",
+          "conclusion": "SUCCESS"
+        }
+      ],
+      "latestReviews": [],
+      "totalCommentsCount": 5,
+      "headRefOid": "aaaaaaa1",
+      "headRefName": "feature/widget-factory",
+      "reviewThreads": 0,
+      "unresolvedReviewThreads": 0,
+      "baseRefName": "main",
+      "labels": [
+        {
+          "name": "enhancement"
+        },
+        {
+          "name": "priority-high"
+        }
+      ],
+      "assignees": ["alice"],
+      "reviewRequests": ["bob"]
+    }
+  ],
+  "issue": [
+    {
+      "number": 10,
+      "title": "Widgets sometimes squeak",
+      "state": "CLOSED",
+      "updatedAt": "2026-01-01T00:15:00Z",
+      "labels": [
+        {
+          "name": "bug"
+        }
+      ],
+      "assignees": ["carol"],
+      "comments": 1
+    }
+  ]
+}
