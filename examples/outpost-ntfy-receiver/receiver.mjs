@@ -2,9 +2,11 @@
 // gh-delta outpost receiver -> ntfy.sh push notifications.
 //
 // Receives one POST per delta (payload schema v1, see docs/contract.md),
-// deduplicates by eventId (the contract makes that the receiver's job),
-// optionally filters by class, and forwards to an ntfy topic so deltas
-// reach a phone. Zero dependencies.
+// deduplicates by `id` (the content-addressed identity of the observed
+// change — the contract's dedupe key; `eventId` identifies a series and
+// repeats by design across different observed states, so it must never gate
+// a discard), optionally filters by class, and forwards to an ntfy topic so
+// deltas reach a phone. Zero dependencies.
 //
 // Env: NTFY_TOPIC (required), PORT (default 8787),
 //      HOST (default 127.0.0.1; set 0.0.0.0 only if the detector runs on another machine),
@@ -79,19 +81,29 @@ function isAuthorized(req, url) {
   return false;
 }
 
-// eventId dedupe survives restarts through an append-only JSONL file. The
+// `id` dedupe survives restarts through an append-only JSONL file. The
 // file is capped at SEEN_MAX_ENTRIES entries so an unattended receiver can't
 // grow it without bound; oldest entries are dropped first (FIFO), which only
-// risks a repeat ping for very old events long after they stopped mattering.
+// risks a repeat ping for very old changes long after they stopped mattering.
+//
+// Migration note: earlier versions of this receiver recorded `{ eventId }`
+// per line — the wrong dedupe key (see the header comment above for why).
+// Those old-format lines have no `id` field, so there is no way to recover
+// the value that should have been recorded; an old line is skipped rather
+// than treated as seen, matching the direction that fails safe: a receiver
+// restarted right after this upgrade may re-forward a handful of already-seen
+// deltas once, which is a harmless duplicate ping, not the silent data loss
+// this fix addresses.
 let seenOrder = [];
 const seen = new Set();
 if (existsSync(SEEN_FILE)) {
   for (const line of readFileSync(SEEN_FILE, 'utf8').split('\n')) {
     if (!line) continue;
     try {
-      const eventId = JSON.parse(line).eventId;
-      if (!seen.has(eventId)) seenOrder.push(eventId);
-      seen.add(eventId);
+      const id = JSON.parse(line).id;
+      if (!id) continue; // old eventId-format line; see migration note above
+      if (!seen.has(id)) seenOrder.push(id);
+      seen.add(id);
     } catch {
       // skip a corrupt line; losing one dedupe entry only risks a repeat ping
     }
@@ -106,12 +118,12 @@ if (existsSync(SEEN_FILE)) {
 }
 
 function rewriteSeenFile() {
-  writeFileSync(SEEN_FILE, seenOrder.map((eventId) => `${JSON.stringify({ eventId })}\n`).join(''));
+  writeFileSync(SEEN_FILE, seenOrder.map((id) => `${JSON.stringify({ id })}\n`).join(''));
 }
 
-function recordSeen(eventId, detectedAt) {
-  seen.add(eventId);
-  seenOrder.push(eventId);
+function recordSeen(id, detectedAt) {
+  seen.add(id);
+  seenOrder.push(id);
   if (seenOrder.length > SEEN_MAX_ENTRIES) {
     // Rotate: drop the oldest entry from memory and rewrite the file rather
     // than letting it grow forever. Rewriting on every rotation keeps the
@@ -121,7 +133,7 @@ function recordSeen(eventId, detectedAt) {
     rewriteSeenFile();
     return;
   }
-  appendFileSync(SEEN_FILE, `${JSON.stringify({ eventId, at: detectedAt })}\n`);
+  appendFileSync(SEEN_FILE, `${JSON.stringify({ id, at: detectedAt })}\n`);
 }
 
 function respond(res, status, body) {
@@ -167,17 +179,17 @@ const server = createServer((req, res) => {
     if (payload?.type !== 'gh-delta.delta' || payload?.schemaVersion !== 1) {
       return respond(res, 400, { error: 'expected gh-delta.delta schemaVersion 1' });
     }
-    if (seen.has(payload.eventId)) return respond(res, 202, { deduped: true });
+    if (seen.has(payload.id)) return respond(res, 202, { deduped: true });
     // Mark seen BEFORE forwarding: this mirrors the detector's at-most-once
     // stance (a failed ntfy push is logged, never retried). Move this after
     // forward() if you prefer at-least-once pings at the cost of duplicates.
-    recordSeen(payload.eventId, payload.detectedAt);
+    recordSeen(payload.id, payload.detectedAt);
     if (CLASSES.length && !payload.classes?.some((cls) => CLASSES.includes(cls))) {
       return respond(res, 202, { filtered: true });
     }
     respond(res, 202, { accepted: true });
     forward(payload).catch((err) =>
-      console.error(`receiver: ntfy forward failed for ${payload.eventId}: ${err.message}`),
+      console.error(`receiver: ntfy forward failed for ${payload.id}: ${err.message}`),
     );
   });
 });

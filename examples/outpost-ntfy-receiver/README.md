@@ -12,7 +12,7 @@ gh-delta tick (cron, CI, systemd — anything)      exit 10
 receiver.mjs :8787
    ├─ check shared secret (OUTPOST_SECRET), if configured
    ├─ validate type + schemaVersion
-   ├─ dedupe by eventId (append-only, size-capped seen-events.jsonl)
+   ├─ dedupe by id (append-only, size-capped seen-events.jsonl)
    ├─ optional class filter (NTFY_CLASSES)
    ▼
 ntfy.sh/<topic> ──> phone: "owner/repo PR #42 — merged"
@@ -91,10 +91,16 @@ events is unaffected.
 
 ## Design notes
 
-- **Dedupe is the receiver's contractual job.** Delivery is at-most-once with
-  no retries, and concurrent or re-run ticks can legitimately re-send the same
-  semantic event — `eventId` is the dedupe key, `deliveryId` only names one
-  attempt. See the
+- **Dedupe is the receiver's contractual job, and `id` is the key.** Delivery
+  is at-most-once with no retries, and concurrent or re-run ticks can
+  legitimately re-send the same observed change — `id` (content-addressed,
+  includes the observed state) is the dedupe key. `eventId` identifies a
+  _series_ ("this monitor saw this item reach this class set") and is stable
+  by design across different observed states — CI red, then green, then red
+  again on the same PR share one `eventId` — so deduping on it would silently
+  drop every change after the first. Use `eventId` only for grouping or
+  correlating notifications, never for discarding one. `deliveryId` names one
+  send attempt and is even narrower than `eventId`. See the
   [payload schema](../../docs/contract.md#outpost-payload-schema-v1).
 - **Gaps are possible by design**: a failed POST is a warning in the
   detector's report, never a retry. Don't build "did I miss something?" logic
