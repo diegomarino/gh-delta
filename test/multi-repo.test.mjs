@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { run } from '../lib/cli.mjs';
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { addWatch, readWatch } from '../lib/watch.mjs';
@@ -130,6 +130,56 @@ test('repo-scoped watch entries keep equal item numbers independent', () => {
         .sort(),
       ['repo-a%2Fone__pr-42.json', 'repo-b%2Ftwo__pr-42.json'],
     );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a single-repo run rejects legacy and scoped watch aliases before fetch or write', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gh-delta-i9-duplicate-watch-'));
+  try {
+    addWatch(dir, 'pr:42', 'merged', { now: () => '2026-09-20T12:00:00.000Z' });
+    addWatch(dir, 'pr:42', 'merged', {
+      now: () => '2026-09-20T12:00:00.000Z',
+      repo: 'a/one',
+    });
+    let fetched = 0;
+    let written = 0;
+    const result = run(
+      ['--repo', 'a/one', '--watch-dir', dir, '--state-file', '/tmp/i9-watch.json'],
+      {
+        ...locks,
+        now: () => '2026-09-20T12:00:00.000Z',
+        fetchPRs: () => {
+          fetched++;
+          return [];
+        },
+        fetchIssues: () => [],
+        writeSnapshotAtomic: () => written++,
+        env: { GH_DELTA_NO_REGISTRY: '1' },
+      },
+    );
+    assert.equal(result.code, 2);
+    assert.match(result.report.error, /duplicate effective watch entry a\/one:pr:42/);
+    assert.equal(fetched, 0);
+    assert.equal(written, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('readWatch rejects malformed or noncanonical persisted scoped repositories', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gh-delta-i9-invalid-watch-'));
+  try {
+    for (const repo of ['A/One', 'a//one']) {
+      const name = `repo-${encodeURIComponent(repo)}__pr-42.json`;
+      writeFileSync(
+        join(dir, name),
+        `${JSON.stringify({ entity: 'pr', number: 42, repo, until: 'merged', addedAt: '2026-09-20T12:00:00.000Z' })}\n`,
+      );
+      assert.throws(() => readWatch(dir), /invalid watch entry/);
+      rmSync(join(dir, name));
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
