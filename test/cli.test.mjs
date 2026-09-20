@@ -5,7 +5,7 @@ import { createHmac } from 'node:crypto';
 
 // Tests must never leave breadcrumbs in the developer's real run registry.
 process.env.GH_DELTA_NO_REGISTRY = '1';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { run, runCommand } from '../lib/cli.mjs';
@@ -252,6 +252,63 @@ test('watch add local derivation decline is config without GitHub fetches', () =
   });
   assert.equal(result.code, 2);
   assert.equal(fetched, false);
+});
+
+test('watch commands reject wrong positional cardinality before mutation', () => {
+  for (const argv of [
+    ['watch', 'add', '--until', 'merged', '--watch-dir', '/tmp/nope'],
+    ['watch', 'rm', 'pr:1', 'pr:2', '--watch-dir', '/tmp/nope'],
+    ['watch', 'ls', 'pr:1', '--watch-dir', '/tmp/nope'],
+  ]) {
+    const result = run(argv, {
+      resolveLocalRepo: () => {
+        throw new Error('unused');
+      },
+    });
+    assert.equal(result.code, 2);
+    assert.match(result.report.error, /requires exactly/);
+  }
+});
+
+test('watch cleanup failure warns after snapshot publication', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-cleanup-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  writeFileSync(
+    join(watch, 'pr-42.json'),
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
+    existing: { pr: { 42: prFingerprint(basePr) }, issue: {} },
+  });
+  d.removeWatchUnchanged = () => {
+    throw new Error('unlink denied');
+  };
+  const { code, warnings } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', state, '--watch-dir', watch],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.equal(d.writes, 1);
+  assert.ok(
+    warnings.some(
+      (warning) => warning.label === 'watch cleanup' && /unlink denied/.test(warning.reason),
+    ),
+  );
+});
+
+test('watch text commands render watch-specific output, never detector deltas', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-text-'));
+  for (const argv of [
+    ['watch', 'add', 'pr:42', '--until', 'merged', '--watch-dir', dir, '--format', 'text'],
+    ['watch', 'ls', '--watch-dir', dir, '--format', 'text'],
+    ['watch', 'rm', 'pr:42', '--watch-dir', dir, '--format', 'text'],
+  ]) {
+    const result = await runCommand(argv);
+    assert.doesNotMatch(result.output, /delta\(s\)/);
+    assert.match(result.output, /watch/);
+  }
 });
 
 test('--state-dir derives a monitor-scoped snapshot path', () => {
