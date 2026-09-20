@@ -12,8 +12,8 @@ gh-delta tick (cron, CI, systemd — anything)      exit 10
 receiver.mjs :8787
    ├─ check shared secret (OUTPOST_SECRET), if configured
    ├─ validate type + schemaVersion
-   ├─ dedupe by id (append-only, size-capped seen-events.jsonl)
    ├─ optional class filter (NTFY_CLASSES)
+   ├─ dedupe by id, scoped to the most recent id per item (size-capped seen-events.jsonl)
    ▼
 ntfy.sh/<topic> ──> phone: "owner/repo PR #42 — merged"
 ```
@@ -81,33 +81,56 @@ relay — do that only on a network you fully trust.
 
 ## SEEN_FILE growth
 
-`seen-events.jsonl` is capped at `SEEN_MAX_ENTRIES` entries (default 5000).
-Past that cap the receiver rotates: the oldest entries are dropped in
-memory and the file is rewritten with only the retained (most recent)
-entries, so an unattended long-running receiver can't grow the file
-without bound. Dropping an old entry only risks re-forwarding a duplicate
-ntfy ping for an event that's long past — dedupe correctness for recent
-events is unaffected.
+`seen-events.jsonl` holds one record per `(entity, number)` item —
+`{"key":"pr#42","id":"<sha>","at":"<iso>"}` — not one record per delivery.
+It's capped at `SEEN_MAX_ENTRIES` **items** (default 5000). Past that cap the
+receiver rotates: the oldest items are dropped in memory and the file is
+rewritten with only the retained (most recently added) items, so an
+unattended long-running receiver can't grow the file without bound. Dropping
+an old item only risks re-forwarding a duplicate ntfy ping if that exact item
+resurfaces later — dedupe correctness for recently active items is
+unaffected.
+
+Upgrading from an older receiver: earlier versions wrote `{eventId}` or
+`{id}` lines with no item key. Those lines are skipped on load (treated as
+unseen) since there's no key to recover them by — expect a handful of
+harmless duplicate pings right after the upgrade, never a missed one.
 
 ## Design notes
 
-- **Dedupe is the receiver's contractual job, and `id` is the key.** Delivery
-  is at-most-once with no retries, and concurrent or re-run ticks can
-  legitimately re-send the same observed change — `id` (content-addressed,
-  includes the observed state) is the dedupe key. `eventId` identifies a
-  _series_ ("this monitor saw this item reach this class set") and is stable
-  by design across different observed states — CI red, then green, then red
-  again on the same PR share one `eventId` — so deduping on it would silently
-  drop every change after the first. Use `eventId` only for grouping or
-  correlating notifications, never for discarding one. `deliveryId` names one
-  send attempt and is even narrower than `eventId`. See the
-  [payload schema](../../docs/contract.md#outpost-payload-schema-v1).
+- **Dedupe is the receiver's contractual job, and `id` is the key — scoped to
+  the most recent id per item.** Delivery is at-most-once with no retries,
+  and concurrent or re-run ticks can legitimately re-send the same observed
+  change — `id` (content-addressed, built from the observed state) is the
+  dedupe key. But `id` identifies the **state**, not "this occurrence": an
+  item that returns to a state it was in before (CI red, then green, then red
+  again with nothing else changed) legitimately repeats an earlier `id`, so
+  the receiver tracks only the **last `id` forwarded per `(entity, number)`**
+  and suppresses a payload only when it matches that last id — a recurrence
+  after an intervening different state has a different "last id" and is
+  correctly forwarded, while two monitors reporting the same observed change
+  (which share an `id`, since it excludes `monitorId`) still collapse when
+  they arrive adjacently. `eventId` identifies a _series_ ("this monitor saw
+  this item reach this class set") and is stable by design across different
+  observed states, so it must never be used to discard a payload — see the
+  [payload schema](../../docs/contract.md#outpost-payload-schema-v1). `deliveryId`
+  names one send attempt and is even narrower than `eventId`.
+- **Filter before you record.** `id` also excludes `classes` whenever there's
+  an observed `to` state, so two monitors with different snapshot histories
+  can reach the same final state through different transitions and emit the
+  _same_ `id` with _different_ class sets. The receiver therefore applies
+  `NTFY_CLASSES` first and only records an `id` for a payload that actually
+  passes the filter and gets forwarded — recording a filtered-out payload's
+  id would let it silently suppress a later, allowed payload that happens to
+  share that id.
 - **Gaps are possible by design**: a failed POST is a warning in the
   detector's report, never a retry. Don't build "did I miss something?" logic
   here — the snapshot already advanced; the next delta will come.
-- **Seen-before-forward**: the receiver marks an event seen before pushing to
-  ntfy, mirroring the detector's at-most-once stance. Swap the order if you
-  prefer duplicate pings over missed ones.
+- **Seen-before-forward**: the receiver marks an item's `id` seen before
+  pushing to ntfy, mirroring the detector's at-most-once stance — but only
+  for a payload that already passed the class filter, so a filtered-out
+  payload's id is never recorded. Swap the seen/forward order if you prefer
+  duplicate pings over missed ones.
 - **Always 202**: forwarding failures are logged to stderr, never turned into
   HTTP errors — the detector's tick latency must not depend on ntfy.
 
