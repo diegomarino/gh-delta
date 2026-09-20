@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "legacy JSON report",
+  "schemaVersion": 1,
+  "type": "object",
+  "required": ["schemaVersion", "at"],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "at": {
+      "type": "string"
+    },
+    "deltas": {
+      "type": "array"
+    },
+    "error": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": ["config", "snapshot", "github", "io", "busy", "log", "rate-limit"]
+    }
+  },
+  "additionalProperties": true
+}

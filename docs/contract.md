@@ -14,7 +14,7 @@ machine-readable form of this document is available at `gh-delta --help-json`.
 ```
 gh-delta [--repo <owner/name>] [--monitor-id <id>]
          [--state-file <path> | --state-dir <dir>]
-         [--entities pr,issue] [--format json|text]
+         [--entities pr,issue] [--format json|text|compact|ndjson]
          [--summary-line] [--detail] [--summaries]
          [--only-classes <classes>] [--ignore-classes <classes>] [--ignore-authors <logins>] [--settled]
          [--baseline-emit-state]
@@ -75,8 +75,20 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
   An eligible economical `--watch-dir` tick deliberately selects an independent
   derived `__watch-pr.json` path (or `<state-file>.watch.json`) instead.
 - `--entities` defaults to `pr,issue`. Accepted: `pr`, `issue`, `pr,issue`.
-- `--format` defaults to `json`. `text` is an operator/log mode, not a machine
-  contract; automated consumers must use `json`.
+- `--format` defaults to `json`. `text` is an operator/log mode; `compact` and
+  `ndjson` are agent formats and imply semantic summaries without changing ids.
+  Compact deltas are ordered by requested repository, PR before issue, then
+  number; NDJSON finishes with exactly one `end` record and newline.
+
+## Agent output schemas
+
+`gh-delta schema [--format json|compact|ndjson]` is local-only and emits a
+draft-2020-12 schema. Published copies live under `schema/`; `npm run
+schema:check` detects drift. Compact/NDJSON never include legacy `from`, `to`,
+`summaryLine`, `line`, `details`, or `updatedAt`; each delta includes `url`,
+`summary`, and a bounded pure `changed` fingerprint diff.
+contract; automated consumers must use `json`.
+
 - `--summary-line` adds a human-readable `summaryLine` to each delta in JSON
   output. This is for logs and agent messages; do not parse it.
 - `--detail` adds structured `details` to each delta, also adds `summaryLine`,

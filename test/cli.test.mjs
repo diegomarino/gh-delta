@@ -3460,3 +3460,28 @@ test('derivation divergence warning appears in text output', async () => {
   );
   assert.match(out.output, /acme\/proj/);
 });
+
+test('schema subcommand is local-only and emits a newline-terminated schema', async () => {
+  let touched = false;
+  const result = await runCommand(['schema', '--format', 'compact'], {
+    now: () => '2026-09-20T00:00:00Z',
+    fetchPRs: () => {
+      touched = true;
+      return [];
+    },
+    readSnapshot: () => {
+      touched = true;
+      return null;
+    },
+  });
+  assert.equal(result.code, 0);
+  assert.equal(touched, false);
+  assert.equal(JSON.parse(result.output).title, 'compact report');
+  assert.ok(result.output.endsWith('\n'));
+});
+
+test('schema rejects an unknown format as configuration error', () => {
+  const result = run(['schema', '--format', 'text'], { now: () => '2026-09-20T00:00:00Z' });
+  assert.equal(result.code, 2);
+  assert.match(result.report.error, /json, compact, or ndjson/);
+});
