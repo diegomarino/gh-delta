@@ -152,6 +152,9 @@ The impure edges are isolated:
   crash-tail recovery, log path derivation, and atomic consumer cursors.
 - `outpost.mjs` validates optional outpost URLs, builds payloads, and sends
   short-timeout HTTP POSTs.
+- `compact-output.mjs` owns pure compact/NDJSON agent rendering and `diff.mjs`
+  owns bounded semantic fingerprint diffs; `schema.mjs` derives published JSON
+  Schemas from the runtime catalogs.
 - `text-output.mjs` formats heartbeat text, list inventory text, and outpost
   warnings.
 - `list.mjs` builds the read-only monitor inventory for `gh-delta list`:

@@ -7,7 +7,9 @@ Replace the placeholders before scheduling it.
 
 The command in step 1 uses `--format text` for readable scheduler logs. If the
 acting agent should see exactly which checks or reviews changed without a
-second GitHub query, schedule step 1 with `--format json --detail` instead: the
+second GitHub query, schedule step 1 with `--format compact` instead: compact
+includes the semantic summary and a bounded changed diff. Use `--detail` only
+when structured diagnostic rows are needed; the legacy `--format json --detail`
 `ci`/`reviews` details then name the added/removed/changed entries (see
 [the contract](contract.md#report-shape)). A detail marked `opaque: true`
 cannot name the change — inspect GitHub in that case. Pick the format up front:

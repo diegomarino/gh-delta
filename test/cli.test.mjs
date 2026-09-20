@@ -1703,7 +1703,7 @@ test('--help-json returns machine-readable help without fetching GitHub', () => 
   assert.equal(help.options.find((option) => option.name === '--repo')?.required, false);
   assert.equal(help.options.find((option) => option.name === '--monitor-id')?.required, false);
   assert.match(help.exitCodes.find((entry) => entry.code === 10)?.meaning ?? '', /Deltas found/);
-  assert.deepEqual(help.output.formats, ['json', 'text']);
+  assert.deepEqual(help.output.formats, ['json', 'text', 'compact', 'ndjson']);
   assert.deepEqual(help.stateConcurrency, {
     sameStateFile: 'locked: one writer at a time, others exit busy (1)',
     overlapRisk:
@@ -3459,4 +3459,42 @@ test('derivation divergence warning appears in text output', async () => {
     }),
   );
   assert.match(out.output, /acme\/proj/);
+});
+
+test('schema subcommand is local-only and emits a newline-terminated schema', async () => {
+  let touched = false;
+  const result = await runCommand(['schema', '--format', 'compact'], {
+    now: () => '2026-09-20T00:00:00Z',
+    fetchPRs: () => {
+      touched = true;
+      return [];
+    },
+    readSnapshot: () => {
+      touched = true;
+      return null;
+    },
+  });
+  assert.equal(result.code, 0);
+  assert.equal(touched, false);
+  assert.equal(JSON.parse(result.output).title, 'compact report');
+  assert.ok(result.output.endsWith('\n'));
+});
+
+test('schema rejects an unknown format as configuration error', () => {
+  const result = run(['schema', '--format', 'text'], { now: () => '2026-09-20T00:00:00Z' });
+  assert.equal(result.code, 2);
+  assert.match(result.report.error, /json, compact, or ndjson/);
+});
+
+test('single-repo compact output derives per-delta repo and URL from the report', async () => {
+  const before = { ...basePr, updatedAt: '2026-07-01T10:00:00Z' };
+  const after = { ...basePr, updatedAt: '2026-07-01T11:00:00Z', state: 'CLOSED' };
+  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const result = await runCommand(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--format', 'compact'],
+    d,
+  );
+  const report = JSON.parse(result.output);
+  assert.equal(report.deltas[0].repo, 'o/r');
+  assert.equal(report.deltas[0].url, 'https://github.com/o/r/pull/42');
 });

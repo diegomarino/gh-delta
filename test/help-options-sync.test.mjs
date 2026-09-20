@@ -48,6 +48,14 @@ test('log compact help requires an explicit repo without promising derivation', 
   assert.doesNotMatch(repo.description, /derived|optional/i);
 });
 
+test('root help advertises agent formats and the schema subcommand', () => {
+  const help = getHelpSpec('gh-delta');
+  assert.match(help.usage, /json\|text\|compact\|ndjson/);
+  assert.match(help.purpose, /agent compact\/NDJSON/);
+  assert.ok(help.subcommands.some((entry) => entry.name === 'schema'));
+  assert.deepEqual(help.output.formats, ['json', 'text', 'compact', 'ndjson']);
+});
+
 for (const command of Object.keys(PARSER_OPTIONS_BY_COMMAND)) {
   test(`"${command}" parser flags match its --help option list`, () => {
     const parserFlags = parserFlagSet(PARSER_OPTIONS_BY_COMMAND[command]);

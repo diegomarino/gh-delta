@@ -9,6 +9,9 @@
     "./contract": {
       "import": "./lib/contract.mjs"
     },
+    "./compact-output": {
+      "import": "./lib/compact-output.mjs"
+    },
     "./detect": {
       "import": "./lib/detect.mjs"
     },
@@ -17,6 +20,9 @@
     },
     "./duration": {
       "import": "./lib/duration.mjs"
+    },
+    "./diff": {
+      "import": "./lib/diff.mjs"
     },
     "./fingerprint": {
       "import": "./lib/fingerprint.mjs"
@@ -35,6 +41,9 @@
     },
     "./snapshot": {
       "import": "./lib/snapshot.mjs"
+    },
+    "./schema": {
+      "import": "./lib/schema.mjs"
     },
     "./args": {
       "import": "./lib/args.mjs"
@@ -70,6 +79,7 @@
     "docs/troubleshooting.md",
     "docs/img",
     "docs/entities-research",
+    "schema",
     "README.md",
     "RUNBOOK.md",
     "CHANGELOG.md",
@@ -88,6 +98,8 @@
     "e2e:playground": "GH_DELTA_E2E_RUN=1 node ./test/e2e/playground-e2e.mjs",
     "examples:cast": "node tools/examples/generate-cast.mjs",
     "examples:svg": "bash tools/examples/render.sh",
+    "schema:generate": "node tools/schema/generate.mjs",
+    "schema:check": "node tools/schema/generate.mjs --check",
     "pack:dry-run": "npm pack --dry-run --cache .npm-cache",
     "release:check": "npm run check && npm run test:coverage && npm run pack:dry-run",
     "prepublishOnly": "npm run release:check"

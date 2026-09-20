@@ -257,6 +257,14 @@ local types if they need compile-time checking.
 
 ## Output
 
+### Agent compact and NDJSON
+
+Use `--format compact` for one self-contained JSON envelope, or `--format
+ndjson` for one JSON record per deterministic delta plus a final `end` record.
+They imply semantic summaries and preserve detector snapshots and delta IDs.
+Use `--detail` only when the structured detail rows are needed. Schemas are
+available locally with `gh-delta schema --format compact`.
+
 Text output consists of an ISO timestamp heartbeat line followed by one block per
 delta:
 

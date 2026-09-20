@@ -1,0 +1,1100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "compact report",
+  "schemaVersion": 1,
+  "anyOf": [
+    {
+      "type": "object",
+      "required": ["schemaVersion", "repo", "at", "baseline", "counts", "deltas"],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "at": {
+          "type": "string"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["label", "reason"],
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind", "message"],
+            "properties": {
+              "repo": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": ["config", "snapshot", "github", "io", "busy", "log", "rate-limit"]
+              },
+              "message": {
+                "type": "string"
+              },
+              "resetAt": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "repo": {
+          "type": "string"
+        },
+        "repos": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "baseline": {
+          "type": "boolean"
+        },
+        "counts": {
+          "type": "object",
+          "required": ["deltas", "byClass"],
+          "properties": {
+            "deltas": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "byClass": {
+              "type": "object",
+              "properties": {
+                "new": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "first-seen": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "baseline-state": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "closed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "reopened": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "new-comments": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "updated": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "missing": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "still-missing": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "presumed-deleted": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "reappeared": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "merged": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "draft-ready": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "converted-to-draft": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "ci-changed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "review-changed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "became-mergeable": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "became-conflicting": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "head-changed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "unresolved-threads-added": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "unresolved-threads-resolved": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "review-threads-changed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "relabeled": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "comments-removed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "assignees-changed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "review-requests-changed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "base-changed": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "filteredDeltas": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": true
+        },
+        "deltas": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "repo",
+              "entity",
+              "number",
+              "title",
+              "url",
+              "classes",
+              "summary",
+              "changed"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "repo": {
+                "type": "string"
+              },
+              "entity": {
+                "enum": ["pr", "issue"]
+              },
+              "number": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "title": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "classes": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "enum": [
+                    "new",
+                    "first-seen",
+                    "baseline-state",
+                    "closed",
+                    "reopened",
+                    "new-comments",
+                    "updated",
+                    "missing",
+                    "still-missing",
+                    "presumed-deleted",
+                    "reappeared",
+                    "merged",
+                    "draft-ready",
+                    "converted-to-draft",
+                    "ci-changed",
+                    "review-changed",
+                    "became-mergeable",
+                    "became-conflicting",
+                    "head-changed",
+                    "unresolved-threads-added",
+                    "unresolved-threads-resolved",
+                    "review-threads-changed",
+                    "relabeled",
+                    "comments-removed",
+                    "assignees-changed",
+                    "review-requests-changed",
+                    "base-changed"
+                  ]
+                }
+              },
+              "summary": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "ciRollup",
+                      "reviewDecision",
+                      "mergeable",
+                      "mergeStateStatus",
+                      "state",
+                      "isDraft",
+                      "unresolvedReviewThreads",
+                      "headSha"
+                    ],
+                    "properties": {
+                      "ciRollup": {
+                        "enum": ["green", "failed", "pending", "none"]
+                      },
+                      "reviewDecision": {
+                        "enum": ["approved", "changes_requested", "review_required", "none"]
+                      },
+                      "mergeable": {
+                        "enum": ["mergeable", "conflicting", "unknown"]
+                      },
+                      "mergeStateStatus": {
+                        "enum": [
+                          "behind",
+                          "blocked",
+                          "clean",
+                          "dirty",
+                          "draft",
+                          "has_hooks",
+                          "unstable",
+                          "unknown"
+                        ]
+                      },
+                      "state": {
+                        "enum": ["open", "closed", "merged"]
+                      },
+                      "isDraft": {
+                        "type": "boolean"
+                      },
+                      "unresolvedReviewThreads": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "headSha": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": true
+                  }
+                ]
+              },
+              "changed": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "missingTicks": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "enrichment": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "detail": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            },
+            "additionalProperties": true,
+            "not": {
+              "anyOf": [
+                {
+                  "required": ["from"]
+                },
+                {
+                  "required": ["to"]
+                },
+                {
+                  "required": ["summaryLine"]
+                },
+                {
+                  "required": ["line"]
+                },
+                {
+                  "required": ["details"]
+                },
+                {
+                  "required": ["updatedAt"]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "required": ["schemaVersion", "repos", "at", "counts", "deltas", "errors"],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "at": {
+          "type": "string"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["label", "reason"],
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind", "message"],
+            "properties": {
+              "repo": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": ["config", "snapshot", "github", "io", "busy", "log", "rate-limit"]
+              },
+              "message": {
+                "type": "string"
+              },
+              "resetAt": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "repo": {
+          "type": "string"
+        },
+        "repos": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "baseline": {
+          "type": "boolean"
+        },
+        "counts": {
+          "type": "object",
+          "required": ["deltas", "byClass"],
+          "properties": {
+            "deltas": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "byClass": {
+              "type": "object",
+              "properties": {
+                "new": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "first-seen": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "baseline-state": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "closed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "reopened": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "new-comments": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "updated": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "missing": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "still-missing": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "presumed-deleted": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "reappeared": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "merged": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "draft-ready": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "converted-to-draft": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "ci-changed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "review-changed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "became-mergeable": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "became-conflicting": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "head-changed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "unresolved-threads-added": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "unresolved-threads-resolved": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "review-threads-changed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "relabeled": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "comments-removed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "assignees-changed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "review-requests-changed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "base-changed": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "filteredDeltas": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": true
+        },
+        "deltas": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "repo",
+              "entity",
+              "number",
+              "title",
+              "url",
+              "classes",
+              "summary",
+              "changed"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "repo": {
+                "type": "string"
+              },
+              "entity": {
+                "enum": ["pr", "issue"]
+              },
+              "number": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "title": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "classes": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "enum": [
+                    "new",
+                    "first-seen",
+                    "baseline-state",
+                    "closed",
+                    "reopened",
+                    "new-comments",
+                    "updated",
+                    "missing",
+                    "still-missing",
+                    "presumed-deleted",
+                    "reappeared",
+                    "merged",
+                    "draft-ready",
+                    "converted-to-draft",
+                    "ci-changed",
+                    "review-changed",
+                    "became-mergeable",
+                    "became-conflicting",
+                    "head-changed",
+                    "unresolved-threads-added",
+                    "unresolved-threads-resolved",
+                    "review-threads-changed",
+                    "relabeled",
+                    "comments-removed",
+                    "assignees-changed",
+                    "review-requests-changed",
+                    "base-changed"
+                  ]
+                }
+              },
+              "summary": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "ciRollup",
+                      "reviewDecision",
+                      "mergeable",
+                      "mergeStateStatus",
+                      "state",
+                      "isDraft",
+                      "unresolvedReviewThreads",
+                      "headSha"
+                    ],
+                    "properties": {
+                      "ciRollup": {
+                        "enum": ["green", "failed", "pending", "none"]
+                      },
+                      "reviewDecision": {
+                        "enum": ["approved", "changes_requested", "review_required", "none"]
+                      },
+                      "mergeable": {
+                        "enum": ["mergeable", "conflicting", "unknown"]
+                      },
+                      "mergeStateStatus": {
+                        "enum": [
+                          "behind",
+                          "blocked",
+                          "clean",
+                          "dirty",
+                          "draft",
+                          "has_hooks",
+                          "unstable",
+                          "unknown"
+                        ]
+                      },
+                      "state": {
+                        "enum": ["open", "closed", "merged"]
+                      },
+                      "isDraft": {
+                        "type": "boolean"
+                      },
+                      "unresolvedReviewThreads": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "headSha": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": true
+                  }
+                ]
+              },
+              "changed": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "missingTicks": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "enrichment": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "detail": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            },
+            "additionalProperties": true,
+            "not": {
+              "anyOf": [
+                {
+                  "required": ["from"]
+                },
+                {
+                  "required": ["to"]
+                },
+                {
+                  "required": ["summaryLine"]
+                },
+                {
+                  "required": ["line"]
+                },
+                {
+                  "required": ["details"]
+                },
+                {
+                  "required": ["updatedAt"]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "required": ["schemaVersion", "at", "counts", "deltas", "errors"],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "at": {
+          "type": "string"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["label", "reason"],
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "errors": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["kind", "message"],
+            "properties": {
+              "repo": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": ["config", "snapshot", "github", "io", "busy", "log", "rate-limit"]
+              },
+              "message": {
+                "type": "string"
+              },
+              "resetAt": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "repo": {
+          "type": "string"
+        },
+        "repos": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "baseline": {
+          "type": "boolean"
+        },
+        "counts": {
+          "type": "object",
+          "required": ["deltas", "byClass"],
+          "properties": {
+            "deltas": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "byClass": {
+              "type": "object",
+              "properties": {
+                "new": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "first-seen": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "baseline-state": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "closed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "reopened": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "new-comments": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "updated": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "missing": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "still-missing": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "presumed-deleted": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "reappeared": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "merged": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "draft-ready": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "converted-to-draft": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "ci-changed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "review-changed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "became-mergeable": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "became-conflicting": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "head-changed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "unresolved-threads-added": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "unresolved-threads-resolved": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "review-threads-changed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "relabeled": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "comments-removed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "assignees-changed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "review-requests-changed": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "base-changed": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "filteredDeltas": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": true
+        },
+        "deltas": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "repo",
+              "entity",
+              "number",
+              "title",
+              "url",
+              "classes",
+              "summary",
+              "changed"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "repo": {
+                "type": "string"
+              },
+              "entity": {
+                "enum": ["pr", "issue"]
+              },
+              "number": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "title": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "classes": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "enum": [
+                    "new",
+                    "first-seen",
+                    "baseline-state",
+                    "closed",
+                    "reopened",
+                    "new-comments",
+                    "updated",
+                    "missing",
+                    "still-missing",
+                    "presumed-deleted",
+                    "reappeared",
+                    "merged",
+                    "draft-ready",
+                    "converted-to-draft",
+                    "ci-changed",
+                    "review-changed",
+                    "became-mergeable",
+                    "became-conflicting",
+                    "head-changed",
+                    "unresolved-threads-added",
+                    "unresolved-threads-resolved",
+                    "review-threads-changed",
+                    "relabeled",
+                    "comments-removed",
+                    "assignees-changed",
+                    "review-requests-changed",
+                    "base-changed"
+                  ]
+                }
+              },
+              "summary": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "ciRollup",
+                      "reviewDecision",
+                      "mergeable",
+                      "mergeStateStatus",
+                      "state",
+                      "isDraft",
+                      "unresolvedReviewThreads",
+                      "headSha"
+                    ],
+                    "properties": {
+                      "ciRollup": {
+                        "enum": ["green", "failed", "pending", "none"]
+                      },
+                      "reviewDecision": {
+                        "enum": ["approved", "changes_requested", "review_required", "none"]
+                      },
+                      "mergeable": {
+                        "enum": ["mergeable", "conflicting", "unknown"]
+                      },
+                      "mergeStateStatus": {
+                        "enum": [
+                          "behind",
+                          "blocked",
+                          "clean",
+                          "dirty",
+                          "draft",
+                          "has_hooks",
+                          "unstable",
+                          "unknown"
+                        ]
+                      },
+                      "state": {
+                        "enum": ["open", "closed", "merged"]
+                      },
+                      "isDraft": {
+                        "type": "boolean"
+                      },
+                      "unresolvedReviewThreads": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "headSha": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": true
+                  }
+                ]
+              },
+              "changed": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "missingTicks": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "enrichment": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "detail": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            },
+            "additionalProperties": true,
+            "not": {
+              "anyOf": [
+                {
+                  "required": ["from"]
+                },
+                {
+                  "required": ["to"]
+                },
+                {
+                  "required": ["summaryLine"]
+                },
+                {
+                  "required": ["line"]
+                },
+                {
+                  "required": ["details"]
+                },
+                {
+                  "required": ["updatedAt"]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  ]
+}

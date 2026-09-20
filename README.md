@@ -131,7 +131,7 @@ the [Usage Guide](docs/usage.md). For the exact CLI contract, use
   use different ids for independent watchers.
 - Exit code `10` means deltas were found. Exit code `0` means baseline/no
   deltas. Error behavior is specified in [Exit Codes](docs/contract.md#exit-codes).
-- `--format json` is the machine contract. `--format text` is an operator log
+- `--format json` is the legacy machine contract and `--format text` is an operator log
   format.
 - `gh-delta list` is a read-only inventory of the monitors that have run on
   this machine — which repo, monitor id, and entities, when each last ran, and
@@ -143,6 +143,13 @@ Exact CLI flags, report fields, delta classes, snapshot semantics, and outpost
 payloads live in [docs/contract.md](docs/contract.md).
 
 ## Output
+
+For agent loops, `--format compact` emits a bounded JSON envelope with
+self-contained deltas (`url`, semantic `summary`, and pure `changed` diff).
+`--format ndjson` emits the same deterministic delta order as one line per
+delta followed by one `type:"end"` record. Both imply `--summaries`; `--detail`
+adds only the compact `detail` key. `gh-delta schema --format compact` (or
+`ndjson`/`json`) prints the matching generated draft-2020-12 schema.
 
 Text output is designed for scheduled logs:
 
