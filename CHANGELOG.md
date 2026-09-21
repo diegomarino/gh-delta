@@ -4,6 +4,53 @@ All notable changes to this package will be documented here.
 
 This project follows semantic versioning.
 
+## [0.6.0](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.5.0...gh-delta-v0.6.0) (2026-09-21)
+
+
+### Features
+
+* add actionable details and ignored comment authors ([#37](https://github.com/diegomarino/gh-delta/issues/37)) ([79960d0](https://github.com/diegomarino/gh-delta/commit/79960d0d23f951f45a89cc3e2bd731af16e403ec))
+* add agent-oriented output formats ([#44](https://github.com/diegomarino/gh-delta/issues/44)) ([eeffae3](https://github.com/diegomarino/gh-delta/commit/eeffae397f95a2c19c6391ff3528fbebcf741d28))
+* add bounded wait command ([#45](https://github.com/diegomarino/gh-delta/issues/45)) ([c293a0e](https://github.com/diegomarino/gh-delta/commit/c293a0ea44c20802d009c49eb5f2651008352045))
+* add durable delta log replay ([#34](https://github.com/diegomarino/gh-delta/issues/34)) ([d3fbf31](https://github.com/diegomarino/gh-delta/commit/d3fbf311a81c9a0a04c4124dc8ae6cd51614ec14))
+* add economical watch directory fetching ([#40](https://github.com/diegomarino/gh-delta/issues/40)) ([38c1f7d](https://github.com/diegomarino/gh-delta/commit/38c1f7d700c7ffa21bb8818ca08d45281014ebfc))
+* add local watch directory selection ([#39](https://github.com/diegomarino/gh-delta/issues/39)) ([38ab15a](https://github.com/diegomarino/gh-delta/commit/38ab15a9915e40838b363ea62e7c71538253a032))
+* add opt-in GraphQL rate limit floor ([#42](https://github.com/diegomarino/gh-delta/issues/42)) ([be672d1](https://github.com/diegomarino/gh-delta/commit/be672d1c035369813135dc5af2076d77d713ca0a))
+* add post-detection attention filters ([#33](https://github.com/diegomarino/gh-delta/issues/33)) ([0fcb81a](https://github.com/diegomarino/gh-delta/commit/0fcb81ada803626c5ddb5ac4c909a56a0859379c))
+* add setup and diagnostics commands ([86fd2b8](https://github.com/diegomarino/gh-delta/commit/86fd2b8220792f60a347cd08c68b42e16baf5d39))
+* add setup and diagnostics commands ([a292409](https://github.com/diegomarino/gh-delta/commit/a29240992ad9979ebe187ae5c3950f761ca34038))
+* add status and stale detection ([#46](https://github.com/diegomarino/gh-delta/issues/46)) ([a824559](https://github.com/diegomarino/gh-delta/commit/a82455992f655582c49fd095aa26c1f3cb39f887))
+* aggregate detector passes across repositories ([#43](https://github.com/diegomarino/gh-delta/issues/43)) ([4ee57dc](https://github.com/diegomarino/gh-delta/commit/4ee57dc0d4d1926fefea69a20eb9152aa4449b2a))
+* compact retained delta logs ([#35](https://github.com/diegomarino/gh-delta/issues/35)) ([5189104](https://github.com/diegomarino/gh-delta/commit/5189104334359f740c4361f034a56d95fc6ea507))
+* detect head changes and review-thread identity ([#32](https://github.com/diegomarino/gh-delta/issues/32)) ([c35aaeb](https://github.com/diegomarino/gh-delta/commit/c35aaebb3ef1d56543dc753d938424b5041a58af))
+* distribute gh-delta for agents ([#47](https://github.com/diegomarino/gh-delta/issues/47)) ([bd69a0e](https://github.com/diegomarino/gh-delta/commit/bd69a0e4f28eca62b54a3ab484506c982ece370b))
+* enrich emitted deltas on demand ([#41](https://github.com/diegomarino/gh-delta/issues/41)) ([99eb38a](https://github.com/diegomarino/gh-delta/commit/99eb38adbee44dd30db70bb677bf7fa723cfa021))
+* guard the snapshot with a deadline-based file lock ([#31](https://github.com/diegomarino/gh-delta/issues/31)) ([69328ca](https://github.com/diegomarino/gh-delta/commit/69328caaa700421c05b47c114ab1e24aa08ca5e0))
+* scope monitor identity by worktree ([#36](https://github.com/diegomarino/gh-delta/issues/36)) ([c423feb](https://github.com/diegomarino/gh-delta/commit/c423feb6ed71138a1435158634ebaeed28dfc4c9))
+* sign outpost deliveries with HMAC ([#38](https://github.com/diegomarino/gh-delta/issues/38)) ([2513dfd](https://github.com/diegomarino/gh-delta/commit/2513dfd3b9ca050baad3491a9a51c832a8d2353e))
+* wave 0 foundations — shared duration parser and the two regression nets ([#28](https://github.com/diegomarino/gh-delta/issues/28)) ([1554ca2](https://github.com/diegomarino/gh-delta/commit/1554ca2b749c05e74fdaaafda46f47e1b09366cb))
+
+
+### Bug Fixes
+
+* **ci:** verify extension release URL ([9de0a22](https://github.com/diegomarino/gh-delta/commit/9de0a2218365d0b26cc89f1e5138d0cff584b5b7))
+* dedupe outpost deliveries by delta id, not event id ([#29](https://github.com/diegomarino/gh-delta/issues/29)) ([dd39da4](https://github.com/diegomarino/gh-delta/commit/dd39da41820f0f26a30592ce52d2d7be05ef3495))
+* **docs:** align schema preview command ([31e882d](https://github.com/diegomarino/gh-delta/commit/31e882db9bd6c9fd69d1261130a77b4a37d0ec76))
+* **dx:** harden doctor and init safeguards ([bfe8d78](https://github.com/diegomarino/gh-delta/commit/bfe8d78354be01e6f09900154de8429a1fd219c4))
+* **examples:** harden agent integration recipes ([18ee2c9](https://github.com/diegomarino/gh-delta/commit/18ee2c99f0055b8f3a4183c576e330062f6633c6))
+
+
+### Documentation
+
+* add agent-first examples and recipes ([228c113](https://github.com/diegomarino/gh-delta/commit/228c113fcc1051dfc6da1f1f6c4eb968e3a6178a))
+* add agent-first examples and recipes ([53b4396](https://github.com/diegomarino/gh-delta/commit/53b4396c35254375cf31a12ac85e8ff8d702d737))
+* add common PR loop demo ([#51](https://github.com/diegomarino/gh-delta/issues/51)) ([7e9fcf8](https://github.com/diegomarino/gh-delta/commit/7e9fcf8eea76f0489293a89409ef14290a73bdc9))
+* keep scenario lifecycle with its launcher ([#53](https://github.com/diegomarino/gh-delta/issues/53)) ([bb90356](https://github.com/diegomarino/gh-delta/commit/bb903568e89ca7e4f4221cb5d1581b403765456a))
+* restore generated output visuals ([1cd6649](https://github.com/diegomarino/gh-delta/commit/1cd6649b2d07e6c62518a161b2855e398bb2de21))
+* restore generated output visuals ([ab14a63](https://github.com/diegomarino/gh-delta/commit/ab14a63cbb1b871f3159ba40e22ba7c5e6e4f3de))
+* scope agent scenarios by session id ([#54](https://github.com/diegomarino/gh-delta/issues/54)) ([3df6c57](https://github.com/diegomarino/gh-delta/commit/3df6c574baa8677279a3ebcbf52c0191807c68bb))
+* turn gh-delta skill into an operating guide ([#52](https://github.com/diegomarino/gh-delta/issues/52)) ([fd13968](https://github.com/diegomarino/gh-delta/commit/fd1396823acfdce9f10c32c2c32a89ce8b86d660))
+
 ## [0.5.0](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.4.0...gh-delta-v0.5.0) (2026-08-05)
 
 
