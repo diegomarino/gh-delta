@@ -58,6 +58,10 @@ test('gh extension shim is executable, guards Node, and identifies its channel',
     output,
     /^gh-delta \d+\.\d+\.\d+ \(gh extension\) https:\/\/github\.com\/diegomarino\/gh-delta\/releases\n$/,
   );
+  assert.match(
+    readFileSync(path('gh-delta'), 'utf8'),
+    /GH_DELTA_CHANNEL='gh extension' exec node .*"\$@"/,
+  );
 });
 
 test('Claude marketplace metadata points at the root plugin', () => {

@@ -75,6 +75,28 @@ test('init does not create config after a failed baseline', () => {
   assert.equal(wrote, false);
 });
 
+test('init refuses an existing derived snapshot before invoking its tick', () => {
+  let ticked = false;
+  const result = initializeMonitor(
+    {
+      repo: 'o/r',
+      stateDir: '/state',
+      monitorId: 'main',
+      configPath: '/repo/.gh-delta.json',
+      stateFile: '/state/o-r.json',
+    },
+    {
+      isTemporaryPath: () => false,
+      existsSync: (path) => path === '/state/o-r.json',
+      tick: () => {
+        ticked = true;
+      },
+    },
+  );
+  assert.equal(result.code, 2);
+  assert.equal(ticked, false);
+});
+
 test('doctor emits one read-only row per check and fails when a required check fails', () => {
   const result = runDoctorChecks(
     { repo: 'o/r', stateDir: '/state', monitorId: 'main' },

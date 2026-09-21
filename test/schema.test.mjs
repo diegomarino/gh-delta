@@ -77,9 +77,9 @@ test('schemas accept representative legacy, compact and NDJSON records', () => {
       hint: 'fix it',
     }),
   );
-  assert.equal(
+  assert.ok(
     validates(schemaFor('json'), { schemaVersion: 1, at: 'now', error: 'bad', kind: 'config' }),
-    false,
+    'schema v1 accepts legacy errors without the additive hint',
   );
   assert.ok(
     validates(schemaFor('compact'), {

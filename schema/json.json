@@ -70,7 +70,7 @@
     },
     {
       "type": "object",
-      "required": ["schemaVersion", "at", "error", "kind", "hint"],
+      "required": ["schemaVersion", "at", "error", "kind"],
       "properties": {
         "schemaVersion": {
           "const": 1

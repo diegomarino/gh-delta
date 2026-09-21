@@ -76,6 +76,8 @@ test('doctor uses injectable read-only gh checks and returns one-line check rows
     defaultMonitor: () => 'main',
     doctorExec: (_cmd, args) => {
       calls.push(args);
+      if (args[0] === 'auth')
+        return JSON.stringify({ hosts: { 'github.com': [{ active: true, login: 'diego' }] } });
       return '';
     },
     fetchRateLimit: () => ({ remaining: 10, resetAt: '2026-01-01T01:00:00Z' }),
@@ -95,6 +97,42 @@ test('doctor uses injectable read-only gh checks and returns one-line check rows
     '--json',
     'hosts',
   ]);
+});
+
+test('doctor rejects a successful JSON status without an active authenticated account', () => {
+  const result = run(['doctor', '--repo', 'o/r', '--state-dir', '/work/state'], {
+    now: () => '2026-01-01T00:00:00Z',
+    defaultMonitor: () => 'main',
+    doctorExec: (_cmd, args) =>
+      args[0] === 'auth'
+        ? JSON.stringify({ hosts: { 'github.com': [{ active: false, login: 'diego' }] } })
+        : '',
+    fetchRateLimit: () => null,
+    inspectStateDir: () => ({ exists: true, writable: true }),
+    nodeVersion: () => 20,
+    registryEntries: () => [],
+    isTemporaryPath: () => false,
+  });
+  assert.equal(result.code, 1);
+  assert.equal(result.report.checks.find((check) => check.name === 'gh-authenticated').ok, false);
+});
+
+test('init refuses an existing derived monitor snapshot before its baseline tick', () => {
+  let fetched = false;
+  const result = run(['init', '--repo', 'o/r', '--state-dir', '/work/state'], {
+    ...lockDeps,
+    now: () => '2026-01-01T00:00:00Z',
+    existsSync: (path) => path.endsWith('.json') && !path.endsWith('/.gh-delta.json'),
+    isTemporaryPath: () => false,
+    fetchPRs: () => {
+      fetched = true;
+      return [pr];
+    },
+    fetchIssues: () => [],
+  });
+  assert.equal(result.code, 2);
+  assert.match(result.report.error, /will not consume/);
+  assert.equal(fetched, false);
 });
 
 test('explain requires explicit local input and demo never contacts the public repo', () => {
@@ -137,7 +175,10 @@ test('doctor text output retains every check as one truthful row', async () => {
     {
       now: () => '2026-01-01T00:00:00Z',
       defaultMonitor: () => 'main',
-      doctorExec: () => '',
+      doctorExec: (_cmd, args) =>
+        args[0] === 'auth'
+          ? JSON.stringify({ hosts: { 'github.com': [{ active: true, login: 'diego' }] } })
+          : '',
       fetchRateLimit: () => ({ remaining: 10, resetAt: '2026-01-01T01:00:00Z' }),
       inspectStateDir: () => ({ exists: true, writable: true }),
       nodeVersion: () => 20,

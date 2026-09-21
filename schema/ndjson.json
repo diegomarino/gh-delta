@@ -210,7 +210,7 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["kind", "message", "hint"],
+            "required": ["kind", "message"],
             "properties": {
               "repo": {
                 "type": "string"
@@ -415,7 +415,7 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["kind", "message", "hint"],
+            "required": ["kind", "message"],
             "properties": {
               "repo": {
                 "type": "string"
@@ -621,7 +621,7 @@
           "minItems": 1,
           "items": {
             "type": "object",
-            "required": ["kind", "message", "hint"],
+            "required": ["kind", "message"],
             "properties": {
               "repo": {
                 "type": "string"
