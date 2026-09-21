@@ -40,6 +40,9 @@ render_animated demo
 render_still usage
 render_still text-output
 render_still json-output
+render_still compact-output
+render_still ndjson-output
+render_still schema-output
 
 echo "✓ wrote SVGs to docs/img/"
 echo "  (preview a still: rsvg-convert -z 2 docs/img/text-output.svg -o /tmp/preview.png)"

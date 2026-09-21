@@ -7,7 +7,10 @@
 // flagged (recommendation 6.1).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   REPORT_FIELDS,
   DELTA_FIELDS,
@@ -215,4 +218,66 @@ test('the GitHub Actions Slack example does not save corrupt snapshot state', ()
     workflow,
     /name: Save snapshot state[\s\S]*if: \$\{\{ always\(\) && steps\.tick\.outputs\.code != '2' \}\}/,
   );
+});
+
+test('the visual generator renders every current output contract from real report data', () => {
+  const outDir = mkdtempSync(join(tmpdir(), 'gh-delta-visuals-'));
+  try {
+    execFileSync(process.execPath, ['tools/examples/generate-cast.mjs', outDir], {
+      cwd: new URL('..', import.meta.url),
+    });
+
+    assert.deepEqual(readdirSync(outDir).sort(), [
+      'compact-output.cast',
+      'demo.cast',
+      'json-output.cast',
+      'ndjson-output.cast',
+      'schema-output.cast',
+      'text-output.cast',
+      'usage.cast',
+    ]);
+
+    const visible = (name) => {
+      const rows = readFileSync(join(outDir, name), 'utf8')
+        .trim()
+        .split('\n')
+        .slice(1)
+        .map(JSON.parse);
+      const ansiColor = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
+      return rows
+        .map((row) => row[2])
+        .join('')
+        .replaceAll(ansiColor, '');
+    };
+
+    assert.match(visible('compact-output.cast'), /--format compact/);
+    assert.match(visible('compact-output.cast'), /"counts"/);
+    assert.match(visible('compact-output.cast'), /"changed"/);
+    assert.doesNotMatch(
+      visible('compact-output.cast'),
+      /"from": \{\r?\n/,
+      'compact output must omit the full legacy from fingerprint',
+    );
+
+    assert.match(visible('ndjson-output.cast'), /--format ndjson \| jq/);
+    assert.match(visible('ndjson-output.cast'), /"type": "delta"/);
+    assert.match(visible('ndjson-output.cast'), /"type": "end"/);
+
+    assert.match(visible('json-output.cast'), /--format json --detail/);
+    assert.match(visible('json-output.cast'), /"from"/);
+    assert.match(visible('json-output.cast'), /"to"/);
+
+    assert.match(visible('schema-output.cast'), /schema --format compact/);
+    assert.match(
+      visible('schema-output.cast'),
+      /jq '\{"\$schema": \."\$schema", title, schemaVersion, variants:/,
+    );
+    assert.match(
+      visible('schema-output.cast'),
+      /https:\/\/json-schema\.org\/draft\/2020-12\/schema/,
+    );
+    assert.match(visible('schema-output.cast'), /"title": "compact report"/);
+  } finally {
+    rmSync(outDir, { recursive: true, force: true });
+  }
 });

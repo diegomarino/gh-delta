@@ -17,6 +17,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { formatTextOutput } from '../../lib/text-output.mjs';
 import { enrichDelta } from '../../lib/cli.mjs';
+import { compactReport, ndjsonReport } from '../../lib/compact-output.mjs';
+import { schemaFor } from '../../lib/schema.mjs';
 import { baselineReport, deltaReport, detailReport } from './fixtures.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -104,33 +106,49 @@ function renderBaseline(report) {
 }
 
 // `--format json --detail`: summaryLine + legacy line + structured details.
+function colorJson(value, args = ['-C', '.']) {
+  const plain = typeof value === 'string' ? value : `${JSON.stringify(value, null, 2)}\n`;
+  // Colorize exactly the way an operator would read it in a shell.
+  return execFileSync('jq', args, { input: plain, encoding: 'utf8' });
+}
+
 function renderJson(report) {
   const r = clone(report);
   for (const d of r.deltas) enrichDelta(d, { summaryLine: true, legacyLine: true, details: true });
-  const plain = `${JSON.stringify(r, null, 2)}\n`;
-  // Colorize exactly the way an operator would read it in a shell.
-  return execFileSync('jq', ['-C', '.'], { input: plain, encoding: 'utf8' });
+  return colorJson(r);
 }
 
 // ── artifacts ──────────────────────────────────────────────────────────────
 const baselineText = renderBaseline(baselineReport);
 const deltaText = renderText(deltaReport);
 const jsonColored = renderJson(detailReport);
+const compactColored = colorJson(compactReport(clone(detailReport), 10));
+const ndjsonColored = colorJson(ndjsonReport(clone(detailReport), 10));
+const compactSchema = schemaFor('compact');
+const schemaColored = colorJson({
+  $schema: compactSchema.$schema,
+  title: compactSchema.title,
+  schemaVersion: compactSchema.schemaVersion,
+  variants: compactSchema.anyOf.map((variant) => variant.required),
+});
 
-// demo.cast — local shell loop: zero-config baseline, then the next scheduled tick.
+// demo.cast — baseline followed by the agent-oriented compact delta report.
 const demo = cast({ width: 92, height: 22, title: 'gh-delta — quick demo' });
 demo
   .prompt()
-  .command('while :; do gh-delta --repo owner/repo; sleep 300; done')
+  .command('gh-delta --repo owner/repo')
   .enter()
   .out(`${GREY}… seeding baseline from GitHub${RESET}`, 0.8)
   .out('\r\x1b[2K', 0.6)
   .block(baselineText)
   .wait(1.4)
-  .out(`${GREY}sleep 300  # in between, someone works on the repo${RESET}\r\n`, 0.4)
+  .out(`${GREY}# later, after GitHub state changes${RESET}\r\n`, 0.4)
+  .prompt()
+  .command('gh-delta --repo owner/repo --format compact | jq')
+  .enter()
   .out(`${GREY}… fetching GitHub state${RESET}`, 0.8)
   .out('\r\x1b[2K', 0.6)
-  .block(deltaText)
+  .block(compactColored)
   // A no-op event 5s later extends the stream so the final frame is held ~5s
   // before the loop restarts (a bare `wait` moves the clock but emits no event,
   // so svg-term — which derives duration from the last event — would ignore it).
@@ -169,6 +187,40 @@ json
   .prompt()
   .wait(0.8);
 
+// compact-output.cast — bounded JSON for agent context.
+const compact = cast({ width: 100, autoHeight: true, title: 'gh-delta — compact output' });
+compact
+  .prompt()
+  .command('gh-delta --repo owner/repo --format compact ')
+  .out(`${GREY}| jq${RESET}`)
+  .enter()
+  .block(compactColored, 0.02)
+  .prompt()
+  .wait(0.8);
+
+// ndjson-output.cast — one compact record per line plus the terminal end record.
+const ndjson = cast({ width: 100, autoHeight: true, title: 'gh-delta — NDJSON output' });
+ndjson
+  .prompt()
+  .command('gh-delta --repo owner/repo --format ndjson ')
+  .out(`${GREY}| jq${RESET}`)
+  .enter()
+  .block(ndjsonColored, 0.04)
+  .prompt()
+  .wait(0.8);
+
+// schema-output.cast — concise inspection of the full generated compact schema.
+const schema = cast({ width: 100, autoHeight: true, title: 'gh-delta — compact schema' });
+schema
+  .prompt()
+  .command(
+    'gh-delta schema --format compact | jq \'{"$schema": ."$schema", title, schemaVersion, variants: [.anyOf[].required]}\'',
+  )
+  .enter()
+  .block(schemaColored, 0.03)
+  .prompt()
+  .wait(0.8);
+
 // ── write ────────────────────────────────────────────────────────────────
 mkdirSync(OUT_DIR, { recursive: true });
 const casts = {
@@ -176,6 +228,9 @@ const casts = {
   'usage.cast': usage,
   'text-output.cast': text,
   'json-output.cast': json,
+  'compact-output.cast': compact,
+  'ndjson-output.cast': ndjson,
+  'schema-output.cast': schema,
 };
 for (const [name, c] of Object.entries(casts)) {
   const path = join(OUT_DIR, name);

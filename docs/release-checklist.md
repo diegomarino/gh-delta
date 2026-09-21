@@ -118,7 +118,9 @@ not the other way around):
 - `.claude-plugin/` marketplace and plugin metadata;
 - `lib/*.mjs`;
 - `docs/architecture.md`, `docs/contract.md`, `docs/usage.md`, `docs/watch-loop-prompt.md`, `docs/release-checklist.md`, `docs/alternatives.md`, `docs/troubleshooting.md`;
-- `docs/img/` (the four generated SVGs: `demo.svg`, `usage.svg`, `text-output.svg`, `json-output.svg`);
+- `docs/img/` (the seven generated SVGs: `demo.svg`, `usage.svg`,
+  `text-output.svg`, `compact-output.svg`, `ndjson-output.svg`,
+  `json-output.svg`, `schema-output.svg`);
 - `docs/entities-research/` (all real entity pages — `pr.md`, `issue.md`, `selectors.md`, etc., and the subtree `README.md`; **not** `_template.md`);
 - `README.md`;
 - `RUNBOOK.md`;

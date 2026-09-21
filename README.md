@@ -8,6 +8,10 @@ for schedulers, scripts, and agent loops. It compares a current observation to
 a local snapshot, emits deltas, and leaves the next action to its caller. It is
 not a dashboard, inbox, bot, or scheduler.
 
+<p align="center">
+  <img src="docs/img/demo.svg" alt="Animated gh-delta baseline followed by a compact report after GitHub state changes" width="820">
+</p>
+
 ## Install
 
 Node 18+ and authenticated GitHub CLI access are required.
@@ -41,6 +45,26 @@ reuse that identity. A first run exits `0`; a changed run exits `10`; exit `1`
 is retryable; exit `2` needs configuration or snapshot repair. JSON is always
 the default. Use `--format compact` for bounded agent context and `--format
 text` for operator logs.
+
+## Output formats
+
+The same observed change has four representations. Click any preview for the
+full-size generated output.
+
+| Agent context                                                                                                                        | Streaming consumers                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| [`compact`](docs/img/compact-output.svg): bounded summary and semantic changes                                                       | [`ndjson`](docs/img/ndjson-output.svg): one delta per line plus an `end` record                                                   |
+| <a href="docs/img/compact-output.svg"><img src="docs/img/compact-output.svg" alt="Complete gh-delta compact output" width="430"></a> | <a href="docs/img/ndjson-output.svg"><img src="docs/img/ndjson-output.svg" alt="Complete gh-delta NDJSON output" width="430"></a> |
+| Full integration contract                                                                                                            | Operator log                                                                                                                      |
+| [`json`](docs/img/json-output.svg): complete fingerprints and optional detail                                                        | [`text`](docs/img/text-output.svg): concise human-readable actions                                                                |
+| <a href="docs/img/json-output.svg"><img src="docs/img/json-output.svg" alt="Complete gh-delta JSON detail output" width="430"></a>   | <a href="docs/img/text-output.svg"><img src="docs/img/text-output.svg" alt="Complete gh-delta text output" width="430"></a>       |
+
+Schemas are generated from the runtime contract and available without GitHub
+access through `gh-delta schema --format compact|ndjson|json`.
+
+<p align="center">
+  <a href="docs/img/schema-output.svg"><img src="docs/img/schema-output.svg" alt="gh-delta compact JSON Schema summary" width="720"></a>
+</p>
 
 ## What an agent usually does
 
