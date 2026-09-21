@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "gh-delta",
+  "owner": {
+    "name": "Diego Marino"
+  },
+  "plugins": [
+    {
+      "name": "gh-delta",
+      "source": ".",
+      "description": "Decision guide for observing GitHub PR and issue deltas with gh-delta."
+    }
+  ]
+}

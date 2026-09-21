@@ -71,6 +71,7 @@
   },
   "homepage": "https://github.com/diegomarino/gh-delta#readme",
   "files": [
+    "gh-delta",
     "gh-delta.mjs",
     "lib",
     "docs/architecture.md",
@@ -83,6 +84,8 @@
     "docs/img",
     "docs/entities-research",
     "schema",
+    "skills",
+    ".claude-plugin",
     "README.md",
     "RUNBOOK.md",
     "CHANGELOG.md",
@@ -101,10 +104,12 @@
     "e2e:playground": "GH_DELTA_E2E_RUN=1 node ./test/e2e/playground-e2e.mjs",
     "examples:cast": "node tools/examples/generate-cast.mjs",
     "examples:svg": "bash tools/examples/render.sh",
+    "build:skill": "node tools/skill/generate-flags.mjs",
+    "skill:check": "node tools/skill/generate-flags.mjs --check",
     "schema:generate": "node tools/schema/generate.mjs",
     "schema:check": "node tools/schema/generate.mjs --check",
     "pack:dry-run": "npm pack --dry-run --cache .npm-cache",
-    "release:check": "npm run check && npm run test:coverage && npm run pack:dry-run",
+    "release:check": "npm run check && npm run skill:check && npm run test:coverage && npm run pack:dry-run",
     "prepublishOnly": "npm run release:check"
   },
   "keywords": [

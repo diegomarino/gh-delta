@@ -35,8 +35,55 @@ jobs:
       - name: Run quality gate
         run: npm run check
 
+      - name: Verify generated skill reference
+        run: npm run skill:check
+
+      - name: Verify skill discovery
+        run: |
+          listing="$(npx skills add ./ --list 2>&1)"
+          printf '%s\n' "$listing"
+          if ! printf '%s\n' "$listing" | grep -Fq -- 'gh-delta'; then
+            echo 'skill discovery did not list gh-delta' >&2
+            exit 1
+          fi
+
       - name: Report test coverage
         run: npm run test:coverage
 
       - name: Verify package contents
         run: npm run pack:dry-run
+
+  distribution:
+    name: Distribution (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+
+    env:
+      GH_CONFIG_DIR: ${{ runner.temp }}/gh-delta-gh-config
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20.x
+
+      - name: Install local GitHub CLI extension
+        run: |
+          mkdir -p "$GH_CONFIG_DIR"
+          test -x ./gh-delta
+          gh extension install .
+
+      - name: Verify extension version channel
+        run: |
+          version="$(gh delta --version)"
+          printf '%s\n' "$version"
+          printf '%s\n' "$version" | grep -E '^gh-delta [0-9]+\.[0-9]+\.[0-9]+ \(gh extension\)$'

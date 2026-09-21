@@ -40,6 +40,7 @@ compares to related projects.
 
 - [Requirements](#requirements)
 - [Quick Start](#quick-start)
+- [Install for AI agents](#install-for-ai-agents)
 - [Core Concepts](#core-concepts)
 - [Output](#output)
 - [Watch Loops and Outposts](#watch-loops-and-outposts)
@@ -89,6 +90,34 @@ gh-delta --help
 gh-delta --help-json
 gh-delta --version
 ```
+
+## Install for AI agents
+
+Install the decision guide directly from this repository:
+
+```bash
+npx skills add diegomarino/gh-delta
+npx skills add diegomarino/gh-delta --list
+```
+
+The skill routes common PR/issue situations to the smallest safe read command;
+it never authorizes a GitHub mutation. Claude Code can also discover the same
+repository as a marketplace:
+
+```text
+/plugin marketplace add diegomarino/gh-delta
+```
+
+For agents already authenticated with the GitHub CLI, install the script
+extension (Node.js 18+ remains required):
+
+```bash
+gh extension install diegomarino/gh-delta
+gh delta --version
+```
+
+The npm binary remains the primary installation channel. The extension's
+version output identifies itself as `gh extension`.
 
 No install required:
 

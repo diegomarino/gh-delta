@@ -1,0 +1,26 @@
+#!/usr/bin/env sh
+# GitHub CLI script-extension entrypoint. Keep this file at repository root:
+# gh discovers `gh <name>` from an executable named exactly like the extension.
+set -eu
+
+if ! command -v node >/dev/null 2>&1; then
+  echo 'gh-delta requires Node.js >= 18; install Node and retry.' >&2
+  exit 1
+fi
+
+node_major=$(node -p "process.versions.node.split('.')[0]" 2>/dev/null) || {
+  echo 'gh-delta could not determine the installed Node.js version.' >&2
+  exit 1
+}
+if [ "$node_major" -lt 18 ]; then
+  echo "gh-delta requires Node.js >= 18; found Node.js $node_major." >&2
+  exit 1
+fi
+
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ "${1-}" = '--version' ]; then
+  version=$(node "$here/gh-delta.mjs" --version)
+  printf '%s (gh extension)\n' "$version"
+  exit 0
+fi
+exec node "$here/gh-delta.mjs" "$@"
