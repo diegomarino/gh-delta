@@ -76,6 +76,7 @@ test('release metadata and CI enforce distributable agent and extension installs
     { type: 'json', path: '.claude-plugin/plugin.json', jsonpath: '$.version' },
   ]);
   const ci = readFileSync(path('.github/workflows/ci.yml'), 'utf8');
+  assert.match(ci, /name: Verify skill discovery\n\s+if: matrix\.node-version == '20\.x'/);
   assert.match(ci, /listing="\$\(npx skills add \.\/ --list 2>&1\)"/);
   assert.match(ci, /grep -Fq -- 'gh-delta'/);
   assert.match(ci, /skill discovery did not list gh-delta/);
