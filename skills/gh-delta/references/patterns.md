@@ -25,6 +25,13 @@ The `monitor-id` starts with the agent or role and ends with the purpose. Put
 watch entries, reports, cursors, and other owned files below `SCENARIO_ROOT` so
 inventory, filtering, recovery, and retirement do not depend on filename globs.
 
+`gh-delta` is one-shot and does not create a daemon. The launcher that invokes
+it owns the process lifecycle: a foreground shell owns its loop or `wait`, and
+cron, launchd, systemd, or another scheduler owns recurring ticks. When the
+launcher supports names, give its job the same `$MONITOR_ID`; keep launcher
+configuration and stop controls in that launcher rather than duplicating them
+inside the scenario directory.
+
 ## Discover and confirm the current repository
 
 ```bash
@@ -37,23 +44,6 @@ gh-delta doctor \
 Confirm the repository when the request is ambiguous, especially when `origin`
 is a fork and `upstream` differs. Ask whether the scope is PRs, issues, both, or
 a specific search/item set.
-
-Before launching recurring work, create `$SCENARIO_ROOT/OWNER.md` as a small
-operator manifest. Record the real values, including the exact launcher and
-stop command chosen for this machine:
-
-```text
-agent-or-role: codex
-purpose: pr-42-ci
-repository: owner/repo
-monitor-id: codex-pr-42-ci
-launcher: <cron entry, launchd label, systemd unit, or parent process>
-stop command: <exact command that stops this scenario>
-```
-
-This file is documentation and inventory, not a shell script: never source it
-or execute its contents automatically. Update it whenever ownership or the
-launcher changes.
 
 ## Pattern 1: scheduler-owned repository monitor
 
@@ -188,14 +178,18 @@ Do not add `status --refresh` unless a fresh detector tick is intentional.
 
 ## Retire or clean one scenario safely
 
-Read the ownership manifest first. Confirm that its repository, monitor ID, and
-purpose match the requested scenario. Run its recorded stop command explicitly
-only after checking that the command still targets this exact scenario, then
-verify that the scheduler or `wait` process has stopped:
+Stop work at its actual owner before moving state: interrupt and wait for a
+foreground shell loop or `gh-delta wait`; disable the exact named scheduler job
+for cron, launchd, or systemd; or use the stop handle returned by another
+launcher. Do not discover a process by a broad `grep` and kill it by prefix. If
+the launcher cannot be identified confidently, leave the scenario in place and
+ask the user.
+
+Then confirm that the exact root matches the requested agent and purpose, and
+inspect the owned state:
 
 ```bash
 printf 'Retiring scenario: %s\n' "$SCENARIO_ROOT"
-sed -n '1,120p' "$SCENARIO_ROOT/OWNER.md"
 gh-delta list --state-dir "$STATE_DIR" --format text
 find "$SCENARIO_ROOT" -maxdepth 2 -type f -print
 ```

@@ -70,8 +70,10 @@ test('agent skill routes real monitoring workflows instead of restating flags', 
   assert.match(patterns, /monitor-id.*agent.*purpose/is);
   assert.match(patterns, /mkdir -p "\$STATE_DIR" "\$REPORT_DIR"/);
   assert.match(patterns, /gh-delta doctor[\s\S]+--monitor-id "\$MONITOR_ID"/);
-  assert.match(patterns, /OWNER\.md/);
-  assert.match(patterns, /stop command/i);
+  assert.doesNotMatch(patterns, /OWNER\.md/);
+  assert.match(patterns, /one-shot/i);
+  assert.match(patterns, /launcher.*owns.*lifecycle/is);
+  assert.match(patterns, /stop.*(?:shell|scheduler|launcher)/is);
   assert.match(patterns, /retire.*scenario/is);
   assert.match(patterns, /mv .*ARCHIVE/);
   assert.match(patterns, /registry.*stale/is);
