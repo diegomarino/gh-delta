@@ -18,7 +18,7 @@ SCENARIO_ROOT=".gh-delta/$MONITOR_ID"
 STATE_DIR="$SCENARIO_ROOT/state"
 WATCH_DIR="$SCENARIO_ROOT/watch"
 REPORT_DIR="$SCENARIO_ROOT/reports"
-mkdir -p "$REPORT_DIR"
+mkdir -p "$STATE_DIR" "$REPORT_DIR"
 ```
 
 The `monitor-id` starts with the agent or role and ends with the purpose. Put
@@ -30,7 +30,8 @@ inventory, filtering, recovery, and retirement do not depend on filename globs.
 ```bash
 REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
 printf 'GitHub repository: %s\n' "$REPO"
-gh-delta doctor --repo "$REPO" --state-dir "$STATE_DIR" --format text
+gh-delta doctor \
+  --repo "$REPO" --monitor-id "$MONITOR_ID" --state-dir "$STATE_DIR" --format text
 ```
 
 Confirm the repository when the request is ambiguous, especially when `origin`
