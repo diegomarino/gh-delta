@@ -3,13 +3,30 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { accessSync, readFileSync, constants } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import prettier from 'prettier';
 
 const root = new URL('../', import.meta.url);
 const path = (relative) => new URL(relative, root);
 
-test('agent skill is installable metadata with generated flags in the package', () => {
+test('agent skill has valid structured frontmatter and generated flags in the package', async () => {
   const skill = readFileSync(path('skills/gh-delta/SKILL.md'), 'utf8');
-  assert.match(skill, /^---\nname: gh-delta\ndescription: .{1,200}\nlicense: MIT\n---/);
+  const frontmatter = /^---\n(?<yaml>[\s\S]*?)\n---\n/.exec(skill)?.groups?.yaml;
+  assert.ok(frontmatter, 'SKILL.md has YAML frontmatter');
+  await prettier.format(frontmatter, { parser: 'yaml' });
+  const fields = Object.fromEntries(
+    frontmatter.split('\n').map((line) => {
+      const match = /^(?<key>[a-z]+): (?<value>.+)$/.exec(line);
+      assert.ok(match, `frontmatter field is key: value: ${line}`);
+      return [match.groups.key, match.groups.value];
+    }),
+  );
+  assert.equal(fields.name, 'gh-delta');
+  assert.equal(fields.license, 'MIT');
+  assert.match(fields.description, /^(".*"|'.*')$/);
+  const description = fields.description.startsWith('"')
+    ? JSON.parse(fields.description)
+    : fields.description.slice(1, -1).replaceAll("''", "'");
+  assert.ok(description.length <= 200);
   assert.match(skill, /references\/flags\.md/);
   assert.match(readFileSync(path('skills/gh-delta/references/flags.md'), 'utf8'), /Generated/);
   const pkg = JSON.parse(readFileSync(path('package.json'), 'utf8'));

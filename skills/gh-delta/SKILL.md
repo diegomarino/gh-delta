@@ -1,6 +1,6 @@
 ---
 name: gh-delta
-description: Decide how to monitor GitHub PRs and issues with gh-delta: wait for a condition, replay a delta, diagnose CI, or find inactive work. Not for mutating GitHub.
+description: 'Decide how to monitor GitHub PRs and issues with gh-delta: wait for a condition, replay a delta, diagnose CI, or find inactive work. Not for mutating GitHub.'
 license: MIT
 ---
 
