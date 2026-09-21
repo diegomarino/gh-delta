@@ -8,9 +8,55 @@ for schedulers, scripts, and agent loops. It compares a current observation to
 a local snapshot, emits deltas, and leaves the next action to its caller. It is
 not a dashboard, inbox, bot, or scheduler.
 
+A common one-minute PR loop lets the terminal history scroll naturally through
+the baseline, PR creation, CI starting, a failed job, a corrective push, green
+CI, and a final quiet tick that does not replay the change.
+
 <p align="center">
-  <img src="docs/img/demo.svg" alt="Animated gh-delta baseline followed by a compact report after GitHub state changes" width="820">
+  <img src="docs/img/common-loop.svg" alt="Animated one-minute gh-delta PR loop from pull request creation through failed and green CI" width="820">
 </p>
+
+### Try it live
+
+Pick the most recently updated open PR with pending CI in a high-activity public
+repository, then poll only that PR once a minute:
+
+```bash
+REPO=NousResearch/hermes-agent
+WATCH_DIR=.gh-delta-live-demo/watch
+# Pick the most recently updated open PR with pending CI.
+PR=$(gh search prs --repo "$REPO" --state open --checks pending \
+  --sort updated --order desc --limit 1 \
+  --json number --jq '.[0].number')
+
+# Save the target locally once; watch add does not query GitHub.
+# The loop reuses it to check one PR instead of scanning the whole repository.
+npx gh-delta watch add "pr:$PR" \
+  --repo "$REPO" \
+  --watch-dir "$WATCH_DIR" \
+  --until closed \
+  --format text
+
+# Check every 60 seconds; the first check establishes the baseline.
+while true; do
+  npx gh-delta \
+    --repo "$REPO" \
+    --monitor-id live-demo-60s \
+    --state-dir .gh-delta-live-demo \
+    --watch-dir "$WATCH_DIR" \
+    --entities pr \
+    --format text
+  sleep 60
+done
+# Press Ctrl-C to stop.
+```
+
+The first tick establishes the baseline; later ticks report only observed
+changes, such as pending CI becoming green or failed. Quiet ticks are normal:
+even a busy repository cannot guarantee a change to the selected PR every
+minute. The watch directory keeps the query economical by fetching that PR
+directly instead of scanning the repository's full PR history. Each tick still
+uses your shared GitHub GraphQL rate limit, so treat this as a short demo.
 
 ## Install
 
@@ -45,6 +91,13 @@ reuse that identity. A first run exits `0`; a changed run exits `10`; exit `1`
 is retryable; exit `2` needs configuration or snapshot repair. JSON is always
 the default. Use `--format compact` for bounded agent context and `--format
 text` for operator logs.
+
+The quick demo below shows the initial baseline followed by a later compact
+JSON report after GitHub state changes:
+
+<p align="center">
+  <img src="docs/img/demo.svg" alt="Animated gh-delta baseline followed by a compact JSON report after GitHub state changes" width="820">
+</p>
 
 ## Output formats
 

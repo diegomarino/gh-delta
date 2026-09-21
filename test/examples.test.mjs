@@ -228,6 +228,7 @@ test('the visual generator renders every current output contract from real repor
     });
 
     assert.deepEqual(readdirSync(outDir).sort(), [
+      'common-loop.cast',
       'compact-output.cast',
       'demo.cast',
       'json-output.cast',
@@ -277,7 +278,85 @@ test('the visual generator renders every current output contract from real repor
       /https:\/\/json-schema\.org\/draft\/2020-12\/schema/,
     );
     assert.match(visible('schema-output.cast'), /"title": "compact report"/);
+
+    const commonLoopRows = readFileSync(join(outDir, 'common-loop.cast'), 'utf8')
+      .trim()
+      .split('\n')
+      .slice(1)
+      .map(JSON.parse);
+    const commonLoop = visible('common-loop.cast');
+    assert.match(commonLoop, /while true; do\r\n> {3}gh-delta \\\r\n> {5}--repo owner\/repo/);
+    assert.equal(
+      commonLoop.includes(`${String.fromCharCode(27)}[2J${String.fromCharCode(27)}[H`),
+      false,
+      'the loop must accumulate tick history and let the terminal scroll naturally',
+    );
+    assert.match(commonLoop, /--monitor-id pr-loop-60-secs/);
+    assert.match(commonLoop, /alice opened PR #42/);
+    assert.match(commonLoop, /CI started: lint, test-unit/);
+    assert.match(commonLoop, /test-unit failed/);
+    assert.match(commonLoop, /alice pushed fix 9f31c2a/);
+    assert.match(commonLoop, /all checks passed/);
+    assert.match(commonLoop, /head-changed, ci-changed/);
+    assert.doesNotMatch(commonLoop, /ticks:/, 'the video must not add a fixed timeline banner');
+
+    const quietTick = commonLoop.slice(
+      commonLoop.indexOf('12:02 · tick 3'),
+      commonLoop.indexOf('test-unit failed'),
+    );
+    assert.match(quietTick, /0 delta\(s\)/);
+    assert.match(quietTick, /No GitHub deltas since the last snapshot\./);
+    assert.doesNotMatch(quietTick, /ci-changed/);
+
+    const lastQuietRow = commonLoopRows.findLastIndex((row) =>
+      row[2].includes('No GitHub deltas since the last snapshot.'),
+    );
+    assert.notEqual(lastQuietRow, -1, 'the final quiet tick must be present');
+    assert.ok(
+      commonLoopRows.at(-1)[0] - commonLoopRows[lastQuietRow][0] >= 4.999,
+      'the final quiet tick must remain visible for five seconds before the loop restarts',
+    );
+
+    const demoRows = readFileSync(join(outDir, 'demo.cast'), 'utf8')
+      .trim()
+      .split('\n')
+      .slice(1)
+      .map(JSON.parse);
+    const schemaRow = demoRows.findIndex((row) => row[2].includes('"schemaVersion"'));
+    assert.notEqual(schemaRow, -1, 'the animated demo must reveal the compact JSON report');
+    assert.ok(
+      demoRows[schemaRow + 1][0] - demoRows[schemaRow][0] >= 0.099,
+      'the animated demo must hold each JSON line for at least 100ms',
+    );
   } finally {
     rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('animated SVGs do not render the blinking terminal cursor', () => {
+  for (const name of ['demo.svg', 'common-loop.svg']) {
+    const svg = readFileSync(new URL(`../docs/img/${name}`, import.meta.url), 'utf8');
+    assert.doesNotMatch(
+      svg,
+      /M0 0h1\.102v2\.171H0z/,
+      `${name} must be exported with svg-term-cli --no-cursor`,
+    );
+  }
+});
+
+test('animated SVGs keep terminal frames stationary for crisp Chrome rendering', () => {
+  for (const name of ['demo.svg', 'common-loop.svg']) {
+    const svg = readFileSync(new URL(`../docs/img/${name}`, import.meta.url), 'utf8');
+    assert.doesNotMatch(
+      svg,
+      /translateX/,
+      `${name} must not animate a horizontally translated frame reel`,
+    );
+    assert.match(
+      svg,
+      /visibility:hidden;animation:overlay-/,
+      `${name} must switch stationary vector frames by discrete visibility`,
+    );
+    assert.match(svg, /<animate attributeName="width"/, `${name} must retain its progress bar`);
   }
 });

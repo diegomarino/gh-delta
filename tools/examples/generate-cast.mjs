@@ -19,6 +19,7 @@ import { formatTextOutput } from '../../lib/text-output.mjs';
 import { enrichDelta } from '../../lib/cli.mjs';
 import { compactReport, ndjsonReport } from '../../lib/compact-output.mjs';
 import { schemaFor } from '../../lib/schema.mjs';
+import { deltaId, deltaIdentity } from '../../lib/fingerprint.mjs';
 import { baselineReport, deltaReport, detailReport } from './fixtures.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -26,10 +27,12 @@ const OUT_DIR = process.argv[2] ?? join(HERE, 'build');
 
 // ── ANSI ─────────────────────────────────────────────────────────────────
 const GREEN = '\x1b[1;32m';
+const AMBER = '\x1b[1;33m';
 const GREY = '\x1b[90m';
 const RESET = '\x1b[0m';
 const CMD = '\x1b[1;97m'; // bold bright white — what the operator types
 const PROMPT = `${GREEN}❯${RESET} `;
+const CONTINUATION_PROMPT = `${GREY}>${RESET} `;
 
 // ── deterministic pseudo-random for stable timing jitter ───────────────────
 let seed = 42;
@@ -105,6 +108,34 @@ function renderBaseline(report) {
   return formatTextOutput({ code: 0, report: clone(report), now: () => report.at });
 }
 
+function loopDelta(classes, from, to) {
+  const delta = {
+    entity: 'pr',
+    number: 42,
+    title: 'Add billing webhook',
+    headRefName: 'feature/billing-webhook',
+    classes,
+    from,
+    to,
+  };
+  return { id: deltaId(deltaIdentity('owner/repo', delta)), ...delta };
+}
+
+function loopReport(at, delta = null, baseline = false) {
+  return {
+    schemaVersion: 1,
+    baseline,
+    repo: 'owner/repo',
+    repoSource: 'flag',
+    monitorId: 'pr-loop-60-secs',
+    entities: ['pr'],
+    stateFile: '.gh-delta/repo-owner%2Frepo__monitor-pr-loop-60-secs__pr.json',
+    at,
+    deltas: delta ? [delta] : [],
+    summary: delta ? '1 delta(s)' : baseline ? 'baseline established: 0 PRs' : '0 delta(s)',
+  };
+}
+
 // `--format json --detail`: summaryLine + legacy line + structured details.
 function colorJson(value, args = ['-C', '.']) {
   const plain = typeof value === 'string' ? value : `${JSON.stringify(value, null, 2)}\n`;
@@ -148,7 +179,7 @@ demo
   .enter()
   .out(`${GREY}… fetching GitHub state${RESET}`, 0.8)
   .out('\r\x1b[2K', 0.6)
-  .block(compactColored)
+  .block(compactColored, 0.1)
   // A no-op event 5s later extends the stream so the final frame is held ~5s
   // before the loop restarts (a bare `wait` moves the clock but emits no event,
   // so svg-term — which derives duration from the last event — would ignore it).
@@ -221,6 +252,87 @@ schema
   .prompt()
   .wait(0.8);
 
+// common-loop.cast — a readable scheduled loop from PR creation through green CI.
+const commonLoop = cast({ width: 110, height: 24, title: 'gh-delta — common PR loop' });
+const showTick = (label, report, hold = 3.2) => {
+  commonLoop
+    .out('\r\n', 0.2)
+    .out(`${GREY}${label} · monitor pr-loop-60-secs${RESET}\r\n`, 0.1)
+    .block(renderText(report), 0.08)
+    .wait(hold);
+};
+const showActivity = (lines) => {
+  commonLoop
+    .out('\r\n', 0.2)
+    .out(`${AMBER}[GitHub activity]${RESET}\r\n`, 0.1)
+    .block(lines.map((line) => `${AMBER}${line}${RESET}`).join('\n'), 0.12)
+    .wait(2.8);
+};
+
+const pending = { state: 'OPEN', head: 'a1b2c3d', ci: 'pending' };
+const failed = { state: 'OPEN', head: 'a1b2c3d', ci: 'failed' };
+const fixPending = { state: 'OPEN', head: '9f31c2a', ci: 'pending' };
+const green = { state: 'OPEN', head: '9f31c2a', ci: 'green' };
+
+commonLoop
+  .prompt()
+  .command('while true; do', 0.018)
+  .enter()
+  .out(CONTINUATION_PROMPT)
+  .command('  gh-delta \\', 0.018)
+  .enter()
+  .out(CONTINUATION_PROMPT)
+  .command('    --repo owner/repo \\', 0.018)
+  .enter()
+  .out(CONTINUATION_PROMPT)
+  .command('    --monitor-id pr-loop-60-secs \\', 0.018)
+  .enter()
+  .out(CONTINUATION_PROMPT)
+  .command('    --state-dir .gh-delta \\', 0.018)
+  .enter()
+  .out(CONTINUATION_PROMPT)
+  .command('    --entities pr \\', 0.018)
+  .enter()
+  .out(CONTINUATION_PROMPT)
+  .command('    --format text', 0.018)
+  .enter()
+  .out(CONTINUATION_PROMPT)
+  .command('  sleep 60', 0.018)
+  .enter()
+  .out(CONTINUATION_PROMPT)
+  .command('done', 0.018)
+  .enter()
+  .wait(2.5);
+showTick('12:00 · tick 1', loopReport('2026-09-21T12:00:00.000Z', null, true));
+showActivity(['alice opened PR #42 "Add billing webhook"', 'CI started: lint, test-unit']);
+showTick(
+  '12:01 · tick 2',
+  loopReport('2026-09-21T12:01:00.000Z', loopDelta(['new'], null, pending)),
+);
+showTick('12:02 · tick 3', loopReport('2026-09-21T12:02:00.000Z'));
+showActivity(['test-unit failed']);
+showTick(
+  '12:03 · tick 4',
+  loopReport('2026-09-21T12:03:00.000Z', loopDelta(['ci-changed'], pending, failed)),
+);
+showActivity(['alice pushed fix 9f31c2a']);
+showTick(
+  '12:04 · tick 5',
+  loopReport(
+    '2026-09-21T12:04:00.000Z',
+    loopDelta(['head-changed', 'ci-changed'], failed, fixPending),
+  ),
+);
+showActivity(['all checks passed']);
+showTick(
+  '12:05 · tick 6',
+  loopReport('2026-09-21T12:05:00.000Z', loopDelta(['ci-changed'], fixPending, green)),
+);
+showTick('12:06 · tick 7', loopReport('2026-09-21T12:06:00.000Z'), 5);
+// Materialize the final hold: svg-term derives its loop duration from the last
+// event timestamp, so a trailing wait alone would be discarded on serialize.
+commonLoop.out('\x1b[0m');
+
 // ── write ────────────────────────────────────────────────────────────────
 mkdirSync(OUT_DIR, { recursive: true });
 const casts = {
@@ -231,6 +343,7 @@ const casts = {
   'compact-output.cast': compact,
   'ndjson-output.cast': ndjson,
   'schema-output.cast': schema,
+  'common-loop.cast': commonLoop,
 };
 for (const [name, c] of Object.entries(casts)) {
   const path = join(OUT_DIR, name);

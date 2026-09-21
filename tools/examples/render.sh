@@ -32,11 +32,14 @@ render_still() {
 render_animated() {
   local name="$1"
   echo "→ anim   $name.svg"
-  npx -y svg-term-cli@2.1.1 --in "$BUILD/$name.cast" --out "$IMG/$name.svg" "${WINDOW[@]}"
+  npx -y svg-term-cli@2.1.1 --in "$BUILD/$name.cast" --out "$IMG/$name.svg" "${WINDOW[@]}" \
+    --no-cursor
+  node "$ROOT/tools/examples/stabilize-svg-animation.mjs" "$IMG/$name.svg"
   node "$ROOT/tools/examples/add-progress-bar.mjs" "$IMG/$name.svg" "$BUILD/$name.cast"
 }
 
 render_animated demo
+render_animated common-loop
 render_still usage
 render_still text-output
 render_still json-output

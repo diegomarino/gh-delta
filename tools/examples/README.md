@@ -6,17 +6,18 @@ breaks `test/examples.test.mjs`, which forces a fixture update and a re-render.
 
 ## Files
 
-| File                   | Role                                                                                                                                                 |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `fixtures.mjs`         | Frozen `report` objects — the single source of truth for the data shown.                                                                             |
-| `generate-cast.mjs`    | Renders the fixtures through the **real** renderers (`lib/text-output.mjs`, `JSON.stringify`, `jq -C`) into asciicast v2 files. No network, no `gh`. |
-| `render.sh`            | Turns casts into SVGs with `svg-term`. Wired to `npm run examples:svg`.                                                                              |
-| `add-progress-bar.mjs` | Post-processes the animated `demo.svg` to overlay a bottom-edge playback progress bar (SMIL, synced to the loop duration).                           |
-| `build/`               | Intermediate `.cast` files (git-ignored; regenerated on demand).                                                                                     |
+| File                          | Role                                                                                                                                                 |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fixtures.mjs`                | Frozen `report` objects — the single source of truth for the data shown.                                                                             |
+| `generate-cast.mjs`           | Renders the fixtures through the **real** renderers (`lib/text-output.mjs`, `JSON.stringify`, `jq -C`) into asciicast v2 files. No network, no `gh`. |
+| `render.sh`                   | Turns casts into SVGs with `svg-term`. Wired to `npm run examples:svg`.                                                                              |
+| `stabilize-svg-animation.mjs` | Replaces svg-term's translated frame reel with stationary frames and discrete visibility, keeping vector text crisp in Chrome.                       |
+| `add-progress-bar.mjs`        | Overlays a bottom-edge playback progress bar on each animated SVG (SMIL, synced to the loop duration).                                               |
+| `build/`                      | Intermediate `.cast` files (git-ignored; regenerated on demand).                                                                                     |
 
-Output SVGs land in `../../docs/img/`: `demo.svg` (animated hero), `usage.svg`,
-`text-output.svg`, `compact-output.svg`, `ndjson-output.svg`,
-`json-output.svg`, and `schema-output.svg`.
+Output SVGs land in `../../docs/img/`: `demo.svg` and `common-loop.svg`
+(animated), plus `usage.svg`, `text-output.svg`, `compact-output.svg`,
+`ndjson-output.svg`, `json-output.svg`, and `schema-output.svg`.
 
 ## Regenerate
 
@@ -40,9 +41,11 @@ rsvg-convert -z 2 docs/img/text-output.svg -o /tmp/preview.png
   of a first tick over a pre-summary snapshot.
 - **Determinism:** timing jitter comes from a seeded LCG, so regenerating an
   unchanged fixture yields an identical cast — a stable git diff.
-- **Animated SVG preview:** `svg-term` animates via CSS; `rsvg-convert` renders
-  only the first frame. Use `--at <ms>` for a specific still, or open the SVG in
-  a browser. GitHub renders the animation correctly.
+- **Animated SVG preview:** svg-term's original moving frame reel makes Chrome
+  rasterize and blur the text. The render pipeline replaces it with stationary
+  vector frames selected by discrete CSS visibility; `rsvg-convert` still
+  renders only the first frame. Use `--at <ms>` for a specific still, or open
+  the generated SVG in a browser.
 - **Styling conventions:** typed commands render in bold bright white so they
   stand out from normal-weight output; still frames auto-size the terminal height
   so nothing scrolls off; the animated demo carries a bottom progress bar so a
