@@ -18,6 +18,7 @@ read one file.
   snapshot location, registry, auth, page caps, recovering from errors.
 - [`watch-loop-prompt.md`](watch-loop-prompt.md) — copyable prompt template
   for running gh-delta as an agent/cron tick.
+- [`recipes.md`](recipes.md) — short situation-to-command agent decisions.
 
 ## Maintaining gh-delta
 
