@@ -31,9 +31,11 @@ test('README is a short agent-first entrypoint and recipes cover ten decisions',
   assert.match(readme, /## What an agent usually does/);
   assert.match(readme, /npx skills add diegomarino\/gh-delta/);
   const recipes = readFileSync(path('docs/recipes.md'), 'utf8');
-  assert.equal([...recipes.matchAll(/^\| [^|]+ \| `gh-delta/gm)].length, 10);
+  assert.equal([...recipes.matchAll(/^\| [^|]+ \| `[^`]*gh-delta/gm)].length, 10);
   for (const line of recipes.matchAll(/^\| [^|]+ \| `([^`]+)`/gm))
-    assert.match(line[1], /^gh-delta /, 'every recipe presents a CLI command');
+    assert.match(line[1], /(?:^|; )gh-delta /, 'every recipe presents a CLI command');
+  assert.match(recipes, /PR_NUMBER=42; gh-delta wait[^`]+--number "\$PR_NUMBER"/);
+  assert.match(readme, /PR_NUMBER=42[\s\S]+--number "\$PR_NUMBER"/);
 });
 
 test('I-14 examples bind cursors, target one PR, and preserve their exit contracts', () => {
@@ -42,7 +44,10 @@ test('I-14 examples bind cursors, target one PR, and preserve their exit contrac
   assert.match(worker, /--number "\$PR_NUMBER"/);
 
   const coordinator = readFileSync(path('examples/coordinator-fanout/README.md'), 'utf8');
-  assert.match(coordinator, /gh-delta cursor set "\$cursor" 0 --log-file "\$LOG_FILE"/);
+  assert.match(
+    coordinator,
+    /if \[ ! -f "\$cursor" \]; then[\s\S]+gh-delta cursor set "\$cursor" 0 --log-file "\$LOG_FILE"/,
+  );
   assert.match(coordinator, /gh-delta read --cursor "\$cursor" --number 42 --advance/);
   assert.doesNotMatch(coordinator, /read --log-file/);
 
@@ -56,6 +61,13 @@ test('GitHub Action shape restores/saves state and exposes exhaustive outputs', 
   const action = readFileSync(path('examples/github-action/README.md'), 'utf8');
   assert.match(action, /actions\/cache\/restore@v4/);
   assert.match(action, /actions\/cache\/save@v4/);
+  assert.match(action, /--monitor-id actions-cache/);
+  assert.match(action, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.match(action, /permissions:[\s\S]+pull-requests: read/);
+  assert.match(
+    action,
+    /concurrency:[\s\S]+group: gh-delta-\$\{\{ github\.repository \}\}[\s\S]+cancel-in-progress: false/,
+  );
   assert.match(action, /changed: \$\{\{ steps\.tick\.outputs\.changed \}\}/);
   assert.match(action, /report: \$\{\{ steps\.tick\.outputs\.report \}\}/);
   assert.match(action, /report<<GH_DELTA_REPORT/);

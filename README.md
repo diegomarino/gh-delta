@@ -65,8 +65,10 @@ schemas, snapshots, and every flag.
 Wait for a PR’s CI without polling from an LLM turn:
 
 ```bash
+PR_NUMBER=42
 gh-delta wait --repo owner/repo --monitor-id worker-42 \
   --state-dir .gh-delta --entities pr --timeout 30m \
+  --number "$PR_NUMBER" \
   --until-summary ciRollup=green,failed
 ```
 

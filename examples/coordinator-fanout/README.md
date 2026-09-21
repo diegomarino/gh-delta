@@ -12,12 +12,15 @@ LOG_FILE=$(jq -r '.logFile' coordinator.json)
 # bind each missing cursor to the producer log once, then advance independently
 for worker in reviewer notifier triage; do
   cursor=".gh-delta/$worker.cursor.json"
-  gh-delta cursor set "$cursor" 0 --log-file "$LOG_FILE"
+  if [ ! -f "$cursor" ]; then
+    gh-delta cursor set "$cursor" 0 --log-file "$LOG_FILE"
+  fi
   gh-delta read --cursor "$cursor" --number 42 --advance
 done
 ```
 
 This prevents three workers from repeating the same fetch. Keep cursor files
-durable, distinct, and bound once to the same log. `run.sh` seeds, changes,
+durable, distinct, and bound once to the same log; never reset an existing
+cursor unless an explicit replay is intended. `run.sh` seeds, changes,
 journals, and reads one local fixture through three cursors; it makes no network
 request.

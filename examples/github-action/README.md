@@ -11,6 +11,13 @@ explicit:
 jobs:
   tick:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    concurrency:
+      group: gh-delta-${{ github.repository }}
+      cancel-in-progress: false
     outputs:
       changed: ${{ steps.tick.outputs.changed }}
       report: ${{ steps.tick.outputs.report }}
@@ -22,9 +29,12 @@ jobs:
           restore-keys: gh-delta-state-
       - id: tick
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set +e
-          npx gh-delta --repo "$GITHUB_REPOSITORY" --state-dir .gh-delta-state --format compact > report.json
+          npx gh-delta --repo "$GITHUB_REPOSITORY" --monitor-id actions-cache \
+            --state-dir .gh-delta-state --format compact > report.json
           code=$?
           set -e
           [ "$code" -eq 10 ] && changed=true || changed=false
