@@ -26,6 +26,8 @@ downstream decisions belong to the caller.
 flowchart LR
     Sched[scheduler / watch loop] --> Bin[gh-delta.mjs]
     Bin --> CLI[lib/cli.mjs]
+    CLI --> Config[lib/config.mjs]
+    CLI --> DX[lib/dx.mjs]
     CLI --> Args[lib/args.mjs]
     CLI --> GH[lib/gh.mjs]
     CLI --> Snap[lib/snapshot.mjs]
@@ -47,6 +49,18 @@ flowchart LR
 The public CLI is one one-shot command. JSON output is for programs; text output
 is for operator logs. Neither format creates schedules, timers, automations, or
 wake-ups.
+
+## Configuration and DX boundaries
+
+`lib/config.mjs` is a pre-parse adapter for detector, wait, status, and the DX
+commands, restricted to the public flags accepted by that command. It reads
+local JSON configuration and environment defaults, then appends those existing
+long flags; validation remains in `lib/cli.mjs`, so flags and configuration
+cannot drift into separate semantics or become explain positionals. No
+configuration is present means no argv rewrite. `lib/dx.mjs` keeps `init`,
+`doctor`, and `explain` policy testable:
+init delegates the actual baseline to the existing detector, doctor reads only,
+and explain delegates the semantic transition to `diffFingerprint`.
 
 ## Failure Safety
 

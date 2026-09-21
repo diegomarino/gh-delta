@@ -69,7 +69,17 @@ test('runtime schemas equal published artifacts', () => {
 test('schemas accept representative legacy, compact and NDJSON records', () => {
   assert.ok(validates(schemaFor('json'), { schemaVersion: 1, at: 'now', deltas: [] }));
   assert.ok(
+    validates(schemaFor('json'), {
+      schemaVersion: 1,
+      at: 'now',
+      error: 'bad',
+      kind: 'config',
+      hint: 'fix it',
+    }),
+  );
+  assert.equal(
     validates(schemaFor('json'), { schemaVersion: 1, at: 'now', error: 'bad', kind: 'config' }),
+    false,
   );
   assert.ok(
     validates(schemaFor('compact'), {

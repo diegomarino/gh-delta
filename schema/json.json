@@ -46,6 +46,9 @@
         "kind": {
           "enum": ["config", "snapshot", "github", "io", "busy", "log", "rate-limit"]
         },
+        "hint": {
+          "type": "string"
+        },
         "warnings": {
           "type": "array",
           "items": {
@@ -67,7 +70,7 @@
     },
     {
       "type": "object",
-      "required": ["schemaVersion", "at", "error", "kind"],
+      "required": ["schemaVersion", "at", "error", "kind", "hint"],
       "properties": {
         "schemaVersion": {
           "const": 1
@@ -107,6 +110,9 @@
         },
         "kind": {
           "enum": ["config", "snapshot", "github", "io", "busy", "log", "rate-limit"]
+        },
+        "hint": {
+          "type": "string"
         },
         "warnings": {
           "type": "array",

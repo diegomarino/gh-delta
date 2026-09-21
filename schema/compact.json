@@ -33,7 +33,7 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["kind", "message"],
+            "required": ["kind", "message", "hint"],
             "properties": {
               "repo": {
                 "type": "string"
@@ -42,6 +42,9 @@
                 "enum": ["config", "snapshot", "github", "io", "busy", "log", "rate-limit"]
               },
               "message": {
+                "type": "string"
+              },
+              "hint": {
                 "type": "string"
               },
               "resetAt": {
@@ -402,7 +405,7 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["kind", "message"],
+            "required": ["kind", "message", "hint"],
             "properties": {
               "repo": {
                 "type": "string"
@@ -411,6 +414,9 @@
                 "enum": ["config", "snapshot", "github", "io", "busy", "log", "rate-limit"]
               },
               "message": {
+                "type": "string"
+              },
+              "hint": {
                 "type": "string"
               },
               "resetAt": {
@@ -772,7 +778,7 @@
           "minItems": 1,
           "items": {
             "type": "object",
-            "required": ["kind", "message"],
+            "required": ["kind", "message", "hint"],
             "properties": {
               "repo": {
                 "type": "string"
@@ -781,6 +787,9 @@
                 "enum": ["config", "snapshot", "github", "io", "busy", "log", "rate-limit"]
               },
               "message": {
+                "type": "string"
+              },
+              "hint": {
                 "type": "string"
               },
               "resetAt": {
