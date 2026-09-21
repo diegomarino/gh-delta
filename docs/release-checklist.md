@@ -15,10 +15,11 @@ This is the end-to-end flow that ships a release, from commit to npm:
    `.github/workflows/release-please.yml` runs
    [`googleapis/release-please-action`](https://github.com/googleapis/release-please-action),
    which maintains a standing "chore(main): release gh-delta X.Y.Z" PR. That
-   PR's diff is entirely generated: it bumps the `version` field in
-   `package.json` and prepends the new section to `CHANGELOG.md`. Never
-   hand-edit either field/file directly — release-please owns both, and a
-   manual edit will be overwritten or cause a merge conflict on the next run.
+   PR's diff is entirely generated: it bumps the `version` fields in
+   `package.json` and `.claude-plugin/plugin.json`, and prepends the new
+   section to `CHANGELOG.md`. Never hand-edit either version field or the
+   changelog directly — release-please owns them, and a manual edit will be
+   overwritten or cause a merge conflict on the next run.
 3. **Merging the release PR tags and creates a GitHub Release.**
    Merging that PR is the release trigger: release-please tags the commit
    (`vX.Y.Z`) and publishes a GitHub Release for it.
@@ -50,6 +51,7 @@ Run:
 ```bash
 npm ci --cache .npm-cache
 npm run release:check
+node tools/skill/generate-flags.mjs --check
 node ./gh-delta.mjs --help
 node ./gh-delta.mjs --help-json
 node ./gh-delta.mjs --version
@@ -61,6 +63,7 @@ Expected:
 - Prettier reports every file as formatted;
 - all Node tests pass;
 - the coverage report completes;
+- the generated skill flag reference matches `lib/help.mjs`;
 - `npm pack --dry-run` lists only expected public package files;
 - the CLI prints human help, JSON help, and version output, then exits `0`.
 
@@ -110,6 +113,9 @@ The package should contain exactly the files enumerated in `package.json#files`
 not the other way around):
 
 - `gh-delta.mjs`;
+- `gh-delta` (GitHub CLI extension shim);
+- `skills/gh-delta/` (including generated `references/flags.md`);
+- `.claude-plugin/` marketplace and plugin metadata;
 - `lib/*.mjs`;
 - `docs/architecture.md`, `docs/contract.md`, `docs/usage.md`, `docs/watch-loop-prompt.md`, `docs/release-checklist.md`, `docs/alternatives.md`, `docs/troubleshooting.md`;
 - `docs/img/` (the four generated SVGs: `demo.svg`, `usage.svg`, `text-output.svg`, `json-output.svg`);
