@@ -65,7 +65,7 @@ jobs:
           - macos-latest
 
     env:
-      GH_CONFIG_DIR: ${{ runner.temp }}/gh-delta-gh-config
+      GH_CONFIG_DIR: ${{ github.workspace }}/.gh-delta-gh-config
 
     steps:
       - name: Check out repository
