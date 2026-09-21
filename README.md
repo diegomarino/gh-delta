@@ -70,8 +70,12 @@ npm install --global gh-delta
 gh extension install diegomarino/gh-delta
 gh delta --version
 
-# agent decision guide
-npx skills add diegomarino/gh-delta
+# agent skill (interactive)
+npx skills add diegomarino/gh-delta --skill gh-delta
+
+# or install globally for Codex without prompts, then verify
+npx skills add diegomarino/gh-delta --skill gh-delta --agent codex --global --yes
+npx skills list --global --agent codex
 ```
 
 For a one-off run, use `npx gh-delta`. The skill is guidance only: it does not
