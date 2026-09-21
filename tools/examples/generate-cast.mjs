@@ -32,6 +32,7 @@ const GREY = '\x1b[90m';
 const RESET = '\x1b[0m';
 const CMD = '\x1b[1;97m'; // bold bright white — what the operator types
 const PROMPT = `${GREEN}❯${RESET} `;
+const CONTINUATION_PROMPT = `${GREY}>${RESET} `;
 
 // ── deterministic pseudo-random for stable timing jitter ───────────────────
 let seed = 42;
@@ -253,21 +254,21 @@ schema
 
 // common-loop.cast — a readable scheduled loop from PR creation through green CI.
 const commonLoop = cast({ width: 110, height: 24, title: 'gh-delta — common PR loop' });
-const clearScreen = () => commonLoop.out('\x1b[2J\x1b[H', 0.2);
 const showTick = (label, report, hold = 3.2) => {
-  clearScreen()
+  commonLoop
+    .out('\r\n', 0.2)
     .out(`${GREY}${label} · monitor pr-loop-60-secs${RESET}\r\n`, 0.1)
     .block(renderText(report), 0.08)
     .wait(hold);
 };
 const showActivity = (lines) => {
-  clearScreen()
+  commonLoop
+    .out('\r\n', 0.2)
     .out(`${AMBER}[GitHub activity]${RESET}\r\n`, 0.1)
     .block(lines.map((line) => `${AMBER}${line}${RESET}`).join('\n'), 0.12)
     .wait(2.8);
 };
 
-const opened = { state: 'OPEN', head: 'a1b2c3d', ci: 'none' };
 const pending = { state: 'OPEN', head: 'a1b2c3d', ci: 'pending' };
 const failed = { state: 'OPEN', head: 'a1b2c3d', ci: 'failed' };
 const fixPending = { state: 'OPEN', head: '9f31c2a', ci: 'pending' };
@@ -275,23 +276,40 @@ const green = { state: 'OPEN', head: '9f31c2a', ci: 'green' };
 
 commonLoop
   .prompt()
-  .command(
-    'while true; do clear; gh-delta --repo owner/repo --monitor-id pr-loop-60-secs --state-dir .gh-delta --entities pr --format text; sleep 60; done',
-    0.018,
-  )
+  .command('while true; do', 0.018)
+  .enter()
+  .out(CONTINUATION_PROMPT)
+  .command('  gh-delta \\', 0.018)
+  .enter()
+  .out(CONTINUATION_PROMPT)
+  .command('    --repo owner/repo \\', 0.018)
+  .enter()
+  .out(CONTINUATION_PROMPT)
+  .command('    --monitor-id pr-loop-60-secs \\', 0.018)
+  .enter()
+  .out(CONTINUATION_PROMPT)
+  .command('    --state-dir .gh-delta \\', 0.018)
+  .enter()
+  .out(CONTINUATION_PROMPT)
+  .command('    --entities pr \\', 0.018)
+  .enter()
+  .out(CONTINUATION_PROMPT)
+  .command('    --format text', 0.018)
+  .enter()
+  .out(CONTINUATION_PROMPT)
+  .command('  sleep 60', 0.018)
+  .enter()
+  .out(CONTINUATION_PROMPT)
+  .command('done', 0.018)
   .enter()
   .wait(2.5);
 showTick('12:00 · tick 1', loopReport('2026-09-21T12:00:00.000Z', null, true));
-showActivity(['alice opened PR #42 "Add billing webhook"']);
+showActivity(['alice opened PR #42 "Add billing webhook"', 'CI started: lint, test-unit']);
 showTick(
   '12:01 · tick 2',
-  loopReport('2026-09-21T12:01:00.000Z', loopDelta(['new'], null, opened)),
+  loopReport('2026-09-21T12:01:00.000Z', loopDelta(['new'], null, pending)),
 );
-showActivity(['CI started: lint, test-unit']);
-showTick(
-  '12:02 · tick 3',
-  loopReport('2026-09-21T12:02:00.000Z', loopDelta(['ci-changed'], opened, pending)),
-);
+showTick('12:02 · tick 3', loopReport('2026-09-21T12:02:00.000Z'));
 showActivity(['test-unit failed']);
 showTick(
   '12:03 · tick 4',
@@ -311,6 +329,9 @@ showTick(
   loopReport('2026-09-21T12:05:00.000Z', loopDelta(['ci-changed'], fixPending, green)),
 );
 showTick('12:06 · tick 7', loopReport('2026-09-21T12:06:00.000Z'), 5);
+// Materialize the final hold: svg-term derives its loop duration from the last
+// event timestamp, so a trailing wait alone would be discarded on serialize.
+commonLoop.out('\x1b[0m');
 
 // ── write ────────────────────────────────────────────────────────────────
 mkdirSync(OUT_DIR, { recursive: true });
