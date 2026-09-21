@@ -228,6 +228,7 @@ test('the visual generator renders every current output contract from real repor
     });
 
     assert.deepEqual(readdirSync(outDir).sort(), [
+      'common-loop.cast',
       'compact-output.cast',
       'demo.cast',
       'json-output.cast',
@@ -277,6 +278,28 @@ test('the visual generator renders every current output contract from real repor
       /https:\/\/json-schema\.org\/draft\/2020-12\/schema/,
     );
     assert.match(visible('schema-output.cast'), /"title": "compact report"/);
+
+    const commonLoop = visible('common-loop.cast');
+    assert.match(commonLoop, /while true; do clear/);
+    assert.match(commonLoop, /--monitor-id pr-loop-60-secs/);
+    assert.match(commonLoop, /alice opened PR #42/);
+    assert.match(commonLoop, /CI started: lint, test-unit/);
+    assert.match(commonLoop, /test-unit failed/);
+    assert.match(commonLoop, /alice pushed fix 9f31c2a/);
+    assert.match(commonLoop, /all checks passed/);
+    assert.match(commonLoop, /head-changed, ci-changed/);
+
+    const demoRows = readFileSync(join(outDir, 'demo.cast'), 'utf8')
+      .trim()
+      .split('\n')
+      .slice(1)
+      .map(JSON.parse);
+    const schemaRow = demoRows.findIndex((row) => row[2].includes('"schemaVersion"'));
+    assert.notEqual(schemaRow, -1, 'the animated demo must reveal the compact JSON report');
+    assert.ok(
+      demoRows[schemaRow + 1][0] - demoRows[schemaRow][0] >= 0.099,
+      'the animated demo must hold each JSON line for at least 100ms',
+    );
   } finally {
     rmSync(outDir, { recursive: true, force: true });
   }

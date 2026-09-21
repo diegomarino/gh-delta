@@ -37,6 +37,7 @@ render_animated() {
 }
 
 render_animated demo
+render_animated common-loop
 render_still usage
 render_still text-output
 render_still json-output

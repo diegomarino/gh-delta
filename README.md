@@ -12,6 +12,14 @@ not a dashboard, inbox, bot, or scheduler.
   <img src="docs/img/demo.svg" alt="Animated gh-delta baseline followed by a compact report after GitHub state changes" width="820">
 </p>
 
+A common one-minute PR loop shows each tick without scrolling: baseline, PR
+creation, CI starting, a failed job, a corrective push, green CI, and a final
+quiet tick that does not replay the change.
+
+<p align="center">
+  <img src="docs/img/common-loop.svg" alt="Animated one-minute gh-delta PR loop from pull request creation through failed and green CI" width="820">
+</p>
+
 ## Install
 
 Node 18+ and authenticated GitHub CLI access are required.

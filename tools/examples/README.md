@@ -14,9 +14,9 @@ breaks `test/examples.test.mjs`, which forces a fixture update and a re-render.
 | `add-progress-bar.mjs` | Post-processes the animated `demo.svg` to overlay a bottom-edge playback progress bar (SMIL, synced to the loop duration).                           |
 | `build/`               | Intermediate `.cast` files (git-ignored; regenerated on demand).                                                                                     |
 
-Output SVGs land in `../../docs/img/`: `demo.svg` (animated hero), `usage.svg`,
-`text-output.svg`, `compact-output.svg`, `ndjson-output.svg`,
-`json-output.svg`, and `schema-output.svg`.
+Output SVGs land in `../../docs/img/`: `demo.svg` and `common-loop.svg`
+(animated), plus `usage.svg`, `text-output.svg`, `compact-output.svg`,
+`ndjson-output.svg`, `json-output.svg`, and `schema-output.svg`.
 
 ## Regenerate
 
