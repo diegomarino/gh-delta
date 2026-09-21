@@ -57,6 +57,7 @@ test('agent skill routes real monitoring workflows instead of restating flags', 
   assert.match(skill, /PRs?.*issues?.*both.*search|scope/i);
   assert.match(skill, /references\/patterns\.md/);
   assert.match(skill, /references\/troubleshooting\.md/);
+  assert.match(skill, /agent-type.*last8.*session.*purpose/i);
 
   const patterns = readFileSync(path('skills/gh-delta/references/patterns.md'), 'utf8');
   assert.match(patterns, /gh repo view/);
@@ -66,8 +67,16 @@ test('agent skill routes real monitoring workflows instead of restating flags', 
   assert.match(patterns, /report\.logFile|logFile.*report/is);
   assert.match(patterns, /one cursor per consumer/i);
   assert.match(patterns, /--stale-after/);
-  assert.match(patterns, /AGENT[\s\S]+PURPOSE[\s\S]+SCENARIO_ROOT/);
-  assert.match(patterns, /monitor-id.*agent.*purpose/is);
+  assert.match(
+    patterns,
+    /AGENT_TYPE[\s\S]+SESSION_ID[\s\S]+SESSION_TAG[\s\S]+PURPOSE[\s\S]+MONITOR_ID/,
+  );
+  assert.match(patterns, /last eight/i);
+  assert.match(patterns, /CLAUDE_CODE_SESSION_ID/);
+  assert.match(patterns, /Codex[\s\S]+hook[\s\S]+`session_id`/);
+  assert.match(patterns, /resume[\s\S]+same scenario/i);
+  assert.match(patterns, /new session[\s\S]+new scenario/i);
+  assert.match(patterns, /shared[\s\S]+`coordinator`/i);
   assert.match(patterns, /mkdir -p "\$STATE_DIR" "\$REPORT_DIR"/);
   assert.match(patterns, /gh-delta doctor[\s\S]+--monitor-id "\$MONITOR_ID"/);
   assert.doesNotMatch(patterns, /OWNER\.md/);
