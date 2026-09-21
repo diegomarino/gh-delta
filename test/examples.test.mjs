@@ -270,6 +270,10 @@ test('the visual generator renders every current output contract from real repor
     assert.match(visible('schema-output.cast'), /schema --format compact/);
     assert.match(
       visible('schema-output.cast'),
+      /jq '\{"\$schema": \."\$schema", title, schemaVersion, variants:/,
+    );
+    assert.match(
+      visible('schema-output.cast'),
       /https:\/\/json-schema\.org\/draft\/2020-12\/schema/,
     );
     assert.match(visible('schema-output.cast'), /"title": "compact report"/);

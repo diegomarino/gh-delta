@@ -214,7 +214,7 @@ const schema = cast({ width: 100, autoHeight: true, title: 'gh-delta — compact
 schema
   .prompt()
   .command(
-    "gh-delta schema --format compact | jq '{title, schemaVersion, variants: [.anyOf[].required]}'",
+    'gh-delta schema --format compact | jq \'{"$schema": ."$schema", title, schemaVersion, variants: [.anyOf[].required]}\'',
   )
   .enter()
   .block(schemaColored, 0.03)
