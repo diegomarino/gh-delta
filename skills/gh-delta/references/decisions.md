@@ -4,6 +4,13 @@
 
 - One recurring producer owns one snapshot identity: repository,
   `--monitor-id`, entity selection, and state path. Keep all four stable.
+- Name a session-owned identity
+  `<agent-type>-<last8(session-id)>-<purpose>`. Resuming the same conversation
+  keeps its identity; a new session gets a new scenario instead of silently
+  adopting another session's snapshot.
+- An intentionally cross-session producer has no session owner. Give it an
+  explicit stable role such as `coordinator-<purpose>` and manage it through
+  its scheduler.
 - Store automation state in an explicit durable `--state-dir`; the default is
   temporary and can silently re-baseline after cleanup or reboot.
 - Do not overlap ticks for the same identity. A busy lock is a reason to wait,

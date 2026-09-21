@@ -33,7 +33,8 @@ the answer changes the design; do not make the user choose CLI flags.
 | Explain an old notification              | Local `explain` using the report or delta log                                    |
 
 Read [references/patterns.md](references/patterns.md) for complete commands,
-agent-prefixed scenario ownership, and safe retirement. Read
+`<agent-type>-<last8(session-id)>-<purpose>` scenario ownership, and safe
+retirement. Read
 [references/troubleshooting.md](references/troubleshooting.md) for `HTTP 502`,
 authentication, rate limits, page caps, locks, and snapshot recovery.
 
