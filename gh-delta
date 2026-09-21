@@ -18,9 +18,4 @@ if [ "$node_major" -lt 18 ]; then
 fi
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-if [ "${1-}" = '--version' ]; then
-  version=$(node "$here/gh-delta.mjs" --version)
-  printf '%s (gh extension)\n' "$version"
-  exit 0
-fi
-exec node "$here/gh-delta.mjs" "$@"
+GH_DELTA_CHANNEL='gh extension' exec node "$here/gh-delta.mjs" "$@"

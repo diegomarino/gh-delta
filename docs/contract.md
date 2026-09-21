@@ -81,6 +81,39 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
   Compact deltas are ordered by requested repository, PR before issue, then
   number; NDJSON finishes with exactly one `end` record and newline.
 
+### Project setup, configuration, and local DX commands
+
+`gh-delta init` resolves the current repository (or accepts `--repo`), uses a
+durable `--state-dir` (default `.gh-delta` in the checkout), performs one normal
+baseline, then atomically creates `.gh-delta.json` only when it did not already
+exist. It never overwrites configuration and rejects a temporary state directory.
+Its `nextCommand` is `gh-delta`; `--agent` only prints cron, systemd, and prompt
+snippets—it never installs a scheduler.
+
+For detector, wait, status, and DX commands, configuration is loaded from
+project `.gh-delta.json` then `~/.config/gh-delta/config.json`; only the
+existing long flags accepted by that command are applied (so configuration never
+supplies a positional). Keys are exactly existing long flag names
+(for example `"state-dir"`, `"monitor-id"`, and `"format"`), never a second
+grammar. Precedence is explicit flag > `GH_DELTA_<FLAG>` environment value >
+project config > user config > current default. With neither config nor relevant
+environment value, argv and output remain byte-identical to the legacy path.
+`GH_DELTA_FORMAT=text` is supported; the unconditional default remains `json`,
+including when stdout is a TTY.
+
+`gh-delta doctor` is read-only and emits one row each for gh installation,
+safe `gh auth status --active --hostname <host> --json hosts` authentication,
+whether `read:org` is needed, GraphQL quota/reset, state-directory writability,
+Node >=18, registry collisions, and temporary-state risk. Exit 0 means required
+checks pass; exit 1 means one failed. `gh-delta explain <id>` requires exactly
+one explicit `--log-file` or `--report-file`, applies `diffFingerprint` locally,
+and never creates hidden last-report state or contacts GitHub. `gh-delta demo`
+only prints the fixed public `diegomarino/gh-delta-demo` command.
+
+`--version` prints the package version, distribution channel (`npm`, `gh
+extension`, or `brew`), and the GitHub Releases URL. The root `gh-delta` shim
+sets the `gh extension` channel; a Homebrew formula can set `GH_DELTA_CHANNEL=brew`.
+
 ### gh-delta status
 
 `gh-delta status [--number <numbers>] [--watch-dir <path>] [--refresh]` reads
@@ -425,6 +458,8 @@ subpaths; the package root is intentionally not exported.
 | `gh-delta/lock`        | `acquireLock`, `releaseLock`, `assertLockOwned`, `lockPath`, `LOCK_EXPIRY_SLACK_MS`                                                                                                                                                                                                                                                                                                                                                                                       | State-file lock: one writer per `(repo, monitorId, entities)` |
 | `gh-delta/args`        | `parseEntitySelection`, `validateRepo`, `validateMonitorId`, `canonicalEntityKey`, `defaultMonitorId`                                                                                                                                                                                                                                                                                                                                                                     | Shared argument parsing policies                              |
 | `gh-delta/version`     | `getPackageMetadata`, `renderVersionText`                                                                                                                                                                                                                                                                                                                                                                                                                                 | Package metadata and version output                           |
+| `gh-delta/config`      | `applyConfig`, `CONFIG_KEYS`                                                                                                                                                                                                                                                                                                                                                                                                                                              | Local configuration and flag-precedence helpers               |
+| `gh-delta/dx`          | `initializeMonitor`, `writeConfigDurableNoOverwrite`, `runDoctorChecks`, `explainDelta`, `isTemporaryPath`                                                                                                                                                                                                                                                                                                                                                                | Local init, diagnostics, and persisted-delta explanation      |
 | `gh-delta/contract`    | `REPORT_SCHEMA_VERSION`, `OUTPOST_SCHEMA_VERSION`, `REPORT_FIELDS`, `DELTA_FIELDS`, `DELTA_DETAIL_FIELDS`, `DELTA_DETAIL_FIELDS_BY_CLASS`, `DELTA_CLASSES`, `ERROR_KINDS`, `LIST_REPORT_FIELDS`, `LIST_MONITOR_FIELDS`, `REGISTRY_ENTRY_FIELDS`, `DELTA_SUMMARY_FIELDS`, `DELTA_SUMMARY_ENUMS`, `DELTA_LOG_RECORD_FIELDS`, `CURSOR_FILE_FIELDS`, `READ_REPORT_FIELDS`, `READ_CURSOR_FIELDS`, `CURSOR_SET_REPORT_FIELDS`, `CURSOR_SET_CURSOR_FIELDS`, `WAIT_REPORT_FIELDS` | Runtime contract constants and field catalogs                 |
 
 Behavioral notes for consumers:
@@ -895,6 +930,7 @@ Emitted with exit code `1` (transient) or `2` (permanent). It **does not** carry
   "schemaVersion": 1,
   "error": "--entities must include pr, issue, or both; got \"prs\"",
   "kind": "config",
+  "hint": "Fix the command configuration, or run gh-delta doctor for a local diagnostic.",
   "repo": "owner/repo",
   "monitorId": "prs-5m",
   "at": "2026-07-01T12:00:00.000Z"
@@ -902,6 +938,11 @@ Emitted with exit code `1` (transient) or `2` (permanent). It **does not** carry
 ```
 
 - `schemaVersion` (number), `error` (string), `at` (string): always present.
+- `hint` (string): always present and actionable. It is advisory rather than a
+  stable enum: `config` points to configuration/doctor, `snapshot` to recovery,
+  `github` to authentication/connectivity (and `read:org` when recognizable),
+  `io` to directory permissions, `busy` to the competing monitor, `log` to the
+  durable journal, and `rate-limit` to `resetAt`/quota.
 - `kind` (string): one of `config`, `snapshot`, `github`, `io`, `busy`, `log`,
   `rate-limit`. This is a closed set while `report.schemaVersion === 1`, but
   forward-compatible like classes — treat unknown values as "something changed,

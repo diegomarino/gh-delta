@@ -54,7 +54,14 @@ test('agent decision guide gives wait its actual exit and format boundaries', ()
 test('gh extension shim is executable, guards Node, and identifies its channel', () => {
   accessSync(path('gh-delta'), constants.X_OK);
   const output = execFileSync(fileURLToPath(path('gh-delta')), ['--version'], { encoding: 'utf8' });
-  assert.match(output, /^gh-delta \d+\.\d+\.\d+ \(gh extension\)\n$/);
+  assert.match(
+    output,
+    /^gh-delta \d+\.\d+\.\d+ \(gh extension\) https:\/\/github\.com\/diegomarino\/gh-delta\/releases\n$/,
+  );
+  assert.match(
+    readFileSync(path('gh-delta'), 'utf8'),
+    /GH_DELTA_CHANNEL='gh extension' exec node .*"\$@"/,
+  );
 });
 
 test('Claude marketplace metadata points at the root plugin', () => {

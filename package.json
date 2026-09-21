@@ -12,6 +12,9 @@
     "./compact-output": {
       "import": "./lib/compact-output.mjs"
     },
+    "./config": {
+      "import": "./lib/config.mjs"
+    },
     "./detect": {
       "import": "./lib/detect.mjs"
     },
@@ -20,6 +23,9 @@
     },
     "./duration": {
       "import": "./lib/duration.mjs"
+    },
+    "./dx": {
+      "import": "./lib/dx.mjs"
     },
     "./diff": {
       "import": "./lib/diff.mjs"

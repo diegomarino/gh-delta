@@ -2,6 +2,24 @@
 
 Common failure symptoms, causes, and fixes for `gh-delta` operators.
 
+## Error-kind hint catalog
+
+Every structured error includes `hint`; use it as the first recovery action.
+
+- `config`: fix the named flag or configuration key; run `gh-delta doctor` when
+  the local prerequisite is unclear.
+- `snapshot`: preserve the file for inspection, then restore valid JSON or pick
+  a fresh durable state directory.
+- `github`: verify `gh auth status`; for organization access run
+  `gh auth refresh -s read:org` when the hint identifies that scope.
+- `io`: create the state directory and fix its ownership/writability.
+- `busy`: another monitor owns the same state file; wait or use another
+  `--monitor-id` rather than deleting a live lock.
+- `log`: inspect the explicit durable log/cursor; automatic truncation is never
+  performed.
+- `rate-limit`: wait for `resetAt`, lower the configured floor, or inspect the
+  quota with `gh-delta doctor`.
+
 **My monitor re-baselined after a reboot.**
 The temp-dir default (`<system temp dir>/gh-delta-<user>/...`) is ephemeral by
 design — the OS may clear `/tmp` on reboot or on schedule. When the snapshot

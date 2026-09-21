@@ -221,6 +221,9 @@
               "message": {
                 "type": "string"
               },
+              "hint": {
+                "type": "string"
+              },
               "resetAt": {
                 "type": "string"
               }
@@ -421,6 +424,9 @@
                 "enum": ["config", "snapshot", "github", "io", "busy", "log", "rate-limit"]
               },
               "message": {
+                "type": "string"
+              },
+              "hint": {
                 "type": "string"
               },
               "resetAt": {
@@ -624,6 +630,9 @@
                 "enum": ["config", "snapshot", "github", "io", "busy", "log", "rate-limit"]
               },
               "message": {
+                "type": "string"
+              },
+              "hint": {
                 "type": "string"
               },
               "resetAt": {

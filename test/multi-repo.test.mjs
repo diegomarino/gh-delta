@@ -110,7 +110,12 @@ test('a failed repository does not prevent a later repository from publishing it
     ['b/two'],
   );
   assert.deepEqual(result.report.errors, [
-    { repo: 'a/one', kind: 'github', message: 'temporary GitHub failure' },
+    {
+      repo: 'a/one',
+      kind: 'github',
+      message: 'temporary GitHub failure',
+      hint: 'Check gh authentication and connectivity with gh-delta doctor, then retry.',
+    },
   ]);
   assert.equal(snapshots.size, 1);
 });

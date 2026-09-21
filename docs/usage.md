@@ -69,6 +69,24 @@ gh-delta --help-json
 
 ## First Baseline and Repeated Runs
 
+### Initialize a durable project monitor
+
+Inside a checkout, the shortest safe setup is:
+
+```bash
+gh-delta init --state-dir .gh-delta
+gh-delta
+```
+
+`init` first establishes the same baseline as a normal tick, then writes a
+non-overwriting `.gh-delta.json`. Later detector ticks can be `gh-delta` with no
+flags. For agent scheduler snippets without installing anything, add `--agent`;
+the emitted cron and systemd snippets include the resolved repo, monitor,
+entities, durable state directory, and working directory, so they can run from
+outside the checkout.
+Use `gh-delta doctor` for read-only prerequisite diagnosis, and keep JSON as the
+agent-safe default (set `GH_DELTA_FORMAT=text` only for an operator profile).
+
 The first successful run seeds a local snapshot and exits `0`:
 
 ```bash

@@ -46,6 +46,9 @@
         "kind": {
           "enum": ["config", "snapshot", "github", "io", "busy", "log", "rate-limit"]
         },
+        "hint": {
+          "type": "string"
+        },
         "warnings": {
           "type": "array",
           "items": {
@@ -107,6 +110,9 @@
         },
         "kind": {
           "enum": ["config", "snapshot", "github", "io", "busy", "log", "rate-limit"]
+        },
+        "hint": {
+          "type": "string"
         },
         "warnings": {
           "type": "array",

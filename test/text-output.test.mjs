@@ -1,7 +1,12 @@
 // Text formatter tests: operator-facing output stays readable without a second bin.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatTextOutput, formatListTextOutput } from '../lib/text-output.mjs';
+import {
+  formatListTextOutput,
+  formatReadTextOutput,
+  formatStatusTextOutput,
+  formatTextOutput,
+} from '../lib/text-output.mjs';
 import { DELTA_CLASSES } from '../lib/contract.mjs';
 
 const issueDelta = {
@@ -303,4 +308,32 @@ test('permanent error text output tells operator to fix before retrying', () => 
   assert.match(output, /error \| 0 delta\(s\)/);
   assert.match(output, /invalid snapshot JSON/);
   assert.match(output, /Fix the configuration or snapshot; retrying will not help/);
+});
+
+test('text error renderers retain structured recovery hints without altering successes', () => {
+  const report = { at: '2026-01-01T00:00:00Z', error: 'bad input', hint: 'use --repo owner/name' };
+  assert.match(
+    formatTextOutput({ code: 2, report, now: () => report.at }),
+    /hint: use --repo owner\/name/,
+  );
+  assert.match(formatListTextOutput({ report }), /hint: use --repo owner\/name/);
+  assert.match(
+    formatStatusTextOutput({ report, now: () => report.at }),
+    /hint: use --repo owner\/name/,
+  );
+  assert.match(
+    formatReadTextOutput({ code: 2, report, now: () => report.at }),
+    /hint: use --repo owner\/name/,
+  );
+  const aggregate = formatTextOutput({
+    code: 1,
+    now: () => report.at,
+    report: {
+      at: report.at,
+      repos: ['o/r'],
+      deltas: [],
+      errors: [{ repo: 'o/r', kind: 'io', message: 'nope', hint: 'fix disk' }],
+    },
+  });
+  assert.match(aggregate, /hint: fix disk/);
 });

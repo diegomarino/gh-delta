@@ -1713,7 +1713,7 @@ test('--help-json returns machine-readable help without fetching GitHub', () => 
   assert.ok(help.options.some((option) => option.name === '--lock-stale-ms'));
 });
 
-test('--version returns package version without fetching GitHub', () => {
+test('--version returns package version, npm channel, and release URL without fetching GitHub', () => {
   const d = {
     fetchPRs: () => {
       throw new Error('should not fetch');
@@ -1725,7 +1725,10 @@ test('--version returns package version without fetching GitHub', () => {
   };
   const { code, report } = run(['--version'], d);
   assert.equal(code, 0);
-  assert.equal(report, `gh-delta ${packageJson.version}\n`);
+  assert.equal(
+    report,
+    `gh-delta ${packageJson.version} (npm) https://github.com/diegomarino/gh-delta/releases\n`,
+  );
 });
 
 test('missing --repo returns code 2 before fetching', () => {
