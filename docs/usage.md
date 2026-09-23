@@ -74,7 +74,7 @@ gh-delta --help-json
 Inside a checkout, the shortest safe setup is:
 
 ```bash
-gh-delta init --state-dir .gh-delta
+gh-delta init
 gh-delta
 ```
 
