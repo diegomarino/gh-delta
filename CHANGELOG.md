@@ -4,6 +4,13 @@ All notable changes to this package will be documented here.
 
 This project follows semantic versioning.
 
+## [0.6.1](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.6.0...gh-delta-v0.6.1) (2026-09-23)
+
+
+### Documentation
+
+* **examples:** point --state-dir at XDG state, not the caller's cwd ([#55](https://github.com/diegomarino/gh-delta/issues/55)) ([a89f2ef](https://github.com/diegomarino/gh-delta/commit/a89f2efc5bd1609c9d78998f61dc8e5ba398f4a6))
+
 ## [0.6.0](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.5.0...gh-delta-v0.6.0) (2026-09-21)
 
 
