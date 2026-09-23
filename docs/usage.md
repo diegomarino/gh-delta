@@ -46,7 +46,7 @@ partial failures are reported without preventing later repositories from
 advancing their own snapshots. Do not combine this mode with `--state-file`.
 
 ```bash
-gh-delta --repo owner/api,owner/web --state-dir ./state --format text
+gh-delta --repo owner/api,owner/web --state-dir "${XDG_STATE_HOME:-$HOME/.local/state}/gh-delta" --format text
 ```
 
 Run from a source checkout:
@@ -90,7 +90,7 @@ agent-safe default (set `GH_DELTA_FORMAT=text` only for an operator profile).
 The first successful run seeds a local snapshot and exits `0`:
 
 ```bash
-gh-delta --repo owner/repo --monitor-id prs-5m --state-dir ./state --entities pr
+gh-delta --repo owner/repo --monitor-id prs-5m --state-dir "${XDG_STATE_HOME:-$HOME/.local/state}/gh-delta" --entities pr
 ```
 
 Later runs with the same repo, monitor id, state location, and entity set compare
@@ -104,7 +104,7 @@ For scheduled logs, prefer text output:
 gh-delta \
   --repo owner/repo \
   --monitor-id prs-5m \
-  --state-dir ./state \
+  --state-dir "${XDG_STATE_HOME:-$HOME/.local/state}/gh-delta" \
   --entities pr \
   --format text
 ```
@@ -115,7 +115,7 @@ For programs and agents, prefer JSON output:
 gh-delta \
   --repo owner/repo \
   --monitor-id prs-5m \
-  --state-dir ./state \
+  --state-dir "${XDG_STATE_HOME:-$HOME/.local/state}/gh-delta" \
   --entities pr \
   --format json \
   --detail
@@ -131,7 +131,7 @@ prefix and deduplicate by `delta.id`: a crash after append but before the snapsh
 can replay an id at a later sequence.
 
 ```bash
-gh-delta --repo owner/repo --monitor-id prs-5m --state-dir ./state --entities pr --log
+gh-delta --repo owner/repo --monitor-id prs-5m --state-dir "${XDG_STATE_HOME:-$HOME/.local/state}/gh-delta" --entities pr --log
 gh-delta cursor set ./state/triage.cursor.json 0 --log-file ./state/log-owner%2Frepo__monitor-prs-5m__pr.ndjson
 gh-delta read --cursor ./state/triage.cursor.json --advance --format text
 ```
@@ -147,7 +147,7 @@ Retention is explicit and local-only. Compact the log derived from the same
 producer identity; snapshots and consumer cursors are never changed:
 
 ```bash
-gh-delta log compact --repo owner/repo --monitor-id prs-5m --state-dir ./state --entities pr --keep 7d
+gh-delta log compact --repo owner/repo --monitor-id prs-5m --state-dir "${XDG_STATE_HOME:-$HOME/.local/state}/gh-delta" --entities pr --keep 7d
 ```
 
 Branch on the process exit code before reading stdout. Exit `10` is the
@@ -160,7 +160,7 @@ id for repeated ticks of the same monitor and a different id when you want
 independent state.
 
 ```bash
-gh-delta --repo org/app --monitor-id prs-5m --state-dir ./state --entities pr
+gh-delta --repo org/app --monitor-id prs-5m --state-dir "${XDG_STATE_HOME:-$HOME/.local/state}/gh-delta" --entities pr
 ```
 
 With `--state-dir`, `gh-delta` derives a snapshot path from the repo, monitor id,
@@ -194,7 +194,7 @@ narrow the inventory to one directory:
 
 ```bash
 gh-delta list --since 24h --format text
-gh-delta list --state-dir ./state --format text
+gh-delta list --state-dir "${XDG_STATE_HOME:-$HOME/.local/state}/gh-delta" --format text
 ```
 
 A corrupt snapshot shows up as an entry with an error, and a registered
@@ -232,7 +232,7 @@ notification per delta:
 gh-delta \
   --repo owner/repo \
   --monitor-id prs-5m \
-  --state-dir ./state \
+  --state-dir "${XDG_STATE_HOME:-$HOME/.local/state}/gh-delta" \
   --entities pr \
   --format text \
   --outpost-url https://example.com/gh-delta \

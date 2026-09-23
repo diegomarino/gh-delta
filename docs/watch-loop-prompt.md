@@ -24,7 +24,7 @@ Run the GitHub delta detector for `<owner/name>` and act on what it reports.
    gh-delta \
      --repo <owner/name> \
      --monitor-id <stable-monitor-id> \
-     --state-dir ./state \
+     --state-dir "${XDG_STATE_HOME:-$HOME/.local/state}/gh-delta" \
      --entities pr,issue \
      --format text
 
@@ -133,7 +133,7 @@ Rules:
    gh-delta \
      --repo <owner/name> \
      --monitor-id <stable-monitor-id> \
-     --state-dir ./state \
+     --state-dir "${XDG_STATE_HOME:-$HOME/.local/state}/gh-delta" \
      --entities pr,issue \
      --format json
    ```
