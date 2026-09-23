@@ -23,7 +23,7 @@ ntfy.sh/<topic> ──> phone: "owner/repo PR #42 — merged"
 ```bash
 export OUTPOST_SECRET=$(openssl rand -hex 32)
 NTFY_TOPIC=my-gh-deltas node receiver.mjs &
-gh-delta --repo owner/repo --monitor-id push --state-dir ./state \
+gh-delta --repo owner/repo --monitor-id push --state-dir "${XDG_STATE_HOME:-$HOME/.local/state}/gh-delta/snapshots" \
   --outpost-url http://127.0.0.1:8787/ --outpost-secret OUTPOST_SECRET
 ```
 
@@ -61,7 +61,7 @@ sha256=<lowercase-hex-hmac>` over the raw request body, validates its exact
    # the receiver only, leaving the sender's $OUTPOST_SECRET empty -> 401.)
    export OUTPOST_SECRET=$(openssl rand -hex 32)
    NTFY_TOPIC=my-gh-deltas HOST=0.0.0.0 node receiver.mjs &
-   gh-delta --repo owner/repo --monitor-id push --state-dir ./state \
+   gh-delta --repo owner/repo --monitor-id push --state-dir "${XDG_STATE_HOME:-$HOME/.local/state}/gh-delta/snapshots" \
      --outpost-url "http://receiver.example.com:8787/" \
      --outpost-secret OUTPOST_SECRET
    ```

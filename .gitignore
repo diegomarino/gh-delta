@@ -1,5 +1,3 @@
-state/*.json
-state/*.tmp
 node_modules/
 .npm-cache/
 .mypy_cache/
@@ -7,6 +5,8 @@ node_modules/
 .DS_Store
 coverage/
 *.tgz
+# `gh-delta init` snapshot state; .gh-delta.json (project config) stays tracked
+.gh-delta/
 tools/examples/build/
 
 # Session/process artifacts — not versioned

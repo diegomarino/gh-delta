@@ -23,7 +23,8 @@ repository, then poll only that PR once a minute:
 
 ```bash
 REPO=NousResearch/hermes-agent
-WATCH_DIR=.gh-delta-live-demo/watch
+DEMO_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/gh-delta-live-demo"
+WATCH_DIR="$DEMO_DIR/watch"
 # Pick the most recently updated open PR with pending CI.
 PR=$(gh search prs --repo "$REPO" --state open --checks pending \
   --sort updated --order desc --limit 1 \
@@ -42,7 +43,7 @@ while true; do
   npx gh-delta \
     --repo "$REPO" \
     --monitor-id live-demo-60s \
-    --state-dir .gh-delta-live-demo \
+    --state-dir "$DEMO_DIR" \
     --watch-dir "$WATCH_DIR" \
     --entities pr \
     --format text
@@ -86,7 +87,7 @@ authorize GitHub mutations.
 In a GitHub checkout, create durable local monitor state and take a first tick:
 
 ```bash
-gh-delta init --state-dir .gh-delta
+gh-delta init
 gh-delta --format compact
 ```
 
@@ -148,7 +149,7 @@ Wait for a PR’s CI without polling from an LLM turn:
 ```bash
 PR_NUMBER=42
 gh-delta wait --repo owner/repo --monitor-id worker-42 \
-  --state-dir .gh-delta --entities pr --timeout 30m \
+  --state-dir "${XDG_STATE_HOME:-$HOME/.local/state}/gh-delta/snapshots" --entities pr --timeout 30m \
   --number "$PR_NUMBER" \
   --until-summary ciRollup=green,failed
 ```

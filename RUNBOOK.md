@@ -44,7 +44,7 @@ Run the detector once before creating the recurring job:
 gh-delta \
   --repo <owner/name> \
   --monitor-id <stable-monitor-id> \
-  --state-dir ./state \
+  --state-dir "${XDG_STATE_HOME:-$HOME/.local/state}/gh-delta/snapshots" \
   --entities pr,issue \
   --format json
 ```
@@ -98,7 +98,7 @@ Tick command:
 gh-delta \
   --repo <owner/name> \
   --monitor-id <stable-monitor-id> \
-  --state-dir ./state \
+  --state-dir "${XDG_STATE_HOME:-$HOME/.local/state}/gh-delta/snapshots" \
   --entities pr,issue \
   --format text
 ```
@@ -109,7 +109,7 @@ Optional outpost command:
 gh-delta \
   --repo <owner/name> \
   --monitor-id <stable-monitor-id> \
-  --state-dir ./state \
+  --state-dir "${XDG_STATE_HOME:-$HOME/.local/state}/gh-delta/snapshots" \
   --entities pr,issue \
   --format text \
   --outpost-url https://example.com/gh-delta

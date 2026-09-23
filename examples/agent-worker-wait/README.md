@@ -6,7 +6,7 @@ command:
 ```bash
 PR_NUMBER=42 # required: the PR this worker owns
 gh-delta wait --repo diegomarino/gh-delta-demo --monitor-id worker-42 \
-  --state-dir .gh-delta --entities pr --timeout 30m \
+  --state-dir "${XDG_STATE_HOME:-$HOME/.local/state}/gh-delta/snapshots" --entities pr --timeout 30m \
   --number "$PR_NUMBER" \
   --until-summary ciRollup=green,failed
 ```

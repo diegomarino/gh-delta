@@ -4,14 +4,19 @@ One coordinator pays for GitHub once and appends deltas; independent workers
 read the same log through their own cursors.
 
 ```bash
+GH_DELTA_HOME="${XDG_STATE_HOME:-$HOME/.local/state}/gh-delta"
+STATE_DIR="$GH_DELTA_HOME/snapshots"
+CURSOR_DIR="$GH_DELTA_HOME/cursors"
+mkdir -p "$CURSOR_DIR"
+
 # cron coordinator; capture its published log path after a changed tick
 gh-delta --repo diegomarino/gh-delta-demo --monitor-id coordinator \
-  --state-dir .gh-delta --entities pr --log --format json > coordinator.json
+  --state-dir "$STATE_DIR" --entities pr --log --format json > coordinator.json
 LOG_FILE=$(jq -r '.logFile' coordinator.json)
 
 # bind each missing cursor to the producer log once, then advance independently
 for worker in reviewer notifier triage; do
-  cursor=".gh-delta/$worker.cursor.json"
+  cursor="$CURSOR_DIR/$worker.cursor.json"
   if [ ! -f "$cursor" ]; then
     gh-delta cursor set "$cursor" 0 --log-file "$LOG_FILE"
   fi

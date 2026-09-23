@@ -6,7 +6,7 @@ Run one detector tick after a turn and add its report to context only for exit
 ```bash
 set +e
 report=$(gh-delta --repo diegomarino/gh-delta-demo --monitor-id claude-hook \
-  --state-dir .gh-delta --entities pr --format compact)
+  --state-dir "${XDG_STATE_HOME:-$HOME/.local/state}/gh-delta/snapshots" --entities pr --format compact)
 code=$?
 set -e
 [ "$code" -eq 10 ] && printf '%s\n' "$report"   # hand this to the next turn
