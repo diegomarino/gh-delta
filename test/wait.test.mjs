@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runCommand } from '../lib/cli.mjs';
 import { WAIT_REPORT_FIELDS } from '../lib/contract.mjs';
+import { prSummary } from '../lib/summary.mjs';
 
 const prWithGreenCi = {
   number: 42,
@@ -17,10 +18,6 @@ const prWithGreenCi = {
   comments: 0,
   headSha: 'abc123',
 };
-
-// Schema v2: a delta's `to` is a snapshot item (`{ fingerprint, context, meta }`),
-// not a bare fingerprint.
-const item = (fingerprint) => ({ fingerprint, context: {}, meta: {} });
 
 const RATE_LIMIT = { cost: 1, remaining: 4999, resetAt: '2026-09-21T09:00:00.000Z' };
 
@@ -274,7 +271,16 @@ test('wait keeps polling through settle and streams progress before sleeping', a
   assert.equal(progress.length, 2);
 });
 
-test('wait from-log derives --until-summary from delta.to rather than a rendered summary', async () => {
+test("wait --from-log --until-summary matches on the durable log's precomputed delta.summary", async () => {
+  // Durable-log shape: `to` is already the bare compared fingerprint (the
+  // strip in runSingle has already run by the time a delta is logged), and
+  // `summary` is the value enrichDelta() computed BEFORE that strip. A
+  // --from-log consumer must read delta.summary directly rather than
+  // recompute it from delta.to -- see waitSummaryMatches() in lib/cli.mjs.
+  const to = {
+    state: 'open',
+    checks: [{ name: 'CI', kind: 'check', status: 'completed', conclusion: 'success' }],
+  };
   const result = await runCommand(
     [
       'wait',
@@ -298,11 +304,8 @@ test('wait from-log derives --until-summary from delta.to rather than a rendered
               entity: 'pr',
               number: 42,
               classes: ['updated'],
-              summary: { ciRollup: 'failed' },
-              to: item({
-                state: 'open',
-                checks: [{ name: 'CI', kind: 'check', status: 'completed', conclusion: 'success' }],
-              }),
+              to,
+              summary: prSummary(to),
             },
           },
         ],
@@ -460,22 +463,26 @@ test('wait keeps log records for --until-summary when --until names a different 
     {
       ...noopLock,
       readCursor: () => ({ logFile: '/tmp/or.ndjson', seq: 0 }),
-      readDeltaLog: () => ({
-        entries: [
-          {
-            seq: 1,
-            delta: {
-              id: 'd',
-              entity: 'pr',
-              number: 42,
-              classes: ['updated'],
-              to: item({ state: 'open', isDraft: true, checks: [] }),
+      readDeltaLog: () => {
+        const to = { state: 'open', isDraft: true, checks: [] };
+        return {
+          entries: [
+            {
+              seq: 1,
+              delta: {
+                id: 'd',
+                entity: 'pr',
+                number: 42,
+                classes: ['updated'],
+                to,
+                summary: prSummary(to),
+              },
             },
-          },
-        ],
-        lastSeq: 1,
-        firstSeq: 1,
-      }),
+          ],
+          lastSeq: 1,
+          firstSeq: 1,
+        };
+      },
       setCursorAtomic: () => {},
       touchHeartbeat: () => {},
       now: () => '2026-09-21T08:00:00.000Z',
