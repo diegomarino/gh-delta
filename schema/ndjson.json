@@ -166,7 +166,7 @@
           "minimum": 1
         },
         "firstObserved": {
-          "type": "string"
+          "const": true
         },
         "seq": {
           "type": "integer",
