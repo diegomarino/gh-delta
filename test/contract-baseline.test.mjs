@@ -56,6 +56,7 @@ process.env.GH_DELTA_NO_REGISTRY = '1';
 
 import { runCommand } from '../lib/cli.mjs';
 import { REPORT_FIELDS } from '../lib/contract.mjs';
+import { getPackageMetadata } from '../lib/version.mjs';
 
 const UPDATE = process.env.GH_DELTA_UPDATE_BASELINE === '1';
 
@@ -99,6 +100,16 @@ function argv(stateFile) {
 const STATE_FILE_PLACEHOLDER = '<STATE_FILE>';
 function normalizeStateFile(text, stateFile) {
   return text.split(stateFile).join(STATE_FILE_PLACEHOLDER);
+}
+
+// The snapshot's `meta.ghDeltaVersion` echoes the live package version
+// (lib/cli.mjs), which release-please bumps on every release. Swap it for a
+// stable placeholder before comparing, the same way the state file path is
+// normalized above, so this golden fixture does not break on every version
+// bump -- only on an actual change to the snapshot's shape or content.
+const GH_DELTA_VERSION_PLACEHOLDER = '<GH_DELTA_VERSION>';
+function normalizeGhDeltaVersion(text) {
+  return text.split(getPackageMetadata().version).join(GH_DELTA_VERSION_PLACEHOLDER);
 }
 
 function assertBytesEqualOrUpdate(actualText, expectedFixtureName, message) {
@@ -145,7 +156,7 @@ test('contract-baseline: run1 seeds a baseline with no deltas', async () => {
       'run1-expected-report.json',
       contractBreakMessage('run1 report'),
     );
-    const snapshotBytes = readFileSync(stateFile, 'utf8');
+    const snapshotBytes = normalizeGhDeltaVersion(readFileSync(stateFile, 'utf8'));
     assertBytesEqualOrUpdate(
       snapshotBytes,
       'run1-expected-snapshot.json',
@@ -179,7 +190,7 @@ test('contract-baseline: run2 reports real deltas against the prior snapshot', a
       'run2-expected-report.json',
       contractBreakMessage('run2 report'),
     );
-    const snapshotBytes = readFileSync(stateFile, 'utf8');
+    const snapshotBytes = normalizeGhDeltaVersion(readFileSync(stateFile, 'utf8'));
     assertBytesEqualOrUpdate(
       snapshotBytes,
       'run2-expected-snapshot.json',
@@ -208,7 +219,7 @@ test('contract-baseline: run3 is a no-change tick with zero deltas', async () =>
       'run3-expected-report.json',
       contractBreakMessage('run3 report'),
     );
-    const snapshotBytes = readFileSync(stateFile, 'utf8');
+    const snapshotBytes = normalizeGhDeltaVersion(readFileSync(stateFile, 'utf8'));
     assertBytesEqualOrUpdate(
       snapshotBytes,
       'run3-expected-snapshot.json',
