@@ -1075,7 +1075,42 @@ test('--summaries acceptance: posting a successful status makes summary.ciRollup
     isDraft: false,
     unresolvedReviewThreads: 0,
     headSha: 'sha1',
+    failedChecks: [],
   });
+});
+
+test('--summaries acceptance: a new PR with a failing check carries failedChecks[0].runId without --detail', () => {
+  // F4: summary.failedChecks must be populated for a PR that is already red on
+  // first observation (a `new` delta, not a `ci-changed` transition), and
+  // without --detail -- a merge gate should not need structured details to
+  // read the failing check's run id.
+  const pr = {
+    ...basePr,
+    checks: [
+      { name: 'build', kind: 'check', status: 'completed', conclusion: 'success' },
+      {
+        name: 'lint',
+        kind: 'check',
+        status: 'completed',
+        conclusion: 'failure',
+        detailsUrl: 'https://github.com/o/r/actions/runs/111222333/job/444555666',
+      },
+    ],
+  };
+  const d = deps([[pr]], { existing: { pr: {}, issue: {} } });
+  const { code, report } = run(SUMMARIES_ARGS, d);
+  assert.equal(code, 10);
+  const delta = report.deltas.find((x) => x.number === 42);
+  assert.ok(delta.classes.includes('new'), 'first observation of a tracked PR is a new delta');
+  assert.deepEqual(delta.summary.failedChecks, [
+    {
+      name: 'lint',
+      runId: '111222333',
+      jobId: '444555666',
+      detailsUrl: 'https://github.com/o/r/actions/runs/111222333/job/444555666',
+    },
+  ]);
+  assert.equal(delta.details, undefined, 'the acceptance case explicitly omits --detail');
 });
 
 test('--summaries surfaces mergeStateStatus behind for an up-to-date-required branch', () => {
@@ -1649,6 +1684,7 @@ test('--help-json documents the summary schema well enough to build a validator'
     'isDraft',
     'unresolvedReviewThreads',
     'headSha',
+    'failedChecks',
   ]);
   assert.deepEqual(help.output.deltaSummaryEnums.ciRollup, ['green', 'failed', 'pending', 'none']);
   assert.deepEqual(help.output.deltaSummaryEnums.mergeable, [
