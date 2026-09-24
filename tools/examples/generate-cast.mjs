@@ -166,7 +166,8 @@ function loopReport(detectedAt, delta = null, baseline = false) {
   };
 }
 
-// `--format json --detail`: summaryLine + legacy line + structured details.
+// `--format json --detail`: summaryLine + structured details, on top of the
+// always-on changed/summary fields.
 function colorJson(value, args = ['-C', '.']) {
   const plain = typeof value === 'string' ? value : `${JSON.stringify(value, null, 2)}\n`;
   // Colorize exactly the way an operator would read it in a shell.
@@ -175,7 +176,21 @@ function colorJson(value, args = ['-C', '.']) {
 
 function renderJson(report) {
   const r = clone(report);
-  for (const d of r.deltas) enrichDelta(d, { summaryLine: true, details: true });
+  for (const d of r.deltas) {
+    // fixtures.mjs's withId already stripped from/to to the public bare
+    // fingerprint (see lib/cli.mjs's matching strip step), but enrichDelta
+    // expects the pre-strip item shape ({fingerprint, context, meta}) --
+    // that's what a live run passes it (enrich, THEN strip). Rewrap here so
+    // enrichDelta recomputes changed/summary/details from real fingerprints
+    // instead of from two `undefined`s, then discard the rewrap.
+    const asItem = (fp) => fp && { fingerprint: fp, context: d.context, meta: {} };
+    const rewrapped = { ...d, from: asItem(d.from), to: asItem(d.to) };
+    enrichDelta(rewrapped, { summaryLine: true, details: true });
+    d.summaryLine = rewrapped.summaryLine;
+    d.details = rewrapped.details;
+    d.changed = rewrapped.changed;
+    d.summary = rewrapped.summary;
+  }
   return colorJson(r);
 }
 
@@ -299,10 +314,11 @@ const showActivity = (lines) => {
     .wait(2.8);
 };
 
-const pending = { state: 'OPEN', head: 'a1b2c3d', ci: 'pending' };
-const failed = { state: 'OPEN', head: 'a1b2c3d', ci: 'failed' };
-const fixPending = { state: 'OPEN', head: '9f31c2a', ci: 'pending' };
-const green = { state: 'OPEN', head: '9f31c2a', ci: 'green' };
+const check = (status, conclusion) => [{ name: 'test-unit', kind: 'check', status, conclusion }];
+const pending = { state: 'open', headSha: 'a1b2c3d', checks: check('in_progress', null) };
+const failed = { state: 'open', headSha: 'a1b2c3d', checks: check('completed', 'failure') };
+const fixPending = { state: 'open', headSha: '9f31c2a', checks: check('in_progress', null) };
+const green = { state: 'open', headSha: '9f31c2a', checks: check('completed', 'success') };
 
 commonLoop
   .prompt()

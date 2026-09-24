@@ -18,7 +18,8 @@ const base = {
   reviewDecision: 'review_required',
   reviews: [],
   mergeable: 'mergeable',
-  comments: 0,
+  conversationComments: 0,
+  reviewComments: 0,
   headSha: 'demo-sha',
 };
 const changed = {
@@ -28,22 +29,11 @@ const changed = {
 };
 const demoRateLimit = { cost: 1, remaining: 4999, resetAt: '2026-09-21T09:00:00.000Z' };
 const detector = (observation) =>
-  run(
-    [
-      '--repo',
-      'diegomarino/gh-delta-demo',
-      '--state-dir',
-      stateDir,
-      '--entities',
-      'pr',
-      '--summaries',
-    ],
-    {
-      fetchPRs: () => ({ rows: observation, rateLimit: demoRateLimit }),
-      fetchIssues: () => ({ rows: [], rateLimit: demoRateLimit }),
-      now: () => '2026-09-21T08:00:00.000Z',
-    },
-  );
+  run(['--repo', 'diegomarino/gh-delta-demo', '--state-dir', stateDir, '--entities', 'pr'], {
+    fetchPRs: () => ({ rows: observation, rateLimit: demoRateLimit }),
+    fetchIssues: () => ({ rows: [], rateLimit: demoRateLimit }),
+    now: () => '2026-09-21T08:00:00.000Z',
+  });
 
 try {
   if (mode === 'agent-worker-wait') {
@@ -75,16 +65,7 @@ try {
   } else if (mode === 'coordinator-fanout') {
     detector([base]);
     const tick = run(
-      [
-        '--repo',
-        'diegomarino/gh-delta-demo',
-        '--state-dir',
-        stateDir,
-        '--entities',
-        'pr',
-        '--summaries',
-        '--log',
-      ],
+      ['--repo', 'diegomarino/gh-delta-demo', '--state-dir', stateDir, '--entities', 'pr', '--log'],
       {
         fetchPRs: () => ({ rows: [changed], rateLimit: demoRateLimit }),
         fetchIssues: () => ({ rows: [], rateLimit: demoRateLimit }),

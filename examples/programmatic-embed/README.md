@@ -29,14 +29,14 @@ node watch-incident-issues.mjs owner/repo sev1       # any label
 Rows handed to `detectDeltas` must match the shape the CLI's fetcher
 produces — the fingerprint reads these exact fields:
 
-| REST field (`gh api .../issues`) | Detector row field | Transform                                                                             |
-| -------------------------------- | ------------------ | ------------------------------------------------------------------------------------- |
-| `number`, `title`                | `number`, `title`  | passthrough                                                                           |
-| `state` (`'open'`/`'closed'`)    | `state`            | uppercase → `'OPEN'`/`'CLOSED'`                                                       |
-| `updated_at`                     | `updatedAt`        | **rename** (snake → camel; forget it and every timestamp-only change goes undetected) |
-| `labels` (objects)               | `labels`           | keep only `{ name }`                                                                  |
-| `comments` (count)               | `comments`         | passthrough (REST gives the exact total)                                              |
-| `pull_request` key present       | —                  | **drop the row** (the issues endpoint includes PRs)                                   |
+| REST field (`gh api .../issues`) | Detector row field     | Transform                                                                             |
+| -------------------------------- | ---------------------- | ------------------------------------------------------------------------------------- |
+| `number`, `title`                | `number`, `title`      | passthrough                                                                           |
+| `state` (`'open'`/`'closed'`)    | `state`                | passthrough (REST already uses v2's lowercase enum)                                   |
+| `updated_at`                     | `updatedAt`            | **rename** (snake → camel; forget it and every timestamp-only change goes undetected) |
+| `labels` (objects)               | `labels`               | keep only `{ name }`                                                                  |
+| `comments` (count)               | `conversationComments` | **rename** (v2 dropped the aggregate `comments` field; passthrough the count)         |
+| `pull_request` key present       | —                      | **drop the row** (the issues endpoint includes PRs)                                   |
 
 ## Design notes
 

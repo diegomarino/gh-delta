@@ -6,7 +6,7 @@ repo documentation — none ship in the npm package.
 | Example                                                     | Axis it demonstrates                         | Consumes                                         |
 | ----------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------ |
 | [github-actions-slack-digest](github-actions-slack-digest/) | Infra-owned scheduling in CI, chat digest    | `--format json --detail` + `actions/cache` state |
-| [outpost-ntfy-receiver](outpost-ntfy-receiver/)             | Push delivery to a phone                     | `--outpost-url` payload schema v1                |
+| [outpost-ntfy-receiver](outpost-ntfy-receiver/)             | Push delivery to a phone                     | `--outpost-url` payload schema v2                |
 | [systemd-timer](systemd-timer/)                             | Init-system ops; exit taxonomy → unit states | `--format text` + `SuccessExitStatus`            |
 | [programmatic-embed](programmatic-embed/)                   | Library reuse; scopes the CLI can't express  | `gh-delta/detect`, `/snapshot`, `/contract`      |
 | [agent-worker-wait](agent-worker-wait/)                     | One bounded worker decision                  | `wait --until-summary`                           |
