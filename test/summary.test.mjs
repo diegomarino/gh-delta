@@ -24,7 +24,7 @@ function fixtureRow(name) {
     new URL(`./fixtures/summaries/pr-ci-${name}.json`, import.meta.url),
     'utf8',
   );
-  const rows = fetchPRs('o/r', { exec: () => bytes, horizonCutoff: null });
+  const { rows } = fetchPRs('o/r', { exec: () => bytes, horizonCutoff: null });
   assert.equal(rows.length, 1, `fixture ${name} must contain exactly one PR`);
   return rows[0];
 }

@@ -77,22 +77,28 @@ test('configuration supplies detector outpost settings to the delivery boundary'
     assertLockOwned: () => true,
     readSnapshot: () => ({ pr: {}, issue: {} }),
     writeSnapshotAtomic: () => {},
-    fetchPRs: () => [
-      {
-        number: 1,
-        title: 'x',
-        state: 'OPEN',
-        updatedAt: '2026-01-01T00:00:00Z',
-        isDraft: false,
-        statusCheckRollup: [],
-        reviewDecision: 'REVIEW_REQUIRED',
-        latestReviews: [],
-        mergeable: 'UNKNOWN',
-        comments: [],
-        headRefOid: 'a',
-      },
-    ],
-    fetchIssues: () => [],
+    fetchPRs: () => ({
+      rows: [
+        {
+          number: 1,
+          title: 'x',
+          state: 'OPEN',
+          updatedAt: '2026-01-01T00:00:00Z',
+          isDraft: false,
+          statusCheckRollup: [],
+          reviewDecision: 'REVIEW_REQUIRED',
+          latestReviews: [],
+          mergeable: 'UNKNOWN',
+          comments: [],
+          headRefOid: 'a',
+        },
+      ],
+      rateLimit: { cost: 1, remaining: 4999, resetAt: '2026-01-01T01:00:00.000Z' },
+    }),
+    fetchIssues: () => ({
+      rows: [],
+      rateLimit: { cost: 1, remaining: 4999, resetAt: '2026-01-01T01:00:00.000Z' },
+    }),
     now: () => '2026-01-01T00:00:00Z',
     outpostFetch: async () => {
       delivered++;
