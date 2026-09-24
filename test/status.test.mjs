@@ -226,6 +226,18 @@ test('status --refresh keeps tracking meta bookkeeping for an unchanged item, wi
   ).snapshot;
   snapshot.pr[42].meta.ticksSinceChange = 5;
   snapshot.pr[42].meta.staleEmittedFor = '2026-09-19';
+  // Schema v2 snapshot-wide meta is mandatory -- see lib/snapshot.mjs.
+  snapshot.meta = {
+    schemaVersion: 2,
+    ghDeltaVersion: '0.0.0-test',
+    repo: 'o/r',
+    monitorId: 'main',
+    entities: ['pr'],
+    scope: 'poll',
+    horizon: '2026-09-18T00:00:00.000Z',
+    createdAt: '2026-09-18T00:00:00.000Z',
+    updatedAt: '2026-09-18T00:00:00.000Z',
+  };
   let written;
   const result = run(
     ['status', '--refresh', '--repo', 'o/r', '--state-file', '/tmp/status-refresh.json'],

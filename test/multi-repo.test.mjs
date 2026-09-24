@@ -15,6 +15,19 @@ const locks = {
   assertLockOwned: () => true,
 };
 
+// Schema v2 snapshot-wide meta is mandatory -- see lib/snapshot.mjs.
+const DEFAULT_OLD_META = {
+  schemaVersion: 2,
+  ghDeltaVersion: '0.0.0-test',
+  repo: 'a/one',
+  monitorId: 'i9',
+  entities: ['pr'],
+  scope: 'poll',
+  horizon: '2026-09-20T11:00:00.000Z',
+  createdAt: '2026-09-20T11:00:00.000Z',
+  updatedAt: '2026-09-20T11:00:00.000Z',
+};
+
 function pr(number, title) {
   return {
     number,
@@ -47,7 +60,7 @@ test('multi-repo aggregates successful ticks in requested order and qualifies ea
     {
       ...locks,
       now: () => '2026-09-20T12:00:00.000Z',
-      readSnapshot: (path) => snapshots.get(path) ?? { pr: {}, issue: {} },
+      readSnapshot: (path) => snapshots.get(path) ?? { pr: {}, issue: {}, meta: DEFAULT_OLD_META },
       writeSnapshotAtomic: (path, value) => snapshots.set(path, value),
       fetchPRs: (repo) => ({
         rows: repo === 'a/one' ? [pr(1, 'one')] : [pr(2, 'two')],
@@ -99,7 +112,7 @@ test('a failed repository does not prevent a later repository from publishing it
     {
       ...locks,
       now: () => '2026-09-20T12:00:00.000Z',
-      readSnapshot: (path) => snapshots.get(path) ?? { pr: {}, issue: {} },
+      readSnapshot: (path) => snapshots.get(path) ?? { pr: {}, issue: {}, meta: DEFAULT_OLD_META },
       writeSnapshotAtomic: (path, value) => snapshots.set(path, value),
       fetchPRs: (repo) => {
         if (repo === 'a/one') throw new Error('temporary GitHub failure');

@@ -151,6 +151,18 @@ test('CLI --detail exposes staleAt through the stale detail contract', () => {
     { pr: [pr], issue: [] },
     { at: '2026-09-18T00:00:00.000Z', staleAfterMs: DAY },
   ).snapshot;
+  // Schema v2 snapshot-wide meta is mandatory -- see lib/snapshot.mjs.
+  seeded.meta = {
+    schemaVersion: 2,
+    ghDeltaVersion: '0.0.0-test',
+    repo: 'o/r',
+    monitorId: 'main',
+    entities: ['pr', 'issue'],
+    scope: 'poll',
+    horizon: '2026-09-18T00:00:00.000Z',
+    createdAt: '2026-09-18T00:00:00.000Z',
+    updatedAt: '2026-09-18T00:00:00.000Z',
+  };
   const result = run(
     ['--repo', 'o/r', '--state-file', '/tmp/stale.json', '--stale-after', '1h', '--detail'],
     {
