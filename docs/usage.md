@@ -245,10 +245,15 @@ queues, and actions. Keep scheduler logs or add an external queue if you need
 at-least-once action delivery.
 
 `--outpost-secret` takes the name of an environment variable, not the secret
-itself. When set, gh-delta signs each exact JSON request body with HMAC-SHA256
-in `X-GhDelta-Signature`; use the same `OUTPOST_SECRET` value at the receiver.
+itself. When set, gh-delta signs each request per the
+[Standard Webhooks](https://www.standardwebhooks.com/) spec: `webhook-id`
+(the delivery id), `webhook-timestamp` (epoch seconds), and
+`webhook-signature` (`v1,<base64 HMAC-SHA256 of "{id}.{timestamp}.{body}">`).
+Use the same `OUTPOST_SECRET` value at the receiver. Dedupe by `deliveryId`
+for processing idempotency, and by `delta.id` (the content-addressed identity
+of the observed change) to collapse duplicates reported by several monitors.
 
-The exact payload, `eventId`, `deliveryId`, and warning semantics are specified
+The exact payload and warning semantics are specified
 in [Outpost Payload](contract.md#outpost-payload-schema-v1).
 
 Worked receiver:
