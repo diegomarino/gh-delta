@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { compactReport, ndjsonReport } from '../lib/compact-output.mjs';
+import {
+  AGENT_COMPACT_REPORT_FIELDS,
+  AGENT_COMPACT_DELTA_FIELDS,
+  AGENT_NDJSON_END_FIELDS,
+} from '../lib/contract.mjs';
 
 // Schema v2: `from`/`to` are snapshot items (`{ fingerprint, context, meta }`).
 const item = (fingerprint) => ({ fingerprint, context: {}, meta: {} });
@@ -154,6 +159,77 @@ test('a per-repo error folds into the compact errors array, keyed by repo', () =
   assert.deepEqual(report.errors, [
     { repo: 'o/r', kind: 'github', message: 'boom', hint: 'retry' },
   ]);
+});
+
+// Nothing else in lib/ or test/ consumes AGENT_COMPACT_REPORT_FIELDS,
+// AGENT_COMPACT_DELTA_FIELDS, or AGENT_NDJSON_END_FIELDS (they are published
+// on the `gh-delta/contract` subpath for external consumers only), so they
+// can silently drift from what compactReport/ndjsonReport actually emit.
+// Pin them against the union of two representative renders -- one exercising
+// the happy single-repo path with every optional delta field, one exercising
+// the per-repo error path -- so an added, removed, or renamed field in
+// either direction breaks this test rather than quietly reaching consumers.
+test('AGENT_COMPACT_*/AGENT_NDJSON_END_FIELDS catalogs match every key compact/ndjson can actually emit', () => {
+  const fullDelta = { ...delta, missingTicks: 2, enrichment: { threadReplies: [] } };
+  const happyReport = compactReport(baseReport({ deltas: [fullDelta] }), 10, [], {
+    detail: true,
+    full: true,
+  });
+  const errorReport = compactReport(
+    baseReport({
+      deltas: [],
+      results: [
+        {
+          repo: 'o/r',
+          baseline: false,
+          repoSource: 'flag',
+          stateFile: '/a',
+          rateLimit: null,
+          error: { kind: 'github', message: 'boom', hint: 'retry' },
+        },
+      ],
+    }),
+    1,
+    [],
+  );
+  const emittedReportKeys = new Set([...Object.keys(happyReport), ...Object.keys(errorReport)]);
+  assert.deepEqual([...emittedReportKeys].sort(), [...AGENT_COMPACT_REPORT_FIELDS].sort());
+  assert.deepEqual(
+    Object.keys(happyReport.deltas[0]).sort(),
+    [...AGENT_COMPACT_DELTA_FIELDS].sort(),
+  );
+
+  const happyEnd = ndjsonReport(baseReport({ deltas: [fullDelta] }), 10, [], {
+    detail: true,
+    full: true,
+  })
+    .trimEnd()
+    .split('\n')
+    .map(JSON.parse)
+    .at(-1);
+  const errorEnd = ndjsonReport(
+    baseReport({
+      deltas: [],
+      results: [
+        {
+          repo: 'o/r',
+          baseline: false,
+          repoSource: 'flag',
+          stateFile: '/a',
+          rateLimit: null,
+          error: { kind: 'github', message: 'boom', hint: 'retry' },
+        },
+      ],
+    }),
+    1,
+    [],
+  )
+    .trimEnd()
+    .split('\n')
+    .map(JSON.parse)
+    .at(-1);
+  const emittedEndKeys = new Set([...Object.keys(happyEnd), ...Object.keys(errorEnd)]);
+  assert.deepEqual([...emittedEndKeys].sort(), [...AGENT_NDJSON_END_FIELDS].sort());
 });
 
 test('a bare pre-flight error renders without a repos key', () => {
