@@ -65,12 +65,14 @@ const lock = {
   extendLockDeadline: () => ({ ok: true }),
 };
 
+const RATE_LIMIT = { cost: 1, remaining: 4999, resetAt: '2026-09-20T13:00:00.000Z' };
+
 function producerDeps(overrides = {}) {
   const events = [];
   return {
     ...lock,
-    fetchPRs: () => [pr],
-    fetchIssues: () => [],
+    fetchPRs: () => ({ rows: [pr], rateLimit: RATE_LIMIT }),
+    fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
     readSnapshot: () => before,
     writeSnapshotAtomic: () => events.push('snapshot'),
     appendDeltaLog: (file, payload) => events.push(['log', file, payload]),
@@ -412,7 +414,7 @@ test('no --log leaves the log seam unopened and report omits logFile', () => {
 
 test('a zero-delta --log tick reports logFile but never opens the append seam', () => {
   const deps = producerDeps({
-    fetchPRs: () => [],
+    fetchPRs: () => ({ rows: [], rateLimit: RATE_LIMIT }),
     readSnapshot: () => ({ pr: {}, issue: {} }),
     appendDeltaLog: () => assert.fail('empty ticks must not open the delta log'),
   });

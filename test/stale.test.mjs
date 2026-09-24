@@ -159,8 +159,14 @@ test('CLI --detail exposes staleAt through the stale detail contract', () => {
       releaseLock: () => {},
       readSnapshot: () => seeded,
       writeSnapshotAtomic: () => {},
-      fetchPRs: () => [pr],
-      fetchIssues: () => [],
+      fetchPRs: () => ({
+        rows: [pr],
+        rateLimit: { cost: 1, remaining: 4999, resetAt: '2026-09-20T01:00:00.000Z' },
+      }),
+      fetchIssues: () => ({
+        rows: [],
+        rateLimit: { cost: 1, remaining: 4999, resetAt: '2026-09-20T01:00:00.000Z' },
+      }),
       now: () => '2026-09-20T00:00:00.000Z',
     },
   );

@@ -7,6 +7,8 @@ import { join } from 'node:path';
 import { addWatch, readWatch } from '../lib/watch.mjs';
 import { buildOutpostPayload, sendOutposts } from '../lib/outpost.mjs';
 
+const RATE_LIMIT = { cost: 1, remaining: 4999, resetAt: '2026-09-20T13:00:00.000Z' };
+
 const locks = {
   acquireLock: () => ({ ok: true, token: 'test-lock' }),
   releaseLock: () => ({ ok: true }),
@@ -47,8 +49,11 @@ test('multi-repo aggregates successful ticks in requested order and qualifies ea
       now: () => '2026-09-20T12:00:00.000Z',
       readSnapshot: (path) => snapshots.get(path) ?? { pr: {}, issue: {} },
       writeSnapshotAtomic: (path, value) => snapshots.set(path, value),
-      fetchPRs: (repo) => (repo === 'a/one' ? [pr(1, 'one')] : [pr(2, 'two')]),
-      fetchIssues: () => [],
+      fetchPRs: (repo) => ({
+        rows: repo === 'a/one' ? [pr(1, 'one')] : [pr(2, 'two')],
+        rateLimit: RATE_LIMIT,
+      }),
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
       env: { GH_DELTA_NO_REGISTRY: '1' },
     },
   );
@@ -69,7 +74,7 @@ test('multi-repo rejects one state file before attempting a repository tick', ()
   const result = run(['--repo', 'a/one,b/two', '--state-file', '/tmp/one.json'], {
     fetchPRs: () => {
       fetched++;
-      return [];
+      return { rows: [], rateLimit: RATE_LIMIT };
     },
     now: () => '2026-09-20T12:00:00.000Z',
   });
@@ -98,9 +103,9 @@ test('a failed repository does not prevent a later repository from publishing it
       writeSnapshotAtomic: (path, value) => snapshots.set(path, value),
       fetchPRs: (repo) => {
         if (repo === 'a/one') throw new Error('temporary GitHub failure');
-        return [pr(2, 'two')];
+        return { rows: [pr(2, 'two')], rateLimit: RATE_LIMIT };
       },
-      fetchIssues: () => [],
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
       env: { GH_DELTA_NO_REGISTRY: '1' },
     },
   );
@@ -157,9 +162,9 @@ test('a single-repo run rejects legacy and scoped watch aliases before fetch or 
         now: () => '2026-09-20T12:00:00.000Z',
         fetchPRs: () => {
           fetched++;
-          return [];
+          return { rows: [], rateLimit: RATE_LIMIT };
         },
-        fetchIssues: () => [],
+        fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
         writeSnapshotAtomic: () => written++,
         env: { GH_DELTA_NO_REGISTRY: '1' },
       },

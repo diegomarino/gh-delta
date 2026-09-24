@@ -67,23 +67,29 @@ test('status --refresh performs one detector tick before reading the local statu
     },
     fetchPRs: () => {
       fetches++;
-      return [
-        {
-          number: 42,
-          title: 'x',
-          state: 'open',
-          updatedAt: '2026-09-21T00:00:00.000Z',
-          isDraft: false,
-          checks: [],
-          reviewDecision: 'none',
-          reviews: [],
-          mergeable: 'unknown',
-          comments: 0,
-          headSha: 'a',
-        },
-      ];
+      return {
+        rows: [
+          {
+            number: 42,
+            title: 'x',
+            state: 'open',
+            updatedAt: '2026-09-21T00:00:00.000Z',
+            isDraft: false,
+            checks: [],
+            reviewDecision: 'none',
+            reviews: [],
+            mergeable: 'unknown',
+            comments: 0,
+            headSha: 'a',
+          },
+        ],
+        rateLimit: { cost: 1, remaining: 4999, resetAt: '2026-09-21T01:00:00.000Z' },
+      };
     },
-    fetchIssues: () => [],
+    fetchIssues: () => ({
+      rows: [],
+      rateLimit: { cost: 1, remaining: 4999, resetAt: '2026-09-21T01:00:00.000Z' },
+    }),
     now: () => '2026-09-21T00:00:00.000Z',
   };
   const result = run(
@@ -231,8 +237,14 @@ test('status --refresh keeps tracking meta bookkeeping for an unchanged item, wi
       writeSnapshotAtomic: (_path, next) => {
         written = next;
       },
-      fetchPRs: () => [current],
-      fetchIssues: () => [],
+      fetchPRs: () => ({
+        rows: [current],
+        rateLimit: { cost: 1, remaining: 4999, resetAt: '2026-09-20T01:00:00.000Z' },
+      }),
+      fetchIssues: () => ({
+        rows: [],
+        rateLimit: { cost: 1, remaining: 4999, resetAt: '2026-09-20T01:00:00.000Z' },
+      }),
       now: () => '2026-09-20T00:00:00.000Z',
     },
   );
@@ -259,8 +271,14 @@ test('status --refresh reuses the repository resolved by the detector', () => {
       warnings: [],
     }),
     resolveLocalRepo: () => assert.fail('status must reuse the detector-resolved repository'),
-    fetchPRs: () => [],
-    fetchIssues: () => [],
+    fetchPRs: () => ({
+      rows: [],
+      rateLimit: { cost: 1, remaining: 4999, resetAt: '2026-09-20T01:00:00.000Z' },
+    }),
+    fetchIssues: () => ({
+      rows: [],
+      rateLimit: { cost: 1, remaining: 4999, resetAt: '2026-09-20T01:00:00.000Z' },
+    }),
     now: () => '2026-09-20T00:00:00.000Z',
   });
   assert.equal(result.code, 0);

@@ -109,6 +109,7 @@
     "format:check": "prettier . --check",
     "check": "npm run lint && npm run format:check && npm test",
     "e2e:playground": "GH_DELTA_E2E_RUN=1 node ./test/e2e/playground-e2e.mjs",
+    "e2e:rate-limit-benchmark": "GH_DELTA_E2E_RUN=1 node ./test/e2e/rate-limit-benchmark.mjs",
     "examples:cast": "node tools/examples/generate-cast.mjs",
     "examples:svg": "bash tools/examples/render.sh",
     "build:skill": "node tools/skill/generate-flags.mjs",

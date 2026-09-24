@@ -26,6 +26,7 @@ const changed = {
   updatedAt: '2026-09-21T08:01:00.000Z',
   checks: [{ name: 'CI', kind: 'check', status: 'completed', conclusion: 'failure' }],
 };
+const demoRateLimit = { cost: 1, remaining: 4999, resetAt: '2026-09-21T09:00:00.000Z' };
 const detector = (observation) =>
   run(
     [
@@ -37,7 +38,11 @@ const detector = (observation) =>
       'pr',
       '--summaries',
     ],
-    { fetchPRs: () => observation, fetchIssues: () => [], now: () => '2026-09-21T08:00:00.000Z' },
+    {
+      fetchPRs: () => ({ rows: observation, rateLimit: demoRateLimit }),
+      fetchIssues: () => ({ rows: [], rateLimit: demoRateLimit }),
+      now: () => '2026-09-21T08:00:00.000Z',
+    },
   );
 
 try {
@@ -56,7 +61,11 @@ try {
         '--until-summary',
         'ciRollup=green',
       ],
-      { fetchPRs: () => [base], fetchIssues: () => [], now: () => '2026-09-21T08:00:00.000Z' },
+      {
+        fetchPRs: () => ({ rows: [base], rateLimit: demoRateLimit }),
+        fetchIssues: () => ({ rows: [], rateLimit: demoRateLimit }),
+        now: () => '2026-09-21T08:00:00.000Z',
+      },
     );
     if (result.code !== 10 || result.report.reason !== 'already-satisfied')
       throw new Error('wait demo did not satisfy CI');
@@ -76,7 +85,11 @@ try {
         '--summaries',
         '--log',
       ],
-      { fetchPRs: () => [changed], fetchIssues: () => [], now: () => '2026-09-21T08:01:00.000Z' },
+      {
+        fetchPRs: () => ({ rows: [changed], rateLimit: demoRateLimit }),
+        fetchIssues: () => ({ rows: [], rateLimit: demoRateLimit }),
+        now: () => '2026-09-21T08:01:00.000Z',
+      },
     );
     if (tick.code !== 10 || !tick.report.logFile)
       throw new Error('coordinator did not append a delta log');

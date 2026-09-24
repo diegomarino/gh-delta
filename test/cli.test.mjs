@@ -115,7 +115,10 @@ test('--outpost-secret reads the injected environment and does not leak its valu
       issue: {},
     },
   });
-  d.fetchPRsByNumber = () => [{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }];
+  d.fetchPRsByNumber = () => ({
+    rows: [{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }],
+    rateLimit: RATE_LIMIT,
+  });
   let sent;
   d.env = { OUTPOST_SECRET: 'not-in-report' };
   d.outpostFetch = async (_url, options) => {
@@ -190,6 +193,13 @@ const NOOP_LOCK_DEPS = {
   assertLockOwned: () => true,
 };
 
+// Every fetcher's real (lib/gh.mjs) return shape is `{ rows, rateLimit }`.
+// Most tests here don't care about the quota number, so this is the shared
+// default a mocked fetch gets unless a test overrides `fetchRateLimit`/the
+// fetcher itself to assert on it (see the accumulation tests near
+// --rate-limit-floor and the "tick accumulates" test below).
+const RATE_LIMIT = { cost: 1, remaining: 4999, resetAt: '2026-07-01T13:00:00.000Z' };
+
 function deps(prSeq, { existing = null } = {}) {
   let writes = 0;
   let stored = existing;
@@ -197,8 +207,8 @@ function deps(prSeq, { existing = null } = {}) {
   let writePath;
   return {
     ...NOOP_LOCK_DEPS,
-    fetchPRs: () => prSeq.shift(),
-    fetchIssues: () => [],
+    fetchPRs: () => ({ rows: prSeq.shift(), rateLimit: RATE_LIMIT }),
+    fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
     readSnapshot: (p) => {
       readPath = p;
       return stored;
@@ -276,7 +286,7 @@ test('eligible PR-only watch uses the economical fetch and separate explicit sta
   let targeted;
   d.fetchPRsByNumber = (_repo, numbers, options) => {
     targeted = { numbers, options };
-    return numbers.map((number) => ({ ...basePr, number }));
+    return { rows: numbers.map((number) => ({ ...basePr, number })), rateLimit: RATE_LIMIT };
   };
   d.fetchPRs = () => {
     throw new Error('broad fetch must not run for an eligible watch');
@@ -361,7 +371,7 @@ test('removing a watch projects old economical state without a missing delta', (
       issue: {},
     },
   });
-  d.fetchPRsByNumber = () => [{ ...basePr, number: 3 }];
+  d.fetchPRsByNumber = () => ({ rows: [{ ...basePr, number: 3 }], rateLimit: RATE_LIMIT });
   const result = run(
     ['--repo', 'o/r', '--state-file', '/tmp/project-watch.json', '--watch-dir', dir],
     d,
@@ -380,7 +390,7 @@ test('a null alias for a still-watched PR enters the normal missing lifecycle', 
   const d = deps([], {
     existing: { pr: { 3: item(prFingerprint({ ...basePr, number: 3 })) }, issue: {} },
   });
-  d.fetchPRsByNumber = () => [];
+  d.fetchPRsByNumber = () => ({ rows: [], rateLimit: RATE_LIMIT });
   const result = run(
     ['--repo', 'o/r', '--state-file', '/tmp/null-watch.json', '--watch-dir', dir],
     d,
@@ -400,7 +410,10 @@ test('economical watch logs derive from the selected state identity for explicit
   );
   const runEconomical = (stateArgs) => {
     const d = deps([], { existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} } });
-    d.fetchPRsByNumber = () => [{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }];
+    d.fetchPRsByNumber = () => ({
+      rows: [{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }],
+      rateLimit: RATE_LIMIT,
+    });
     let appended;
     d.appendDeltaLog = (file) => {
       appended = file;
@@ -459,7 +472,7 @@ test('economical run registers PR-only watch identity and scope', () => {
     JSON.stringify({ entity: 'pr', number: 42, until: 'merged', addedAt: '2026-07-01T00:00:00Z' }),
   );
   const d = deps([[]]);
-  d.fetchPRsByNumber = () => [{ ...basePr }];
+  d.fetchPRsByNumber = () => ({ rows: [{ ...basePr }], rateLimit: RATE_LIMIT });
   const registered = [];
   d.registerMonitor = (entry) => registered.push(entry);
   d.env = { GH_DELTA_REGISTRY_DIR: '/tmp/economical-registry' };
@@ -475,7 +488,7 @@ test('watch add local derivation decline is config without GitHub fetches', () =
     resolveLocalRepo: () => ({ status: 'declined' }),
     fetchPRs: () => {
       fetched = true;
-      return [];
+      return { rows: [], rateLimit: RATE_LIMIT };
     },
   });
   assert.equal(result.code, 2);
@@ -510,7 +523,10 @@ test('watch cleanup failure warns after snapshot publication', () => {
   const d = deps([[{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} },
   });
-  d.fetchPRsByNumber = () => [{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }];
+  d.fetchPRsByNumber = () => ({
+    rows: [{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }],
+    rateLimit: RATE_LIMIT,
+  });
   d.removeWatchUnchanged = () => {
     throw new Error('unlink denied');
   };
@@ -540,7 +556,10 @@ test('ignored merged terminal delta keeps its watch entry while snapshot advance
   const d = deps([[{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} },
   });
-  d.fetchPRsByNumber = () => [{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }];
+  d.fetchPRsByNumber = () => ({
+    rows: [{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }],
+    rateLimit: RATE_LIMIT,
+  });
   let cleanup = false;
   d.removeWatchUnchanged = () => {
     cleanup = true;
@@ -622,7 +641,7 @@ test('a gh failure returns code 1 and does NOT write the snapshot', () => {
     fetchPRs: () => {
       throw new Error('gh: rate limited');
     },
-    fetchIssues: () => [],
+    fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
     readSnapshot: () => ({ pr: {}, issue: {} }),
     writeSnapshotAtomic: () => {
       throw new Error('should not be called');
@@ -1549,8 +1568,8 @@ test('attention filters leave the persisted snapshot byte-identical and outpost 
     stateFile,
   ];
   const dependencySet = (prs) => ({
-    fetchPRs: () => prs,
-    fetchIssues: () => [],
+    fetchPRs: () => ({ rows: prs, rateLimit: RATE_LIMIT }),
+    fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
     now: () => '2026-07-01T12:00:00Z',
   });
   try {
@@ -1862,8 +1881,8 @@ test('corrupt snapshot read failure returns code 2 and does NOT write', () => {
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'],
     {
       ...NOOP_LOCK_DEPS,
-      fetchPRs: () => [basePr],
-      fetchIssues: () => [],
+      fetchPRs: () => ({ rows: [basePr], rateLimit: RATE_LIMIT }),
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
       readSnapshot: () => {
         throw new Error('invalid snapshot JSON at /tmp/x.json');
       },
@@ -1887,9 +1906,9 @@ test('invalid snapshot horizon returns code 2 before fetching', () => {
       ...NOOP_LOCK_DEPS,
       fetchPRs: () => {
         fetched = true;
-        return [];
+        return { rows: [], rateLimit: RATE_LIMIT };
       },
-      fetchIssues: () => [],
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
       readSnapshot: () => ({ pr: {}, issue: {}, meta: { horizon: 'not-a-date' } }),
       writeSnapshotAtomic: () => {
         writes++;
@@ -2114,7 +2133,7 @@ test('gh-delta rejects invalid --outpost-url before fetching GitHub', async () =
         fetches++;
         throw new Error('should not fetch');
       },
-      fetchIssues: () => [],
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
       readSnapshot: () => ({ pr: {}, issue: {} }),
       writeSnapshotAtomic: () => {
         throw new Error('should not write');
@@ -2346,31 +2365,41 @@ test('--enrich decorates surviving deltas only after snapshot publication and le
     assert.equal(order[0], 'log');
     assert.equal(order[1], 'snapshot');
     if (kind === 'review')
-      return [
+      return {
+        rows: [
+          {
+            id: ids[0],
+            author: 'a',
+            state: 'changes_requested',
+            submittedAt: 'now',
+            commit: 'b',
+            body: 'fix',
+          },
+        ],
+        rateLimit: RATE_LIMIT,
+      };
+    if (kind === 'comments')
+      return {
+        rows: [{ id: ids[0], author: 'b', createdAt: 'now', body: '@alice' }],
+        rateLimit: RATE_LIMIT,
+      };
+    return {
+      rows: [
         {
           id: ids[0],
-          author: 'a',
-          state: 'changes_requested',
-          submittedAt: 'now',
-          commit: 'b',
-          body: 'fix',
+          firstComment: {
+            id: 'TC',
+            author: 'c',
+            createdAt: 'now',
+            path: 'x',
+            line: 2,
+            originalLine: 1,
+            body: 'body',
+          },
         },
-      ];
-    if (kind === 'comments') return [{ id: ids[0], author: 'b', createdAt: 'now', body: '@alice' }];
-    return [
-      {
-        id: ids[0],
-        firstComment: {
-          id: 'TC',
-          author: 'c',
-          createdAt: 'now',
-          path: 'x',
-          line: 2,
-          originalLine: 1,
-          body: 'body',
-        },
-      },
-    ];
+      ],
+      rateLimit: RATE_LIMIT,
+    };
   };
   const result = run(
     [
@@ -2485,15 +2514,15 @@ test('error kinds map to exit codes: config/snapshot=2, github/io/busy=1', () =>
     fetchPRs: () => {
       throw new Error('gh: rate limited');
     },
-    fetchIssues: () => [],
+    fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
   });
   assert.equal(github.code, 1);
   assert.equal(github.report.kind, 'github');
   const io = run(base, {
     ...noFetch,
     readSnapshot: () => null,
-    fetchPRs: () => [],
-    fetchIssues: () => [],
+    fetchPRs: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+    fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
     writeSnapshotAtomic: () => {
       throw new Error('ENOSPC');
     },
@@ -2506,9 +2535,9 @@ test('error kinds map to exit codes: config/snapshot=2, github/io/busy=1', () =>
     acquireLock: () => ({ ok: false, reason: 'held' }),
     fetchPRs: () => {
       fetched = true;
-      return [];
+      return { rows: [], rateLimit: RATE_LIMIT };
     },
-    fetchIssues: () => [],
+    fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
   });
   assert.equal(busy.code, 1);
   assert.equal(busy.report.kind, 'busy');
@@ -2671,11 +2700,11 @@ test('--rate-limit-floor gates fetch after snapshot read and reports a low quota
       },
       fetchPRs: () => {
         order.push('fetch');
-        return [];
+        return { rows: [], rateLimit: RATE_LIMIT };
       },
       fetchIssues: () => {
         order.push('fetch');
-        return [];
+        return { rows: [], rateLimit: RATE_LIMIT };
       },
       writeSnapshotAtomic: () => {
         writes++;
@@ -2690,6 +2719,11 @@ test('--rate-limit-floor gates fetch after snapshot read and reports a low quota
   assert.equal(result.code, 1);
   assert.equal(result.report.kind, 'rate-limit');
   assert.equal(result.report.resetAt, '2026-07-01T13:00:00.000Z');
+  // The pre-fetch REST check shares {cost, remaining, resetAt} with the
+  // post-fetch GraphQL rateLimit; cost is null since a REST quota read has
+  // no per-query cost of its own.
+  assert.equal(result.report.remaining, 3);
+  assert.equal(result.report.cost, null);
   assert.match(result.report.error, /remaining 3.*floor 4/);
   assert.deepEqual(order, ['read', 'rate']);
   assert.equal(writes, 0);
@@ -2721,15 +2755,92 @@ test('--rate-limit-floor allows equality and forwards timeout before the observa
       },
       fetchPRs: () => {
         order.push(['fetch']);
-        return [];
+        return { rows: [], rateLimit: RATE_LIMIT };
       },
-      fetchIssues: () => [],
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
       writeSnapshotAtomic: () => {},
       now: () => '2026-07-01T12:00:00Z',
     },
   );
   assert.equal(result.code, 0);
   assert.deepEqual(order, [['rate', 321], ['fetch']]);
+});
+
+test('a tick spanning two entity families accumulates cost and keeps the last remaining/resetAt', () => {
+  const d = {
+    ...NOOP_LOCK_DEPS,
+    fetchPRs: () => ({
+      rows: [],
+      rateLimit: { cost: 4, remaining: 100, resetAt: '2026-07-01T13:00:00.000Z' },
+    }),
+    fetchIssues: () => ({
+      rows: [],
+      rateLimit: { cost: 2, remaining: 98, resetAt: '2026-07-01T13:00:01.000Z' },
+    }),
+    readSnapshot: () => null,
+    writeSnapshotAtomic: () => {},
+    now: () => '2026-07-01T12:00:00Z',
+  };
+  const result = run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
+  assert.equal(result.code, 0);
+  // TODO(R3): this is the same accumulator the eventual results[].rateLimit
+  // report field will surface; see the TODO comment at its definition site
+  // in lib/cli.mjs's runSingle.
+  assert.deepEqual(result.rateLimit, {
+    cost: 6,
+    remaining: 98,
+    resetAt: '2026-07-01T13:00:01.000Z',
+  });
+});
+
+test('enrichment cost accumulates into the same tick-level rateLimit as the observation fetches', () => {
+  const before = {
+    ...basePr,
+    comments: 1,
+    conversationComments: 1,
+    recentComments: [{ id: 'C1', author: 'old' }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    comments: 2,
+    conversationComments: 2,
+    recentComments: [
+      { id: 'C1', author: 'old' },
+      { id: 'C2', author: 'new' },
+    ],
+  };
+  const d = deps([[after]], {
+    existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} },
+  });
+  d.fetchPRs = () => ({
+    rows: [after],
+    rateLimit: { cost: 4, remaining: 100, resetAt: '2026-07-01T13:00:00.000Z' },
+  });
+  d.fetchEnrichment = () => ({
+    rows: [{ id: 'C2', author: 'a', createdAt: 'now', body: 'hi' }],
+    rateLimit: { cost: 1, remaining: 99, resetAt: '2026-07-01T13:00:01.000Z' },
+  });
+  const result = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/x.json',
+      '--enrich',
+      'comments',
+    ],
+    d,
+  );
+  assert.equal(result.code, 10);
+  // 4 (PR fetch) + 1 (default issue fetch from deps()) + 1 (enrichment).
+  assert.deepEqual(result.rateLimit, {
+    cost: 6,
+    remaining: 99,
+    resetAt: '2026-07-01T13:00:01.000Z',
+  });
 });
 
 test('omitting --rate-limit-floor makes no rate-limit call', () => {
@@ -2749,9 +2860,9 @@ test('--gh-timeout-ms threads into fetchers and defaults to 60000', () => {
     ...NOOP_LOCK_DEPS,
     fetchPRs: (_repo, opts) => {
       receivedTimeoutMs = opts.timeoutMs;
-      return [];
+      return { rows: [], rateLimit: RATE_LIMIT };
     },
-    fetchIssues: () => [],
+    fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
     readSnapshot: () => null,
     writeSnapshotAtomic: () => {},
     now: () => '2026-07-01T12:00:00Z',
@@ -2801,9 +2912,9 @@ test('the CLI threads the snapshot horizon into fetchers and stamps a new one', 
     ...NOOP_LOCK_DEPS,
     fetchPRs: (_repo, opts) => {
       receivedCutoff = opts.horizonCutoff;
-      return [];
+      return { rows: [], rateLimit: RATE_LIMIT };
     },
-    fetchIssues: () => [],
+    fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
     readSnapshot: () => ({ pr: {}, issue: {}, meta: { horizon: '2026-07-01T11:00:00.000Z' } }),
     writeSnapshotAtomic: (_p, data) => {
       d.written = data;
@@ -2819,8 +2930,8 @@ test('the CLI threads the snapshot horizon into fetchers and stamps a new one', 
 test('--detail reports the current missing tick for still-missing', () => {
   const d = {
     ...NOOP_LOCK_DEPS,
-    fetchPRs: () => [],
-    fetchIssues: () => [],
+    fetchPRs: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+    fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
     readSnapshot: () => ({
       pr: {
         42: item(openFp, { missingTicks: 1 }),
@@ -3241,8 +3352,8 @@ test('list without --state-dir consults the run registry; --state-dir narrows to
 // Minimal deps that let run() reach the report without touching disk/network.
 const baseDeps = (over = {}) => ({
   ...NOOP_LOCK_DEPS,
-  fetchPRs: () => ({}),
-  fetchIssues: () => ({}),
+  fetchPRs: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+  fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
   readSnapshot: () => null,
   writeSnapshotAtomic: () => {},
   registerMonitor: () => {},

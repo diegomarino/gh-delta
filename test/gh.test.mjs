@@ -56,11 +56,20 @@ function prNode(over = {}) {
   };
 }
 
-function page(nodes, hasNextPage = false, endCursor = null) {
+function page(nodes, hasNextPage = false, endCursor = null, rateLimit = DEFAULT_PAGE_RATE_LIMIT) {
   return JSON.stringify({
-    data: { repository: { items: { nodes, pageInfo: { hasNextPage, endCursor } } } },
+    data: {
+      rateLimit,
+      repository: { items: { nodes, pageInfo: { hasNextPage, endCursor } } },
+    },
   });
 }
+
+// Every gh.mjs GraphQL query requests `rateLimit { cost remaining resetAt }`
+// alongside its real selection; most fixtures below don't care about the
+// exact numbers, so this is the shared default a `page()` call gets unless
+// it overrides `rateLimit` explicitly.
+const DEFAULT_PAGE_RATE_LIMIT = { cost: 1, remaining: 4999, resetAt: '2026-07-01T13:00:00.000Z' };
 
 test('rate-limit fetch invokes the REST boundary once, reports progress, and normalizes resetAt', () => {
   const calls = [];
@@ -111,11 +120,12 @@ test('rate-limit fetch fails closed for invalid payload and never progresses aft
 
 test('enrichment fetch uses one sorted nodes query and normalizes review bodies by requested id', () => {
   const calls = [];
-  const rows = fetchEnrichment('review', ['R2', 'R1', 'R2'], {
+  const { rows, rateLimit } = fetchEnrichment('review', ['R2', 'R1', 'R2'], {
     exec: (_cmd, args, opts) => {
       calls.push({ args, opts });
       return JSON.stringify({
         data: {
+          rateLimit: DEFAULT_PAGE_RATE_LIMIT,
           nodes: [
             {
               __typename: 'PullRequestReview',
@@ -167,14 +177,21 @@ test('enrichment fetch uses one sorted nodes query and normalizes review bodies 
       body: '',
     },
   ]);
+  assert.deepEqual(rateLimit, DEFAULT_PAGE_RATE_LIMIT);
 });
 
 test('enrichment fetch fails closed on node coverage, wrong type, and malformed thread connection', () => {
   for (const body of [
-    { data: { nodes: [] } },
-    { data: { nodes: [{ __typename: 'IssueComment', id: 'R1' }] } },
+    { data: { rateLimit: DEFAULT_PAGE_RATE_LIMIT, nodes: [] } },
     {
       data: {
+        rateLimit: DEFAULT_PAGE_RATE_LIMIT,
+        nodes: [{ __typename: 'IssueComment', id: 'R1' }],
+      },
+    },
+    {
+      data: {
+        rateLimit: DEFAULT_PAGE_RATE_LIMIT,
         nodes: [
           {
             __typename: 'PullRequestReviewThread',
@@ -224,11 +241,14 @@ test('enrichment progress advances after a successful process return even when J
 
 test('targeted PR fetch uses one aliased query and the canonical normalizer', () => {
   const calls = [];
-  const rows = fetchPRsByNumber('o/r', [9, 3, 9], {
+  const { rows, rateLimit } = fetchPRsByNumber('o/r', [9, 3, 9], {
     exec: (_cmd, args, opts) => {
       calls.push({ args, opts });
       return JSON.stringify({
-        data: { repository: { pr3: prNode({ number: 3 }), pr9: prNode({ number: 9 }) } },
+        data: {
+          rateLimit: DEFAULT_PAGE_RATE_LIMIT,
+          repository: { pr3: prNode({ number: 3 }), pr9: prNode({ number: 9 }) },
+        },
       });
     },
     onProgress: () => calls.push({ progress: true }),
@@ -245,12 +265,23 @@ test('targeted PR fetch uses one aliased query and the canonical normalizer', ()
   assert.deepEqual(rows[0].checks, [
     { name: 'build', kind: 'check', status: 'completed', conclusion: 'success', detailsUrl: null },
   ]);
+  assert.deepEqual(rateLimit, DEFAULT_PAGE_RATE_LIMIT);
+});
+
+test('targeted PR fetch returns an empty rows/null rateLimit without calling gh for an empty number set', () => {
+  assert.deepEqual(fetchPRsByNumber('o/r', [], { exec: () => assert.fail('must not fetch') }), {
+    rows: [],
+    rateLimit: null,
+  });
 });
 
 test('targeted PR fetch fails closed on alias shape, GraphQL errors, and nested overflow', () => {
   assert.throws(
     () =>
-      fetchPRsByNumber('o/r', [3], { exec: () => JSON.stringify({ data: { repository: {} } }) }),
+      fetchPRsByNumber('o/r', [3], {
+        exec: () =>
+          JSON.stringify({ data: { rateLimit: DEFAULT_PAGE_RATE_LIMIT, repository: {} } }),
+      }),
     /unexpected shape/,
   );
   assert.throws(
@@ -265,7 +296,10 @@ test('targeted PR fetch fails closed on alias shape, GraphQL errors, and nested 
   assert.throws(
     () =>
       fetchPRsByNumber('o/r', [3], {
-        exec: () => JSON.stringify({ data: { repository: { pr3: overflow } } }),
+        exec: () =>
+          JSON.stringify({
+            data: { rateLimit: DEFAULT_PAGE_RATE_LIMIT, repository: { pr3: overflow } },
+          }),
       }),
     /paginated reviewThreads/,
   );
@@ -277,7 +311,7 @@ test('baseline (null horizon) fetches only open PRs and normalizes rows', () => 
     calls.push({ cmd, args, opts });
     return page([prNode()]);
   };
-  const rows = fetchPRs('o/r', { exec, horizonCutoff: null });
+  const { rows, rateLimit } = fetchPRs('o/r', { exec, horizonCutoff: null });
   assert.equal(calls.length, 1);
   assert.ok(calls[0].args.some((a) => a === 'states[]=OPEN'));
   assert.equal(calls[0].opts.timeoutMs, DEFAULT_GH_TIMEOUT_MS);
@@ -289,11 +323,12 @@ test('baseline (null horizon) fetches only open PRs and normalizes rows', () => 
     { id: 'T_A', resolved: false, comments: 0 },
     { id: 'T_B', resolved: true, comments: 0 },
   ]);
+  assert.deepEqual(rateLimit, DEFAULT_PAGE_RATE_LIMIT);
 });
 
 test('queries and normalizes bounded comment identities plus failed check URLs', () => {
   let prQuery = '';
-  const prs = fetchPRs('o/r', {
+  const { rows: prs } = fetchPRs('o/r', {
     exec: (_cmd, args) => {
       prQuery = args.find((arg) => arg.startsWith('query=')) ?? '';
       return page([
@@ -332,7 +367,7 @@ test('queries and normalizes bounded comment identities plus failed check URLs',
   assert.equal(prs[0].checks[0].detailsUrl, 'https://ci/build');
 
   let issueQuery = '';
-  const issues = fetchIssues('o/r', {
+  const { rows: issues } = fetchIssues('o/r', {
     exec: (_cmd, args) => {
       issueQuery = args.find((arg) => arg.startsWith('query=')) ?? '';
       return page([
@@ -368,7 +403,7 @@ test('incremental fetch adds updated items and cuts at the horizon', () => {
       prNode({ number: 3, state: 'CLOSED', updatedAt: '2026-06-30T00:00:00Z' }), // below cutoff
     ]);
   };
-  const rows = fetchPRs('o/r', { exec, horizonCutoff: '2026-07-01T00:00:00Z' });
+  const { rows } = fetchPRs('o/r', { exec, horizonCutoff: '2026-07-01T00:00:00Z' });
   assert.deepEqual(rows.map((r) => r.number).sort(), [1, 9]);
   assert.equal(calls.length, 2);
   const updatedCall = calls.find((args) => !args.some((a) => a === 'states[]=OPEN'));
@@ -377,6 +412,32 @@ test('incremental fetch adds updated items and cuts at the horizon', () => {
     !updatedCall.some((a) => a.startsWith('states')),
     'updated phase must omit states so GitHub applies no state filter',
   );
+});
+
+test('a two-page fetch sums cost across pages and keeps the last remaining/resetAt', () => {
+  let call = 0;
+  const exec = () => {
+    call++;
+    if (call === 1) {
+      return page([prNode({ number: 1 })], true, 'c1', {
+        cost: 1,
+        remaining: 100,
+        resetAt: '2026-07-01T13:00:00.000Z',
+      });
+    }
+    return page([prNode({ number: 2 })], false, null, {
+      cost: 1,
+      remaining: 99,
+      resetAt: '2026-07-01T13:00:01.000Z',
+    });
+  };
+  const { rows, rateLimit } = fetchPRs('o/r', { exec, horizonCutoff: null });
+  assert.equal(call, 2);
+  assert.deepEqual(
+    rows.map((r) => r.number),
+    [1, 2],
+  );
+  assert.deepEqual(rateLimit, { cost: 2, remaining: 99, resetAt: '2026-07-01T13:00:01.000Z' });
 });
 
 test('cutoff stops pagination early', () => {
@@ -412,7 +473,7 @@ test('the PR query requests review-thread id/comments and normalizePr carries th
       }),
     ]);
   };
-  const rows = fetchPRs('o/r', { exec, horizonCutoff: null });
+  const { rows } = fetchPRs('o/r', { exec, horizonCutoff: null });
   assert.match(
     sentQuery,
     /reviewThreads\(first: \d+\) \{ totalCount nodes \{ id isResolved comments \{ totalCount \} \}/,
@@ -434,7 +495,7 @@ test('normalizePr drops review threads with no id and defaults threads to [] whe
         },
       }),
     ]);
-  const rows = fetchPRs('o/r', { exec, horizonCutoff: null });
+  const { rows } = fetchPRs('o/r', { exec, horizonCutoff: null });
   assert.deepEqual(rows[0].threads, []);
 });
 
@@ -462,7 +523,7 @@ test('fetchIssues normalizes labels and exact comment totals', () => {
       },
     ]);
   };
-  const rows = fetchIssues('o/r', { exec, horizonCutoff: null });
+  const { rows } = fetchIssues('o/r', { exec, horizonCutoff: null });
   assert.deepEqual(rows[0].labels, [{ name: 'worker' }]);
   assert.equal(rows[0].comments, 130);
 });
@@ -479,7 +540,7 @@ test('normalizeIssue filters null elements from labels nodes', () => {
         comments: { totalCount: 0 },
       },
     ]);
-  const rows = fetchIssues('o/r', { exec, horizonCutoff: null });
+  const { rows } = fetchIssues('o/r', { exec, horizonCutoff: null });
   assert.deepEqual(rows[0].labels, [{ name: 'worker' }]);
 });
 
@@ -489,13 +550,13 @@ test('the PR query requests headRefName and normalizePr carries it (defensively 
     sentQuery = args.find((a) => a.startsWith('query=')) ?? '';
     return page([prNode({ headRefName: 'feature/login' })]);
   };
-  const rows = fetchPRs('o/r', { exec, horizonCutoff: null });
+  const { rows } = fetchPRs('o/r', { exec, horizonCutoff: null });
   assert.ok(sentQuery.includes('headRefName'), 'PR GraphQL selection must request headRefName');
   assert.equal(rows[0].headRefName, 'feature/login');
 
   // Defensive: GitHub's headRefName is String! and retained after deletion, but
   // if a node ever lacks it, normalize to null rather than undefined (never throw).
-  const missingName = fetchPRs('o/r', {
+  const { rows: missingName } = fetchPRs('o/r', {
     exec: () => page([prNode({ headRefName: null })]),
     horizonCutoff: null,
   });
@@ -555,7 +616,10 @@ test('normalizePr filters null elements from statusCheckRollup contexts nodes', 
       ],
     },
   });
-  const rows = fetchPRs('o/r', { exec: () => page([nodeWithNullContext]), horizonCutoff: null });
+  const { rows } = fetchPRs('o/r', {
+    exec: () => page([nodeWithNullContext]),
+    horizonCutoff: null,
+  });
   assert.deepEqual(rows[0].checks, [
     { name: 'build', kind: 'check', status: 'completed', conclusion: 'success', detailsUrl: null },
   ]);
@@ -567,7 +631,7 @@ test('the PR query requests mergeStateStatus and normalizePr defaults it to unkn
     sentQuery = args.find((a) => a.startsWith('query=')) ?? '';
     return page([prNode()]); // prNode() omits mergeStateStatus
   };
-  const rows = fetchPRs('o/r', { exec, horizonCutoff: null });
+  const { rows } = fetchPRs('o/r', { exec, horizonCutoff: null });
   assert.ok(
     sentQuery.includes('mergeStateStatus'),
     'PR GraphQL selection must request mergeStateStatus',
@@ -595,7 +659,7 @@ test('the PR query requests base ref, labels, assignees, and review requests and
       }),
     ]);
   };
-  const rows = fetchPRs('o/r', { exec, horizonCutoff: null });
+  const { rows } = fetchPRs('o/r', { exec, horizonCutoff: null });
   for (const field of ['baseRefName', 'labels', 'assignees', 'reviewRequests']) {
     assert.ok(sentQuery.includes(field), `PR GraphQL selection must request ${field}`);
   }
@@ -606,7 +670,7 @@ test('the PR query requests base ref, labels, assignees, and review requests and
 });
 
 test('normalizePr defaults the new fields when a node predates them', () => {
-  const rows = fetchPRs('o/r', { exec: () => page([prNode()]), horizonCutoff: null });
+  const { rows } = fetchPRs('o/r', { exec: () => page([prNode()]), horizonCutoff: null });
   assert.equal(rows[0].baseRef, '');
   assert.deepEqual(rows[0].labels, []);
   assert.deepEqual(rows[0].assignees, []);
@@ -639,13 +703,13 @@ test('the issue query requests assignees and fetchIssues normalizes them', () =>
       },
     ]);
   };
-  const rows = fetchIssues('o/r', { exec, horizonCutoff: null });
+  const { rows } = fetchIssues('o/r', { exec, horizonCutoff: null });
   assert.ok(sentQuery.includes('assignees'), 'issue GraphQL selection must request assignees');
   assert.deepEqual(rows[0].assignees, ['zoe', 'alice']);
 });
 
 test('normalizePr passes through a present mergeStateStatus verbatim', () => {
-  const rows = fetchPRs('o/r', {
+  const { rows } = fetchPRs('o/r', {
     exec: () => page([prNode({ mergeStateStatus: 'BEHIND' })]),
     horizonCutoff: null,
   });

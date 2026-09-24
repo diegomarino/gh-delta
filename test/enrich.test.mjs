@@ -25,43 +25,52 @@ test('enrichment uses final delta identities, keeps successful siblings, and pre
     }),
   };
   const calls = [];
-  const warnings = enrichEmittedDeltas([delta], ['review', 'comments', 'threads'], {
+  const { warnings, rateLimit } = enrichEmittedDeltas([delta], ['review', 'comments', 'threads'], {
     fetch(kind, ids) {
       calls.push({ kind, ids });
       if (kind === 'review')
-        return [
-          {
-            id: 'R1',
-            author: 'a',
-            state: 'changes_requested',
-            submittedAt: 'new',
-            commit: 'b',
-            body: 'fix',
-          },
-        ];
+        return {
+          rows: [
+            {
+              id: 'R1',
+              author: 'a',
+              state: 'changes_requested',
+              submittedAt: 'new',
+              commit: 'b',
+              body: 'fix',
+            },
+          ],
+          rateLimit: { cost: 1, remaining: 99, resetAt: '2026-07-01T13:00:00.000Z' },
+        };
       if (kind === 'comments')
-        return [
+        return {
+          rows: [
+            {
+              id: 'C2',
+              author: 'b',
+              createdAt: 'now',
+              body: 'hi @Alice and @org/team, x@y.com @alice',
+            },
+          ],
+          rateLimit: { cost: 1, remaining: 98, resetAt: '2026-07-01T13:00:01.000Z' },
+        };
+      return {
+        rows: [
           {
-            id: 'C2',
-            author: 'b',
-            createdAt: 'now',
-            body: 'hi @Alice and @org/team, x@y.com @alice',
+            id: 'T1',
+            firstComment: {
+              id: 'TC1',
+              author: 'c',
+              createdAt: 'now',
+              path: 'x',
+              line: 2,
+              originalLine: 1,
+              body: 'body',
+            },
           },
-        ];
-      return [
-        {
-          id: 'T1',
-          firstComment: {
-            id: 'TC1',
-            author: 'c',
-            createdAt: 'now',
-            path: 'x',
-            line: 2,
-            originalLine: 1,
-            body: 'body',
-          },
-        },
-      ];
+        ],
+        rateLimit: { cost: 1, remaining: 97, resetAt: '2026-07-01T13:00:02.000Z' },
+      };
     },
   });
   assert.deepEqual(calls, [
@@ -71,6 +80,8 @@ test('enrichment uses final delta identities, keeps successful siblings, and pre
   ]);
   assert.deepEqual(delta.enrichment.comments[0].mentions, ['Alice', 'org/team']);
   assert.equal(warnings.length, 0);
+  // cost accumulates across all three enrichment calls; remaining/resetAt are the last call's.
+  assert.deepEqual(rateLimit, { cost: 3, remaining: 97, resetAt: '2026-07-01T13:00:02.000Z' });
 });
 
 test('enrichment skips opaque identities and turns one boundary failure into a warning', () => {
@@ -80,7 +91,7 @@ test('enrichment skips opaque identities and turns one boundary failure into a w
     to: item({ comments: 2 }),
   };
   let calls = 0;
-  const warnings = enrichEmittedDeltas([delta], ['comments'], { fetch: () => calls++ });
+  const { warnings } = enrichEmittedDeltas([delta], ['comments'], { fetch: () => calls++ });
   assert.equal(calls, 0);
   assert.equal(warnings.length, 1);
   assert.equal(delta.enrichment, undefined);
@@ -95,7 +106,7 @@ test('enrichment skips opaque identities and turns one boundary failure into a w
       throw new Error('nope');
     },
   });
-  assert.equal(failure.length, 1);
+  assert.equal(failure.warnings.length, 1);
   assert.equal(good.enrichment, undefined);
 });
 
@@ -106,10 +117,10 @@ test('a zero-count prior comment fingerprint may use an absent identity window a
     to: item({ conversationComments: 1, recentComments: [{ id: 'C1' }] }),
   };
   const calls = [];
-  const warnings = enrichEmittedDeltas([delta], ['comments'], {
+  const { warnings } = enrichEmittedDeltas([delta], ['comments'], {
     fetch: (kind, ids) => {
       calls.push({ kind, ids });
-      return [{ id: 'C1', author: 'a', createdAt: 'now', body: 'body' }];
+      return { rows: [{ id: 'C1', author: 'a', createdAt: 'now', body: 'body' }], rateLimit: null };
     },
   });
   assert.deepEqual(calls, [{ kind: 'comments', ids: ['C1'] }]);
@@ -129,12 +140,11 @@ test('a zero-count prior comment fingerprint may use an absent identity window a
 test('selected kinds with no final matching class make no calls, while a failed sibling does not remove successful enrichment', () => {
   let calls = 0;
   const ignored = { classes: ['updated'], from: item({}), to: item({}) };
-  assert.deepEqual(
-    enrichEmittedDeltas([ignored], ['review', 'comments', 'threads'], {
-      fetch: () => calls++,
-    }),
-    [],
-  );
+  const ignoredResult = enrichEmittedDeltas([ignored], ['review', 'comments', 'threads'], {
+    fetch: () => calls++,
+  });
+  assert.deepEqual(ignoredResult.warnings, []);
+  assert.equal(ignoredResult.rateLimit, null);
   assert.equal(calls, 0);
 
   const delta = {
@@ -146,10 +156,10 @@ test('selected kinds with no final matching class make no calls, while a failed 
       recentComments: [{ id: 'C1' }],
     }),
   };
-  const warnings = enrichEmittedDeltas([delta], ['review', 'comments'], {
+  const { warnings } = enrichEmittedDeltas([delta], ['review', 'comments'], {
     fetch: (kind) => {
       if (kind === 'review') throw new Error('unavailable');
-      return [{ id: 'C1', author: null, createdAt: 'now', body: '' }];
+      return { rows: [{ id: 'C1', author: null, createdAt: 'now', body: '' }], rateLimit: null };
     },
   });
   assert.equal(warnings.length, 1);

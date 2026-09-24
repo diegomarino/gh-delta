@@ -22,6 +22,8 @@ const prWithGreenCi = {
 // not a bare fingerprint.
 const item = (fingerprint) => ({ fingerprint, context: {}, meta: {} });
 
+const RATE_LIMIT = { cost: 1, remaining: 4999, resetAt: '2026-09-21T09:00:00.000Z' };
+
 const noopLock = {
   acquireLock: () => ({ ok: true, token: 'test-lock' }),
   assertLockOwned: () => true,
@@ -65,8 +67,8 @@ test('wait evaluates an already-satisfied summary from the first snapshot and to
     ],
     {
       ...noopLock,
-      fetchPRs: () => [prWithGreenCi],
-      fetchIssues: () => [],
+      fetchPRs: () => ({ rows: [prWithGreenCi], rateLimit: RATE_LIMIT }),
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
       readSnapshot: () => snapshot,
       writeSnapshotAtomic: (_path, next) => {
         snapshot = next;
@@ -156,8 +158,8 @@ test('wait releases each detector tick into one accumulated report and heartbeat
     ],
     {
       ...noopLock,
-      fetchPRs: () => observations.shift(),
-      fetchIssues: () => [],
+      fetchPRs: () => ({ rows: observations.shift(), rateLimit: RATE_LIMIT }),
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
       readSnapshot: () => snapshot,
       writeSnapshotAtomic: (_path, next) => {
         snapshot = next;
@@ -201,8 +203,8 @@ test('wait reports a completed tick on stderr and returns its partial report on 
     ],
     {
       ...noopLock,
-      fetchPRs: () => [prWithGreenCi],
-      fetchIssues: () => [],
+      fetchPRs: () => ({ rows: [prWithGreenCi], rateLimit: RATE_LIMIT }),
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
       readSnapshot: () => snapshot,
       writeSnapshotAtomic: (_path, next) => {
         snapshot = next;
@@ -514,8 +516,8 @@ test('wait creates its derived default heartbeat before an aggregate first tick 
     ],
     {
       ...noopLock,
-      fetchPRs: () => [],
-      fetchIssues: () => [],
+      fetchPRs: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
       readSnapshot: (path) => {
         assert.ok(path);
         return null;
@@ -555,9 +557,9 @@ test('wait touches the derived normal state heartbeat before its first detector 
       ...noopLock,
       fetchPRs: () => {
         assert.equal(heartbeats.length, 1);
-        return [];
+        return { rows: [], rateLimit: RATE_LIMIT };
       },
-      fetchIssues: () => [],
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
       readSnapshot: () => null,
       writeSnapshotAtomic: () => {},
       touchHeartbeat: (path) => heartbeats.push(path),

@@ -62,12 +62,14 @@ const NOOP_LOCK_DEPS = {
 // Minimal `run()` harness mirroring test/cli.test.mjs: no disk, no network.
 // `stored` persists across successive run() calls so the missing lifecycle can
 // advance tick by tick.
+const RATE_LIMIT = { cost: 1, remaining: 4999, resetAt: '2026-07-01T13:00:00.000Z' };
+
 function deps(prSeq, { existing = null } = {}) {
   let stored = existing;
   return {
     ...NOOP_LOCK_DEPS,
-    fetchPRs: () => prSeq.shift(),
-    fetchIssues: () => [],
+    fetchPRs: () => ({ rows: prSeq.shift(), rateLimit: RATE_LIMIT }),
+    fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
     readSnapshot: () => stored,
     writeSnapshotAtomic: (_p, d) => {
       stored = d;
