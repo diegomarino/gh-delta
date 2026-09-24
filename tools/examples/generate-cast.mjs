@@ -20,6 +20,8 @@ import { enrichDelta } from '../../lib/cli.mjs';
 import { compactReport, ndjsonReport } from '../../lib/compact-output.mjs';
 import { schemaFor } from '../../lib/schema.mjs';
 import { deltaId, deltaIdentity } from '../../lib/fingerprint.mjs';
+import { diffFingerprint } from '../../lib/diff.mjs';
+import { deltaSummary } from '../../lib/summary.mjs';
 import { baselineReport, deltaReport, detailReport } from './fixtures.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -99,13 +101,11 @@ function clone(report) {
 }
 
 function renderText(report) {
-  const r = clone(report);
-  for (const d of r.deltas) enrichDelta(d, { legacyLine: true });
-  return formatTextOutput({ code: 0, report: r, now: () => r.at });
+  return formatTextOutput({ code: 0, report: clone(report), now: () => report.detectedAt });
 }
 
 function renderBaseline(report) {
-  return formatTextOutput({ code: 0, report: clone(report), now: () => report.at });
+  return formatTextOutput({ code: 0, report: clone(report), now: () => report.detectedAt });
 }
 
 // Snapshot items store `{ fingerprint, context, meta }`; wrap a raw compared-
@@ -125,28 +125,39 @@ const loopItem = (fingerprint) =>
 
 function loopDelta(classes, from, to) {
   const delta = {
+    repo: 'owner/repo',
     entity: 'pr',
     number: 42,
-    title: 'Add billing webhook',
-    headRefName: 'feature/billing-webhook',
+    context: { title: 'Add billing webhook', headRefName: 'feature/billing-webhook' },
     classes,
     from: loopItem(from),
     to: loopItem(to),
   };
-  return { id: deltaId(deltaIdentity('owner/repo', delta)), ...delta };
+  delta.id = deltaId(deltaIdentity('owner/repo', delta));
+  delta.changed = diffFingerprint(delta.from?.fingerprint, delta.to?.fingerprint);
+  delta.summary = deltaSummary(delta);
+  return delta;
 }
 
-function loopReport(at, delta = null, baseline = false) {
+function loopReport(detectedAt, delta = null, baseline = false) {
   return {
     schemaVersion: 1,
-    baseline,
-    repo: 'owner/repo',
-    repoSource: 'flag',
+    detectedAt,
     monitorId: 'pr-loop-60-secs',
     entities: ['pr'],
-    stateFile: '.gh-delta/repo-owner%2Frepo__monitor-pr-loop-60-secs__pr.json',
-    at,
+    repos: ['owner/repo'],
+    results: [
+      {
+        repo: 'owner/repo',
+        baseline,
+        repoSource: 'flag',
+        stateFile: '.gh-delta/repo-owner%2Frepo__monitor-pr-loop-60-secs__pr.json',
+        rateLimit: null,
+      },
+    ],
     deltas: delta ? [delta] : [],
+    filteredDeltas: 0,
+    warnings: [],
     summary: delta ? '1 delta(s)' : baseline ? 'baseline established: 0 PRs' : '0 delta(s)',
   };
 }
@@ -160,7 +171,7 @@ function colorJson(value, args = ['-C', '.']) {
 
 function renderJson(report) {
   const r = clone(report);
-  for (const d of r.deltas) enrichDelta(d, { summaryLine: true, legacyLine: true, details: true });
+  for (const d of r.deltas) enrichDelta(d, { summaryLine: true, details: true });
   return colorJson(r);
 }
 
@@ -175,7 +186,7 @@ const schemaColored = colorJson({
   $schema: compactSchema.$schema,
   title: compactSchema.title,
   schemaVersion: compactSchema.schemaVersion,
-  variants: compactSchema.anyOf.map((variant) => variant.required),
+  variants: [compactSchema.required],
 });
 
 // demo.cast — baseline followed by the agent-oriented compact delta report.
@@ -260,7 +271,7 @@ const schema = cast({ width: 100, autoHeight: true, title: 'gh-delta — compact
 schema
   .prompt()
   .command(
-    'gh-delta schema --format compact | jq \'{"$schema": ."$schema", title, schemaVersion, variants: [.anyOf[].required]}\'',
+    'gh-delta schema --format compact | jq \'{"$schema": ."$schema", title, schemaVersion, variants: [.required]}\'',
   )
   .enter()
   .block(schemaColored, 0.03)

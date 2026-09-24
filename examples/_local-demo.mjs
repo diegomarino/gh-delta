@@ -91,15 +91,15 @@ try {
         now: () => '2026-09-21T08:01:00.000Z',
       },
     );
-    if (tick.code !== 10 || !tick.report.logFile)
-      throw new Error('coordinator did not append a delta log');
+    const logFile = tick.report.results?.[0]?.logFile;
+    if (tick.code !== 10 || !logFile) throw new Error('coordinator did not append a delta log');
     for (const worker of ['reviewer', 'notifier', 'triage']) {
       const cursor = join(stateDir, `${worker}.cursor.json`);
-      setCursorAtomic(cursor, { cursorVersion: 1, logFile: tick.report.logFile, seq: 0 });
+      setCursorAtomic(cursor, { cursorVersion: 1, logFile, seq: 0 });
       const read = await runCommand(['read', '--cursor', cursor, '--number', '42'], {});
       if (read.code !== 10) throw new Error(`${worker} did not receive the delta`);
     }
-    console.log(JSON.stringify({ workers: 3, logFile: tick.report.logFile }));
+    console.log(JSON.stringify({ workers: 3, logFile }));
   } else if (mode === 'claude-code-hook' || mode === 'github-action') {
     detector([base]);
     const result = detector([changed]);
