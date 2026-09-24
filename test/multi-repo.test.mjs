@@ -292,7 +292,7 @@ test('readWatch rejects malformed or noncanonical persisted scoped repositories'
   }
 });
 
-test('aggregate outposts use the delta repository for identity and links', () => {
+test('aggregate outposts use the delta repository for identity', () => {
   const payload = buildOutpostPayload({
     report: { monitorId: 'i9', detectedAt: '2026-09-20T12:00:00.000Z' },
     delta: {
@@ -305,9 +305,8 @@ test('aggregate outposts use the delta repository for identity and links', () =>
       to: { state: 'OPEN' },
     },
   });
-  assert.equal(payload.repo, 'b/two');
-  assert.match(payload.eventId, /:b\/two:/);
-  assert.equal(payload.links.html, 'https://github.com/b/two/pull/2');
+  assert.equal(payload.delta.repo, 'b/two');
+  assert.match(payload.deliveryId, /:b\/two:/);
 });
 
 test('aggregate outpost failures qualify same-number items with their repository', async () => {

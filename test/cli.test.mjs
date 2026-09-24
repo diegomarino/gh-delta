@@ -1,7 +1,6 @@
 // CLI contract tests: exit codes, snapshot safety, and user-facing detail output.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHmac } from 'node:crypto';
 
 // Tests must never leave breadcrumbs in the developer's real run registry.
 process.env.GH_DELTA_NO_REGISTRY = '1';
@@ -52,16 +51,27 @@ const item = (fingerprint, meta = {}) => ({
 // build their own via `prFingerprint({ ...basePr, ...overrides })` instead.
 const openFp = prFingerprint(basePr);
 
-test('outpostSignature matches the published HMAC-SHA256 known vector', () => {
+// Standard Webhooks (https://www.standardwebhooks.com/) worked example,
+// independently verified: id, timestamp, body, and secret are fixed
+// literals, and the expected signature is a fixed literal too -- this must
+// catch a construction bug (wrong field order, wrong separator, hex instead
+// of base64, ms instead of seconds) that a round-trip through outpostSignature
+// itself could never catch.
+test('outpostSignature matches a fixed Standard Webhooks v1 test vector', () => {
   assert.equal(
-    outpostSignature('The quick brown fox jumps over the lazy dog', 'key'),
-    'sha256=f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8',
+    outpostSignature(
+      'msg_p5jXN8AQM9LWM0D4loKWxJek',
+      '1614265330',
+      '{"test": 2432232314}',
+      'MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw',
+    ),
+    'v1,ELhqG0Ku1gwOc1f4jyKdp3SFGFLAOdJ9bvpWLciCakI=',
   );
 });
 
-test('postOutpost signs the exact serialized body with the configured HMAC secret', async () => {
-  const { postOutpost } = await import('../lib/outpost.mjs');
-  const payload = { type: 'gh-delta.delta', title: 'snowman ☃' };
+test('postOutpost signs the exact serialized body with Standard Webhooks headers', async () => {
+  const { postOutpost, outpostSignature: sign } = await import('../lib/outpost.mjs');
+  const payload = { type: 'gh-delta.delta', deliveryId: 'gh-delta.delivery.v1:o/r:m:pr:1:x:t' };
   let sent;
 
   await postOutpost('https://example.com/hook', payload, {
@@ -72,11 +82,14 @@ test('postOutpost signs the exact serialized body with the configured HMAC secre
     },
   });
 
-  const expectedBody = '{"type":"gh-delta.delta","title":"snowman ☃"}';
+  const expectedBody =
+    '{"type":"gh-delta.delta","deliveryId":"gh-delta.delivery.v1:o/r:m:pr:1:x:t"}';
   assert.equal(sent.body, expectedBody, 'the signed bytes must be the bytes sent');
+  assert.equal(sent.headers['webhook-id'], payload.deliveryId);
+  assert.match(sent.headers['webhook-timestamp'], /^\d+$/);
   assert.equal(
-    sent.headers['X-GhDelta-Signature'],
-    `sha256=${createHmac('sha256', 'Jefe').update(expectedBody, 'utf8').digest('hex')}`,
+    sent.headers['webhook-signature'],
+    sign(payload.deliveryId, sent.headers['webhook-timestamp'], expectedBody, 'Jefe'),
   );
 });
 
@@ -142,7 +155,9 @@ test('--outpost-secret reads the injected environment and does not leak its valu
     d,
   );
 
-  assert.match(sent.headers['X-GhDelta-Signature'], /^sha256=[0-9a-f]{64}$/);
+  assert.match(sent.headers['webhook-signature'], /^v1,[A-Za-z0-9+/]+=*$/);
+  assert.match(sent.headers['webhook-timestamp'], /^\d+$/);
+  assert.equal(sent.headers['webhook-id'], JSON.parse(sent.body).deliveryId);
   assert.doesNotMatch(JSON.stringify(result), /not-in-report/);
   assert.doesNotMatch(sent.body, /not-in-report/);
 });
@@ -163,7 +178,7 @@ test('--outpost-secret requires an outpost URL and a non-empty injected value', 
   assert.match(emptyValue.report.error, /OUTPOST_SECRET.*unset or empty/);
 });
 
-test('unsigned postOutpost keeps the legacy headers and body bytes', async () => {
+test('unsigned postOutpost sends no Standard Webhooks headers and keeps the exact body bytes', async () => {
   const { postOutpost } = await import('../lib/outpost.mjs');
   let sent;
   await postOutpost(
@@ -432,8 +447,9 @@ test('economical watch logs derive from the selected state identity for explicit
       rateLimit: RATE_LIMIT,
     });
     let appended;
-    d.appendDeltaLog = (file) => {
+    d.appendDeltaLog = (file, record) => {
       appended = file;
+      return { fromSeq: 1, toSeq: record.deltas.length, appended: record.deltas.length };
     };
     d.removeWatchUnchanged = () => false;
     const result = run(['--repo', 'o/r', '--watch-dir', watch, '--log', ...stateArgs], d);
@@ -1348,7 +1364,10 @@ test('--ignore-authors suppresses review-comments-added when --enrich thread-rep
   const d = deps([[after]], { existing });
   const calls = [];
   const logged = [];
-  d.appendDeltaLog = (_file, record) => logged.push(record);
+  d.appendDeltaLog = (_file, record) => {
+    logged.push(record);
+    return { fromSeq: 1, toSeq: record.deltas.length, appended: record.deltas.length };
+  };
   d.fetchThreadReplies = (entries) => {
     calls.push(entries);
     return {
@@ -1829,7 +1848,7 @@ test('attention filters leave the persisted snapshot byte-identical and outpost 
       [43],
     );
     assert.equal(posts.length, 1);
-    assert.equal(posts[0].number, 43);
+    assert.equal(posts[0].delta.number, 43);
     assert.equal(readFileSync(filteredState, 'utf8'), readFileSync(unfilteredState, 'utf8'));
   } finally {
     rmSync(stateDir, { recursive: true, force: true });
@@ -2240,8 +2259,7 @@ test('gh-delta sends outpost payloads with monitor id after the snapshot write',
   assert.equal(posts[0].url, 'https://example.com/gh-delta');
   assert.equal(posts[0].body.type, 'gh-delta.delta');
   assert.equal(posts[0].body.monitorId, 'main');
-  assert.equal(posts[0].body.branch, undefined);
-  assert.equal(posts[0].body.eventId, 'gh-delta.delta.v1:o/r:main:pr:42:merged');
+  assert.equal(posts[0].body.delta.branch, undefined);
   assert.equal(
     posts[0].body.deliveryId,
     'gh-delta.delivery.v1:o/r:main:pr:42:merged:2026-07-01T12:00:00Z',
@@ -2403,7 +2421,7 @@ test('config validation precedes repo derivation: an invalid --outpost-url short
   assert.match(report.error, /--outpost-url must use http: or https:/);
 });
 
-test('outpost eventId is order-independent across class permutations', async () => {
+test('outpost deliveryId is order-independent across class permutations', async () => {
   const { buildOutpostPayload } = await import('../lib/outpost.mjs');
   const report = { repo: 'o/r', monitorId: 'main', detectedAt: '2026-07-01T12:00:00Z' };
   const a = buildOutpostPayload({
@@ -2424,16 +2442,14 @@ test('outpost eventId is order-independent across class permutations', async () 
       classes: ['ci-changed', 'review-changed'],
     },
   });
-  assert.equal(a.eventId, b.eventId);
   assert.equal(a.deliveryId, b.deliveryId);
-  assert.equal(a.eventId, 'gh-delta.delta.v1:o/r:main:pr:42:ci-changed+review-changed');
   assert.equal(
     a.deliveryId,
     'gh-delta.delivery.v1:o/r:main:pr:42:ci-changed+review-changed:2026-07-01T12:00:00Z',
   );
 });
 
-test('outpost eventId is stable across detector timestamps while deliveryId changes', async () => {
+test('outpost deliveryId changes across detector timestamps for the same delta', async () => {
   const { buildOutpostPayload } = await import('../lib/outpost.mjs');
   const delta = { entity: 'pr', number: 42, context: { title: 'x' }, classes: ['merged'] };
   const first = buildOutpostPayload({
@@ -2445,16 +2461,15 @@ test('outpost eventId is stable across detector timestamps while deliveryId chan
     delta,
   });
 
-  assert.equal(first.eventId, second.eventId);
   assert.notEqual(first.deliveryId, second.deliveryId);
 });
 
-test('outpost eventId repeats across different observed states while id does not (regression: id is the dedupe key, not eventId)', async () => {
+test('outpost delta.id changes across different observed states while deliveryId does not (regression: delta.id is the dedupe key, not deliveryId)', async () => {
   const { buildOutpostPayload } = await import('../lib/outpost.mjs');
   const report = { repo: 'o/r', monitorId: 'main', detectedAt: '2026-07-01T12:00:00Z' };
   // Same PR, same class set (ci-changed), two successive observed states —
-  // e.g. CI went red, then green. A receiver that dedupes by eventId would
-  // silently drop the second one; this is exactly the bug being fixed.
+  // e.g. CI went red, then green. A receiver that dedupes by deliveryId would
+  // silently drop the second one; delta.id is the one field safe to dedupe by.
   const first = buildOutpostPayload({
     report,
     delta: {
@@ -2475,11 +2490,11 @@ test('outpost eventId repeats across different observed states while id does not
       to: item({ state: 'open', ciRollup: 'green' }),
     },
   });
-  assert.equal(first.eventId, second.eventId);
-  assert.notEqual(first.id, second.id);
+  assert.equal(first.deliveryId, second.deliveryId);
+  assert.notEqual(first.delta.id, second.delta.id);
 });
 
-test('outpost id is stable across runs and across monitorId values for the same observed change', async () => {
+test('outpost delta.id is stable across runs and across monitorId values for the same observed change, while deliveryId is not', async () => {
   const { buildOutpostPayload } = await import('../lib/outpost.mjs');
   const delta = {
     entity: 'pr',
@@ -2500,61 +2515,81 @@ test('outpost id is stable across runs and across monitorId values for the same 
     report: { repo: 'o/r', monitorId: 'other-monitor', detectedAt: '2026-07-01T12:00:00Z' },
     delta,
   });
-  assert.equal(a.id, b.id);
-  assert.equal(a.id, c.id);
-  // eventId and deliveryId both include monitorId, so they diverge where id doesn't.
-  assert.notEqual(a.eventId, c.eventId);
+  assert.equal(a.delta.id, b.delta.id);
+  assert.equal(a.delta.id, c.delta.id);
+  // deliveryId includes monitorId, so it diverges where delta.id doesn't.
+  assert.notEqual(a.deliveryId, c.deliveryId);
 });
 
-test('outpost payload has exactly the documented key set (shape/byte-stability guard)', async () => {
+test('two monitors observing the same change produce the same delta.id but a different deliveryId', async () => {
   const { buildOutpostPayload } = await import('../lib/outpost.mjs');
+  const delta = {
+    id: 'f'.repeat(64),
+    repo: 'o/r',
+    entity: 'pr',
+    number: 42,
+    context: { title: 'x' },
+    classes: ['merged'],
+    to: item({ state: 'merged' }),
+  };
+  const a = buildOutpostPayload({
+    report: { monitorId: 'monitor-a', detectedAt: '2026-07-01T12:00:00Z' },
+    delta,
+  });
+  const b = buildOutpostPayload({
+    report: { monitorId: 'monitor-b', detectedAt: '2026-07-01T12:00:00Z' },
+    delta,
+  });
+  assert.equal(a.delta.id, b.delta.id);
+  assert.notEqual(a.deliveryId, b.deliveryId);
+});
+
+test('outpost payload has exactly the documented top-level key set, and embeds the report delta verbatim (no root-level field duplication)', async () => {
+  const { buildOutpostPayload } = await import('../lib/outpost.mjs');
+  const delta = {
+    id: 'a'.repeat(64),
+    repo: 'o/r',
+    entity: 'pr',
+    number: 42,
+    context: { title: 'x', headRefName: 'feature' },
+    classes: ['merged'],
+    seq: 7,
+    to: item({ state: 'merged', labels: [] }),
+  };
   const payload = buildOutpostPayload({
     report: { repo: 'o/r', monitorId: 'main', detectedAt: '2026-07-01T12:00:00Z' },
-    delta: {
-      entity: 'pr',
-      number: 42,
-      context: { title: 'x', headRefName: 'feature' },
-      classes: ['merged'],
-      to: item({ state: 'merged', labels: [] }),
-    },
+    delta,
   });
   assert.deepEqual(
     Object.keys(payload).sort(),
-    [
-      'classes',
-      'delta',
-      'deliveryId',
-      'detectedAt',
-      'entity',
-      'eventId',
-      'headRefName',
-      'id',
-      'labels',
-      'line',
-      'links',
-      'monitorId',
-      'number',
-      'repo',
-      'schemaVersion',
-      'state',
-      'title',
-      'type',
-    ].sort(),
+    ['type', 'schemaVersion', 'deliveryId', 'seq', 'monitorId', 'detectedAt', 'delta'].sort(),
   );
+  assert.deepEqual(payload.delta, delta, 'the embedded delta must be the report delta, unmodified');
+  assert.equal(payload.seq, 7);
 });
 
-test('outpost mirrors optional transient enrichment without adding it to legacy payloads', async () => {
+test('outpost payload seq is null (not omitted) when the delta carries no journal record', async () => {
+  const { buildOutpostPayload } = await import('../lib/outpost.mjs');
+  const payload = buildOutpostPayload({
+    report: { repo: 'o/r', monitorId: 'main', detectedAt: '2026-07-01T12:00:00Z' },
+    delta: { entity: 'issue', number: 1, context: { title: 'x' }, classes: ['new-comments'] },
+  });
+  assert.equal(payload.seq, null);
+  assert.equal(Object.hasOwn(payload, 'seq'), true);
+});
+
+test('outpost mirrors optional transient enrichment on the embedded delta, verbatim', async () => {
   const { buildOutpostPayload } = await import('../lib/outpost.mjs');
   const base = {
     report: { repo: 'o/r', monitorId: 'main', detectedAt: 'now' },
     delta: { entity: 'issue', number: 1, context: { title: 'x' }, classes: ['new-comments'] },
   };
-  assert.equal(Object.hasOwn(buildOutpostPayload(base), 'enrichment'), false);
+  assert.equal(Object.hasOwn(buildOutpostPayload(base).delta, 'enrichment'), false);
   const enrichment = {
     comments: [{ id: 'C1', author: 'a', createdAt: 'now', body: 'hi', mentions: [] }],
   };
   assert.deepEqual(
-    buildOutpostPayload({ ...base, delta: { ...base.delta, enrichment } }).enrichment,
+    buildOutpostPayload({ ...base, delta: { ...base.delta, enrichment } }).delta.enrichment,
     enrichment,
   );
 });
@@ -2596,6 +2631,7 @@ test('--enrich decorates surviving deltas only after snapshot publication and le
   d.appendDeltaLog = (_path, value) => {
     order.push('log');
     d.logged = value;
+    return { fromSeq: 1, toSeq: value.deltas.length, appended: value.deltas.length };
   };
   d.fetchEnrichment = (kind, ids) => {
     order.push(kind);
@@ -2662,6 +2698,72 @@ test('--enrich decorates surviving deltas only after snapshot publication and le
   assert.equal(JSON.stringify(d.logged).includes('enrichment'), false);
   assert.equal(d.snapshotBytes.includes('enrichment'), false);
   assert.match(result.report.deltas[0].enrichment.comments[0].mentions[0], /alice/);
+});
+
+test("with --log and --enrich, the delivered outpost payload seq matches that delta's journal record (R4 seq binding)", async () => {
+  const { runWithOutpost } = await import('../lib/cli.mjs');
+  const before = { ...basePr, reviews: [] };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    reviewDecision: 'changes_requested',
+    reviews: [
+      { id: 'R1', state: 'changes_requested', submittedAt: 'now', author: 'a', commit: 'b' },
+    ],
+  };
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
+  // A non-trivial fromSeq (not 1) proves the payload's seq is the delta's own
+  // journal record number, not an off-by-one or a hardcoded first-record guess.
+  d.appendDeltaLog = (_path, value) => ({
+    fromSeq: 5,
+    toSeq: 5 + value.deltas.length - 1,
+    appended: value.deltas.length,
+  });
+  d.fetchEnrichment = (_kind, ids) => ({
+    rows: [
+      {
+        id: ids[0],
+        author: 'a',
+        state: 'changes_requested',
+        submittedAt: 'now',
+        commit: 'b',
+        body: 'fix',
+      },
+    ],
+    rateLimit: RATE_LIMIT,
+  });
+  const posts = [];
+  d.outpostFetch = async (_url, options) => {
+    posts.push(JSON.parse(options.body));
+    return { ok: true, status: 202 };
+  };
+
+  const result = await runWithOutpost(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/x.json',
+      '--log',
+      '--enrich',
+      'review',
+      '--outpost-url',
+      'https://example.com/gh-delta',
+    ],
+    d,
+  );
+
+  assert.equal(result.code, 10);
+  assert.equal(result.report.deltas[0].seq, 5);
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].seq, 5);
+  // The delivered delta must be the ENRICHED one, even though the seq comes
+  // from the pre-enrichment journal write -- the two are sourced from the
+  // same object at different points in the pipeline, not from a snapshot
+  // taken at the same time.
+  assert.ok(posts[0].delta.enrichment?.review);
 });
 
 test('--enrich invalid selection is rejected before repository derivation', () => {
@@ -3247,7 +3349,7 @@ test('--detail reports the current missing tick for still-missing', () => {
   assert.equal(report.deltas[0].details[0].missingTicks, 2);
 });
 
-test('mixed-case --repo shares one snapshot and one eventId space', async () => {
+test('mixed-case --repo shares one snapshot and one deliveryId space', async () => {
   const { runWithOutpost } = await import('../lib/cli.mjs');
   const d = deps([[{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: {
@@ -3278,8 +3380,11 @@ test('mixed-case --repo shares one snapshot and one eventId space', async () => 
   assert.equal(code, 10);
   assert.deepEqual(report.repos, ['o/r']);
   assert.equal(d.readPath, '/tmp/state/repo-o%2Fr__monitor-main__pr-issue.json');
-  assert.equal(posts[0].eventId, 'gh-delta.delta.v1:o/r:main:pr:42:merged');
-  assert.match(posts[0].links.html, /^https:\/\/github\.com\/o\/r\/pull\/42$/);
+  assert.equal(
+    posts[0].deliveryId,
+    'gh-delta.delivery.v1:o/r:main:pr:42:merged:2026-07-01T12:00:00Z',
+  );
+  assert.equal(posts[0].delta.repo, 'o/r');
 });
 
 test('list subcommand returns a read-only inventory report with code 0', () => {

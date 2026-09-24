@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // gh-delta outpost receiver -> ntfy.sh push notifications.
 //
-// Receives one POST per delta (payload schema v1, see docs/contract.md),
-// deduplicates by `id` (the content-addressed identity of the observed
-// change — the contract's dedupe key; `eventId` identifies a series and
-// repeats by design across different observed states, so it must never gate
+// Receives one POST per delta (payload schema v2, see docs/contract.md):
+// {type, schemaVersion, deliveryId, seq, monitorId, detectedAt, delta}.
+// Deduplicates by `delta.id` (the content-addressed identity of the observed
+// change — the contract's dedupe key; `deliveryId` identifies one send
+// attempt and repeats by design on transport retries, so it must never gate
 // a discard), optionally filters by class, and forwards to an ntfy topic so
 // deltas reach a phone. Zero dependencies.
 //
@@ -15,7 +16,8 @@
 //      SEEN_FILE (default ./seen-events.jsonl),
 //      SEEN_MAX_ENTRIES (default 5000; oldest entries are dropped past this cap),
 //      OUTPOST_SECRET (optional shared secret; when set, every POST must carry
-//        an X-GhDelta-Signature HMAC over its raw body. See README.md).
+//        Standard Webhooks headers (webhook-id/webhook-timestamp/webhook-signature)
+//        verifiable with this secret. See README.md).
 //
 // SECURITY: with OUTPOST_SECRET unset, this receiver accepts and forwards any
 // well-formed POST with no authentication. That is fine bound to 127.0.0.1
@@ -29,19 +31,47 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 const MAX_REQUEST_BODY_BYTES = 64 * 1024;
+const MAX_TIMESTAMP_SKEW_SECONDS = 5 * 60;
 
 /**
- * Verify the exact SHA-256 HMAC over the raw request body.
- *
+ * Verify a request against the Standard Webhooks spec
+ * (https://www.standardwebhooks.com/): `webhook-signature` must contain a
+ * `v1,<base64 HMAC-SHA256>` entry over `"{webhook-id}.{webhook-timestamp}.{rawBody}"`
+ * matching `outpostSecret`, and `webhook-timestamp` must be within
+ * MAX_TIMESTAMP_SKEW_SECONDS of now (replay protection).
  */
 function isAuthorized(req, rawBody, outpostSecret) {
   if (!outpostSecret) return true;
-  const signature = req.headers['x-ghdelta-signature'];
-  const match = typeof signature === 'string' && /^sha256=([0-9a-f]{64})$/.exec(signature);
-  if (!match) return false;
-  const provided = Buffer.from(match[1], 'hex');
-  const expected = createHmac('sha256', outpostSecret).update(rawBody).digest();
-  return provided.length === expected.length && timingSafeEqual(provided, expected);
+  const id = req.headers['webhook-id'];
+  const timestamp = req.headers['webhook-timestamp'];
+  const signatureHeader = req.headers['webhook-signature'];
+  if (
+    typeof id !== 'string' ||
+    typeof timestamp !== 'string' ||
+    typeof signatureHeader !== 'string'
+  ) {
+    return false;
+  }
+  const timestampSeconds = Number(timestamp);
+  if (!Number.isFinite(timestampSeconds)) return false;
+  if (Math.abs(Date.now() / 1000 - timestampSeconds) > MAX_TIMESTAMP_SKEW_SECONDS) return false;
+
+  const expected = createHmac('sha256', outpostSecret)
+    .update(`${id}.${timestamp}.${rawBody}`, 'utf8')
+    .digest();
+  // webhook-signature may list several space-separated `v{n},<sig>` entries
+  // (for secret rotation); any one matching is sufficient.
+  return signatureHeader.split(' ').some((entry) => {
+    const [version, encoded] = entry.split(',');
+    if (version !== 'v1' || !encoded) return false;
+    let provided;
+    try {
+      provided = Buffer.from(encoded, 'base64');
+    } catch {
+      return false;
+    }
+    return provided.length === expected.length && timingSafeEqual(provided, expected);
+  });
 }
 
 // Seen state is one record per (entity, number) item — the LAST id forwarded
@@ -62,7 +92,7 @@ function isAuthorized(req, rawBody, outpostSecret) {
 // rewriting the file on every request.
 
 function itemKey(payload) {
-  return `${payload.entity}#${payload.number}`;
+  return `${payload.delta.entity}#${payload.delta.number}`;
 }
 
 /**
@@ -130,11 +160,11 @@ function loadSeenState(text) {
  * `action === 'forward'`.
  */
 function shouldForward(seenMap, payload, classes) {
-  if (classes.length && !payload.classes?.some((cls) => classes.includes(cls))) {
+  if (classes.length && !payload.delta.classes?.some((cls) => classes.includes(cls))) {
     return { action: 'filtered', key: null };
   }
   const key = itemKey(payload);
-  if (seenMap.get(key) === payload.id) {
+  if (seenMap.get(key) === payload.delta.id) {
     return { action: 'deduped', key: null };
   }
   return { action: 'forward', key };
@@ -145,14 +175,30 @@ function respond(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+// v2 payloads carry no `line`/`links` (dropped as root-level duplication of
+// the delta) -- build the notification title/click-through/body from
+// `payload.delta` directly instead.
+function htmlLink(delta) {
+  const path = delta.entity === 'pr' ? 'pull' : 'issues';
+  return `https://github.com/${delta.repo}/${path}/${delta.number}`;
+}
+
+function notificationLine(delta) {
+  return (
+    delta.summaryLine ??
+    `${delta.entity.toUpperCase()} #${delta.number} "${delta.context?.title ?? ''}": ${(delta.classes ?? []).join(', ')}`
+  );
+}
+
 async function forward(payload, ntfyBaseUrl, ntfyTopic) {
+  const { delta } = payload;
   const response = await globalThis.fetch(`${ntfyBaseUrl}/${ntfyTopic}`, {
     method: 'POST',
     headers: {
-      Title: `${payload.repo} ${payload.entity.toUpperCase()} #${payload.number}`,
-      Click: payload.links?.html ?? '',
+      Title: `${delta.repo} ${delta.entity.toUpperCase()} #${delta.number}`,
+      Click: htmlLink(delta),
     },
-    body: payload.line,
+    body: notificationLine(delta),
   });
   if (!response.ok) throw new Error(`ntfy HTTP ${response.status}`);
 }
@@ -192,16 +238,18 @@ function createReceiverHandler({
       } catch {
         return respond(res, 400, { error: 'invalid JSON' });
       }
-      if (payload?.type !== 'gh-delta.delta' || payload?.schemaVersion !== 1) {
+      // TODO(E0): OUTPOST_SCHEMA_VERSION bumps to 2 alongside lib/contract.mjs;
+      // this literal 1 must move in lockstep once that lands.
+      if (payload?.type !== 'gh-delta.delta' || payload?.schemaVersion !== 1 || !payload?.delta) {
         return respond(res, 400, { error: 'expected gh-delta.delta schemaVersion 1' });
       }
       const decision = shouldForward(seen, payload, classes);
       if (decision.action === 'filtered') return respond(res, 202, { filtered: true });
       if (decision.action === 'deduped') return respond(res, 202, { deduped: true });
-      recordSeen(decision.key, payload.id, payload.detectedAt);
+      recordSeen(decision.key, payload.delta.id, payload.detectedAt);
       respond(res, 202, { accepted: true });
       forwardPayload(payload).catch((err) =>
-        console.error(`receiver: ntfy forward failed for ${payload.id}: ${err.message}`),
+        console.error(`receiver: ntfy forward failed for ${payload.delta.id}: ${err.message}`),
       );
     });
   };

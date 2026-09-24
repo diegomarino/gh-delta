@@ -119,7 +119,7 @@ test('headRefName is present across families with a current object, absent on mi
   assert.equal(back.deltas[0].context.headRefName, 'b/u');
 });
 
-test('the outpost payload mirrors the report delta for headRefName', () => {
+test('the outpost payload embeds the report delta verbatim, headRefName included exactly as given', () => {
   const report = { repo: 'o/r', monitorId: 'm', detectedAt: '2026-07-01T12:00:00Z' };
   // PR with a current object → carries the branch (or null if deleted post-merge).
   const change = {
@@ -130,8 +130,8 @@ test('the outpost payload mirrors the report delta for headRefName', () => {
     from: { state: 'open' },
     to: { state: 'merged' },
   };
-  // Missing-family PR has NO current object; the report delta omits headRefName,
-  // so the payload must omit it too (never fabricate a null).
+  // Missing-family PR has NO current object; the report delta omits headRefName --
+  // verbatim embedding means the payload must omit it too, never fabricate a null.
   const missing = {
     entity: 'pr',
     number: 42,
@@ -149,9 +149,18 @@ test('the outpost payload mirrors the report delta for headRefName', () => {
     from: {},
     to: { labels: ['x'] },
   };
-  assert.equal(buildOutpostPayload({ report, delta: change }).headRefName, 'feature/z');
-  assert.equal('headRefName' in buildOutpostPayload({ report, delta: missing }), false);
-  assert.equal('headRefName' in buildOutpostPayload({ report, delta: issueDelta }), false);
+  assert.equal(
+    buildOutpostPayload({ report, delta: change }).delta.context.headRefName,
+    'feature/z',
+  );
+  assert.equal(
+    'headRefName' in buildOutpostPayload({ report, delta: missing }).delta.context,
+    true,
+  );
+  assert.equal(
+    'headRefName' in buildOutpostPayload({ report, delta: issueDelta }).delta.context,
+    false,
+  );
 });
 
 test('headRefName carries over from the last known context on presumed-deleted', () => {

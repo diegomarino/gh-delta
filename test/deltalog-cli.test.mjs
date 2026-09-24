@@ -87,7 +87,10 @@ function producerDeps(overrides = {}) {
     fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
     readSnapshot: () => before,
     writeSnapshotAtomic: () => events.push('snapshot'),
-    appendDeltaLog: (file, payload) => events.push(['log', file, payload]),
+    appendDeltaLog: (file, payload) => {
+      events.push(['log', file, payload]);
+      return { fromSeq: 1, toSeq: payload.deltas.length, appended: payload.deltas.length };
+    },
     now: () => '2026-09-20T12:00:00.000Z',
     ...overrides,
     events,
@@ -416,7 +419,16 @@ test('attention filtering stores the exact fully decorated surviving report delt
   );
   assert.equal(result.code, 10);
   const logged = deps.events.find(([kind]) => kind === 'log')[2].deltas;
-  assert.deepEqual(logged, result.report.deltas);
+  // The durable log record is written pre-seq-stamp (R4): it is a shallow
+  // copy of the same deltas taken before `seq` (the journal record number)
+  // is attached to the report-facing objects, so the two diverge on that one
+  // field by design -- compare everything else, then seq separately.
+  assert.deepEqual(
+    logged.map(({ seq: _seq, ...rest }) => rest),
+    result.report.deltas.map(({ seq: _seq, ...rest }) => rest),
+  );
+  assert.equal(logged[0].seq, undefined);
+  assert.equal(result.report.deltas[0].seq, 1);
   assert.ok(logged[0].summary);
   assert.ok(logged[0].summaryLine);
   assert.ok(logged[0].details.length > 0);
