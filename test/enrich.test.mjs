@@ -167,6 +167,54 @@ test('selected kinds with no final matching class make no calls, while a failed 
   assert.deepEqual(Object.keys(delta.enrichment), ['comments']);
 });
 
+test('thread-replies fetches exactly the threads whose count rose, with per-thread increment', () => {
+  const delta = {
+    classes: ['review-comments-added'],
+    from: item({
+      threads: [
+        { id: 'T1', resolved: false, comments: 1 },
+        { id: 'T2', resolved: false, comments: 3 },
+      ],
+    }),
+    to: item({
+      threads: [
+        { id: 'T1', resolved: false, comments: 3 },
+        { id: 'T2', resolved: false, comments: 3 },
+      ],
+    }),
+  };
+  const calls = [];
+  const { warnings } = enrichEmittedDeltas([delta], ['thread-replies'], {
+    fetch: (kind, ids) => {
+      calls.push({ kind, ids });
+      return {
+        rows: [{ id: 'T1', replies: [{ id: 'C1', author: 'bob', createdAt: 'now', body: 'x' }] }],
+        rateLimit: null,
+      };
+    },
+  });
+  assert.deepEqual(calls, [{ kind: 'thread-replies', ids: [{ id: 'T1', increment: 2 }] }]);
+  assert.equal(warnings.length, 0);
+  assert.deepEqual(delta.enrichment['thread-replies'], [
+    { id: 'T1', replies: [{ id: 'C1', author: 'bob', createdAt: 'now', body: 'x' }] },
+  ]);
+});
+
+test('thread-replies with no attributable increment is an opaque-identity warning', () => {
+  const delta = {
+    classes: ['review-comments-added'],
+    from: item({ threads: [{ id: 'T3', resolved: false, comments: 5 }] }),
+    to: item({ threads: [{ id: 'T3', resolved: false, comments: 5 }] }),
+  };
+  const { warnings } = enrichEmittedDeltas([delta], ['thread-replies'], {
+    fetch: () => {
+      throw new Error('must not call');
+    },
+  });
+  assert.equal(warnings.length, 1);
+  assert.equal(delta.enrichment, undefined);
+});
+
 test('extractMentions ignores email domains and deduplicates case-insensitively', () => {
   assert.deepEqual(extractMentions('a@b.com @One @one @org/team'), ['One', 'org/team']);
 });
