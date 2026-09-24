@@ -87,6 +87,36 @@ test('wait evaluates an already-satisfied summary from the first snapshot and to
   assert.deepEqual(heartbeats, ['/tmp/wait-summary.json.hb', '/tmp/wait-summary.json.hb']);
 });
 
+test('wait --until-summary matches an already-satisfied PR under --repo autodetect (no --repo, no --state-file)', async () => {
+  let snapshot = null;
+  const heartbeats = [];
+  const result = await runCommand(
+    ['wait', '--entities', 'pr', '--timeout', '1m', '--until-summary', 'ciRollup=green'],
+    {
+      ...noopLock,
+      resolveRepo: () => ({ status: 'found', repo: 'o/r', source: 'git-remote', warnings: [] }),
+      fetchPRs: () => ({ rows: [prWithGreenCi], rateLimit: RATE_LIMIT }),
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+      readSnapshot: () => snapshot,
+      writeSnapshotAtomic: (_path, next) => {
+        snapshot = next;
+      },
+      touchHeartbeat: (path) => heartbeats.push(path),
+      now: () => '2026-09-21T08:00:00.000Z',
+    },
+  );
+
+  // Neither derivedWaitStateFiles (no --repo/--state-file on `wait` itself)
+  // nor waitSummaryMatches (the baseline tick has no deltas) can see this --
+  // only the tick report's own results[].stateFile, read fresh off disk, can.
+  assert.equal(result.code, 10);
+  assert.equal(result.report.reason, 'already-satisfied');
+  assert.ok(
+    heartbeats.length > 0,
+    'heartbeatFileFor must also derive a path from results[].stateFile',
+  );
+});
+
 test('wait --from-log reads the cursor-bound log without invoking GitHub', async () => {
   const result = await runCommand(
     [
