@@ -860,7 +860,12 @@ test('fetchThreadReplies requests one aliased node(id:) per thread with its own 
           id: 'T1',
           comments: {
             nodes: [
-              { id: 'C10', author: { login: 'bob' }, createdAt: '2026-07-01T11:00:00Z', body: 'reply' },
+              {
+                id: 'C10',
+                author: { login: 'bob' },
+                createdAt: '2026-07-01T11:00:00Z',
+                body: 'reply',
+              },
             ],
           },
         },
@@ -869,7 +874,12 @@ test('fetchThreadReplies requests one aliased node(id:) per thread with its own 
           id: 'T2',
           comments: {
             nodes: [
-              { id: 'C20', author: { login: 'carol' }, createdAt: '2026-07-01T11:01:00Z', body: 'r1' },
+              {
+                id: 'C20',
+                author: { login: 'carol' },
+                createdAt: '2026-07-01T11:01:00Z',
+                body: 'r1',
+              },
               { id: 'C21', author: null, createdAt: '2026-07-01T11:02:00Z', body: 'r2' },
             ],
           },

@@ -188,6 +188,14 @@
                 "base-changed": {
                   "type": "integer",
                   "minimum": 1
+                },
+                "review-comments-added": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "review-comments-removed": {
+                  "type": "integer",
+                  "minimum": 1
                 }
               },
               "additionalProperties": false
@@ -266,7 +274,9 @@
                     "comments-removed",
                     "assignees-changed",
                     "review-requests-changed",
-                    "base-changed"
+                    "base-changed",
+                    "review-comments-added",
+                    "review-comments-removed"
                   ]
                 }
               },
@@ -560,6 +570,14 @@
                 "base-changed": {
                   "type": "integer",
                   "minimum": 1
+                },
+                "review-comments-added": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "review-comments-removed": {
+                  "type": "integer",
+                  "minimum": 1
                 }
               },
               "additionalProperties": false
@@ -638,7 +656,9 @@
                     "comments-removed",
                     "assignees-changed",
                     "review-requests-changed",
-                    "base-changed"
+                    "base-changed",
+                    "review-comments-added",
+                    "review-comments-removed"
                   ]
                 }
               },
@@ -933,6 +953,14 @@
                 "base-changed": {
                   "type": "integer",
                   "minimum": 1
+                },
+                "review-comments-added": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "review-comments-removed": {
+                  "type": "integer",
+                  "minimum": 1
                 }
               },
               "additionalProperties": false
@@ -1011,7 +1039,9 @@
                     "comments-removed",
                     "assignees-changed",
                     "review-requests-changed",
-                    "base-changed"
+                    "base-changed",
+                    "review-comments-added",
+                    "review-comments-removed"
                   ]
                 }
               },

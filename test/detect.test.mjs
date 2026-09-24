@@ -868,22 +868,36 @@ test('every emitted detail key is declared in the exported contract, across ever
   deltas.push(...back.deltas);
 
   // new-comments / comments-removed
-  const sC = detectDeltas(null, { pr: [pr({ number: 30, conversationComments: 3 })], issue: [] }, { at: AT });
+  const sC = detectDeltas(
+    null,
+    { pr: [pr({ number: 30, conversationComments: 3 })], issue: [] },
+    { at: AT },
+  );
   const tMore = detectDeltas(
     sC.snapshot,
-    { pr: [pr({ number: 30, conversationComments: 5, updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
+    {
+      pr: [pr({ number: 30, conversationComments: 5, updatedAt: '2026-07-01T11:00:00Z' })],
+      issue: [],
+    },
     { at: '2026-07-01T11:00:00Z' },
   );
   deltas.push(...tMore.deltas);
   const tLess = detectDeltas(
     tMore.snapshot,
-    { pr: [pr({ number: 30, conversationComments: 2, updatedAt: '2026-07-01T12:00:00Z' })], issue: [] },
+    {
+      pr: [pr({ number: 30, conversationComments: 2, updatedAt: '2026-07-01T12:00:00Z' })],
+      issue: [],
+    },
     { at: '2026-07-01T12:00:00Z' },
   );
   deltas.push(...tLess.deltas);
 
   // review-comments-added / review-comments-removed
-  const sRc = detectDeltas(null, { pr: [pr({ number: 31, reviewComments: 3 })], issue: [] }, { at: AT });
+  const sRc = detectDeltas(
+    null,
+    { pr: [pr({ number: 31, reviewComments: 3 })], issue: [] },
+    { at: AT },
+  );
   const tRcMore = detectDeltas(
     sRc.snapshot,
     { pr: [pr({ number: 31, reviewComments: 5, updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
