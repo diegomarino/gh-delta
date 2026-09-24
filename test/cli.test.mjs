@@ -1405,7 +1405,42 @@ test('--ignore-authors + --enrich thread-replies warns (does not silently suppre
   const result = run([...FILTER_ARGS, '--ignore-authors', 'bot', '--enrich', 'thread-replies'], d);
   assert.equal(result.code, 10);
   assert.ok(result.report.deltas[0].classes.includes('review-comments-added'));
-  assert.ok(result.warnings.some((w) => /no prior baseline/i.test(w.reason)));
+  assert.ok(result.warnings.some((w) => /attributable/i.test(w.reason)));
+});
+
+test('--ignore-authors + --enrich thread-replies warns and does not suppress review-comments-added when a brand-new thread only partly explains the rise', () => {
+  // T1 is established and rose by 1 (attributable, all-bot). T2 is brand new
+  // this tick with 2 comments from a human -- threadReplyIncrements excludes
+  // it (no prior baseline), so the fetched rows only ever cover T1's +1 out
+  // of the observed +3 reviewComments rise. Suppressing on T1 alone would
+  // silently drop a delta a human review reply is hiding inside.
+  const before = {
+    ...basePr,
+    reviewComments: 1,
+    threads: [{ id: 'T1', resolved: false, comments: 1 }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    reviewComments: 4,
+    threads: [
+      { id: 'T1', resolved: false, comments: 2 },
+      { id: 'T2', resolved: false, comments: 2 },
+    ],
+  };
+  const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
+  const d = deps([[after]], { existing });
+  d.fetchThreadReplies = (entries) => {
+    assert.deepEqual(entries, [{ id: 'T1', increment: 1 }]);
+    return {
+      rows: [{ id: 'T1', replies: [{ id: 'C1', author: 'bot', createdAt: 'now', body: 'x' }] }],
+      rateLimit: RATE_LIMIT,
+    };
+  };
+  const result = run([...FILTER_ARGS, '--ignore-authors', 'bot', '--enrich', 'thread-replies'], d);
+  assert.equal(result.code, 10);
+  assert.ok(result.report.deltas[0].classes.includes('review-comments-added'));
+  assert.ok(result.warnings.some((w) => /attributable/i.test(w.reason)));
 });
 
 test('--ignore-authors fails open on review-changed when reviewDecision itself moved, even if a changed review row is ignored', () => {
