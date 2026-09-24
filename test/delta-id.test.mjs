@@ -59,13 +59,27 @@ const NOOP_LOCK_DEPS = {
   assertLockOwned: () => true,
 };
 
+// Schema v2 snapshot-wide meta is mandatory (lib/snapshot.mjs); stamp a
+// default onto any hand-built `existing` fixture that omits it.
+const DEFAULT_OLD_META = {
+  schemaVersion: 2,
+  ghDeltaVersion: '0.0.0-test',
+  repo: 'o/r',
+  monitorId: 'main',
+  entities: ['pr', 'issue'],
+  scope: 'poll',
+  horizon: '2026-07-01T11:00:00.000Z',
+  createdAt: '2026-07-01T11:00:00.000Z',
+  updatedAt: '2026-07-01T11:00:00.000Z',
+};
+
 // Minimal `run()` harness mirroring test/cli.test.mjs: no disk, no network.
 // `stored` persists across successive run() calls so the missing lifecycle can
 // advance tick by tick.
 const RATE_LIMIT = { cost: 1, remaining: 4999, resetAt: '2026-07-01T13:00:00.000Z' };
 
 function deps(prSeq, { existing = null } = {}) {
-  let stored = existing;
+  let stored = existing && !existing.meta ? { ...existing, meta: DEFAULT_OLD_META } : existing;
   return {
     ...NOOP_LOCK_DEPS,
     fetchPRs: () => ({ rows: prSeq.shift(), rateLimit: RATE_LIMIT }),

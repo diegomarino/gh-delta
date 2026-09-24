@@ -2,7 +2,7 @@
 // stay read-only, and report broken snapshots instead of failing on them.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { listMonitors, parseSince, parseSnapshotFilename } from '../lib/list.mjs';
@@ -27,9 +27,31 @@ const item = (fingerprint = { state: 'OPEN' }) => ({
   },
 });
 
+// Schema v2 snapshot-wide meta is mandatory -- see lib/snapshot.mjs's
+// validateSnapshotMeta. horizon/createdAt/updatedAt default to NOW so callers
+// below only need to override what a given test actually cares about.
+function META(overrides = {}) {
+  return {
+    schemaVersion: 2,
+    ghDeltaVersion: '0.0.0-test',
+    repo: 'o/r',
+    monitorId: 'm',
+    entities: ['pr'],
+    scope: 'poll',
+    horizon: NOW,
+    createdAt: NOW,
+    updatedAt: NOW,
+    ...overrides,
+  };
+}
+
 function seed(dir, repo, monitorId, entities, snapshot) {
   const path = snapshotPath(repo, monitorId, entities, dir);
-  writeSnapshotAtomic(path, snapshot);
+  const { meta: metaOverrides, ...rest } = snapshot;
+  writeSnapshotAtomic(path, {
+    ...rest,
+    meta: META({ repo, monitorId, entities: entities.split(','), ...metaOverrides }),
+  });
   return path;
 }
 
@@ -116,16 +138,6 @@ test('listMonitors reports a corrupt snapshot as an entry, not a failure', () =>
   assert.ok(monitors[0].lastRun); // mtime fallback keeps the entry sortable
 });
 
-test('listMonitors falls back to mtime for legacy snapshots without meta', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'gd-list-'));
-  const path = seed(dir, 'o/r', 'legacy', 'pr', { pr: {}, issue: {} });
-  const mtime = new Date('2026-07-08T10:30:00.000Z');
-  utimesSync(path, mtime, mtime);
-
-  const { monitors } = listMonitors(dir, { now: () => NOW });
-  assert.equal(monitors[0].lastRun, mtime.toISOString());
-});
-
 test('listMonitors --since window keeps only recent monitors', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-list-'));
   seed(dir, 'o/r', 'fresh', 'pr', {
@@ -170,12 +182,12 @@ test('listMonitors identifies self-describing snapshots with arbitrary filenames
   writeSnapshotAtomic(join(dir, 'my-private-monitor.json'), {
     pr: { 5: item() },
     issue: {},
-    meta: {
+    meta: META({
       horizon: '2026-07-08T11:00:00.000Z',
       repo: 'o/r',
       monitorId: 'prs-fast',
       entities: ['pr'],
-    },
+    }),
   });
 
   const { monitors, skippedFiles } = listMonitors(dir, { now: () => NOW });
@@ -212,7 +224,12 @@ test('listMonitors merges the registry, dedupes scanned paths, and marks stale e
   writeSnapshotAtomic(external, {
     pr: {},
     issue: { 9: item() },
-    meta: { horizon: '2026-07-08T10:00:00.000Z' },
+    meta: META({
+      horizon: '2026-07-08T10:00:00.000Z',
+      repo: 'o/other',
+      monitorId: 'issues',
+      entities: ['issue'],
+    }),
   });
   registerMonitor({
     repo: 'o/other',
@@ -258,7 +275,13 @@ test('registry-only economical snapshots retain their PR scope and counts', () =
   writeSnapshotAtomic(external, {
     pr: { 42: item() },
     issue: {},
-    meta: { horizon: NOW, repo: 'o/r', monitorId: 'watch', entities: ['pr'], scope: 'watch-pr' },
+    meta: META({
+      horizon: NOW,
+      repo: 'o/r',
+      monitorId: 'watch',
+      entities: ['pr'],
+      scope: 'watch-pr',
+    }),
   });
   registerMonitor({
     repo: 'o/r',
@@ -285,12 +308,12 @@ test('a newer snapshot observation supersedes a stale registry success timestamp
   writeSnapshotAtomic(external, {
     pr: {},
     issue: {},
-    meta: {
+    meta: META({
       horizon: '2026-07-08T11:30:00.000Z',
       repo: 'o/r',
       monitorId: 'no-registry-run',
       entities: ['pr'],
-    },
+    }),
   });
   registerMonitor({
     repo: 'o/r',
@@ -352,4 +375,16 @@ test('list distinguishes a failed first attempt from a lost successful snapshot 
   assert.equal(all.find((m) => m.repo === 'o/failed').observationAgeMs, null);
   assert.equal(all.find((m) => m.repo === 'o/lost').snapshotStatus, 'expected-missing');
   assert.equal(all.find((m) => m.repo === 'o/lost').stale, true);
+});
+
+test('listMonitors reports schemaVersion for a valid snapshot and null for a corrupt one', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-list-'));
+  seed(dir, 'o/r', 'valid', 'pr', { pr: {}, issue: {} });
+  writeFileSync(snapshotPath('o/r', 'broken', 'pr', dir), '{ not json');
+
+  const { monitors } = listMonitors(dir, { now: () => NOW });
+  const valid = monitors.find((m) => m.monitorId === 'valid');
+  const broken = monitors.find((m) => m.monitorId === 'broken');
+  assert.equal(valid.schemaVersion, 2);
+  assert.equal(broken.schemaVersion, null);
 });

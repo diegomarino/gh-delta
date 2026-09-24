@@ -200,9 +200,26 @@ const NOOP_LOCK_DEPS = {
 // --rate-limit-floor and the "tick accumulates" test below).
 const RATE_LIMIT = { cost: 1, remaining: 4999, resetAt: '2026-07-01T13:00:00.000Z' };
 
+// Schema v2 snapshot-wide meta is mandatory (lib/snapshot.mjs). Most
+// `existing` fixtures below only care about pr/issue contents, so `deps()`
+// stamps a valid default meta onto any `existing` snapshot that doesn't
+// already carry one -- letting horizonCutoff/writeSnapshotAtomic's meta
+// bookkeeping proceed without every fixture spelling out the full shape.
+const DEFAULT_OLD_META = {
+  schemaVersion: 2,
+  ghDeltaVersion: '0.0.0-test',
+  repo: 'o/r',
+  monitorId: 'main',
+  entities: ['pr', 'issue'],
+  scope: 'poll',
+  horizon: '2026-07-01T11:00:00.000Z',
+  createdAt: '2026-07-01T11:00:00.000Z',
+  updatedAt: '2026-07-01T11:00:00.000Z',
+};
+
 function deps(prSeq, { existing = null } = {}) {
   let writes = 0;
-  let stored = existing;
+  let stored = existing && !existing.meta ? { ...existing, meta: DEFAULT_OLD_META } : existing;
   let readPath;
   let writePath;
   return {
@@ -642,7 +659,7 @@ test('a gh failure returns code 1 and does NOT write the snapshot', () => {
       throw new Error('gh: rate limited');
     },
     fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
-    readSnapshot: () => ({ pr: {}, issue: {} }),
+    readSnapshot: () => ({ pr: {}, issue: {}, meta: DEFAULT_OLD_META }),
     writeSnapshotAtomic: () => {
       throw new Error('should not be called');
     },
@@ -2937,6 +2954,7 @@ test('--detail reports the current missing tick for still-missing', () => {
         42: item(openFp, { missingTicks: 1 }),
       },
       issue: {},
+      meta: DEFAULT_OLD_META,
     }),
     writeSnapshotAtomic: (_p, data) => {
       d.written = data;
@@ -3119,7 +3137,7 @@ test('list --format text renders one line per monitor plus skipped files', async
   assert.match(output, /^2026-07-08T12:00:00\.000Z \| 2 monitor\(s\) \| \/state\n/);
   assert.match(
     output,
-    /o\/r \| monitor: prs-5m \| entities: pr,issue \| last run: 2026-07-08T11:00:00\.000Z \| 2 PR\(s\), 3 issue\(s\)/,
+    /o\/r \| monitor: prs-5m \| entities: pr,issue \| schema: .* \| last run: 2026-07-08T11:00:00\.000Z \| 2 PR\(s\), 3 issue\(s\)/,
   );
   assert.match(output, /o\/r \| monitor: broken \| .* \| snapshot error: invalid snapshot JSON/);
   assert.match(output, /2 unrecognized file\(s\) skipped\./);
@@ -3324,11 +3342,17 @@ test('snapshots are self-describing: meta carries identity next to horizon', () 
     d,
   );
   assert.deepEqual(d.stored.meta, {
-    horizon: '2026-07-01T12:00:00Z',
+    schemaVersion: 2,
+    ghDeltaVersion: d.stored.meta.ghDeltaVersion,
     repo: 'o/r',
     monitorId: 'main',
     entities: ['pr'],
+    scope: 'poll',
+    horizon: '2026-07-01T12:00:00Z',
+    createdAt: '2026-07-01T12:00:00Z',
+    updatedAt: '2026-07-01T12:00:00Z',
   });
+  assert.match(d.stored.meta.ghDeltaVersion, /^\d+\.\d+\.\d+/);
 });
 
 test('list without --state-dir consults the run registry; --state-dir narrows to a scan', () => {

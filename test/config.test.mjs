@@ -75,7 +75,21 @@ test('configuration supplies detector outpost settings to the delivery boundary'
     acquireLock: () => ({ ok: true, token: 'lock' }),
     releaseLock: () => ({ ok: true }),
     assertLockOwned: () => true,
-    readSnapshot: () => ({ pr: {}, issue: {} }),
+    readSnapshot: () => ({
+      pr: {},
+      issue: {},
+      meta: {
+        schemaVersion: 2,
+        ghDeltaVersion: '0.0.0-test',
+        repo: 'o/r',
+        monitorId: 'main',
+        entities: ['pr', 'issue'],
+        scope: 'poll',
+        horizon: '2025-12-31T00:00:00.000Z',
+        createdAt: '2025-12-31T00:00:00.000Z',
+        updatedAt: '2025-12-31T00:00:00.000Z',
+      },
+    }),
     writeSnapshotAtomic: () => {},
     fetchPRs: () => ({
       rows: [
