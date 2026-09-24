@@ -113,7 +113,7 @@ harmless duplicate pings right after the upgrade, never a missed one.
   `deliveryId` names one send attempt (useful for processing idempotency on
   transport retries) and is stable-per-attempt only — it must never be used
   to discard a payload; see the
-  [payload schema](../../docs/contract.md#outpost-payload-schema-v1).
+  [payload schema](../../docs/contract.md#outpost-payload-schema-v2).
 - **Filter before you record.** `delta.id` also excludes `classes` whenever
   there's an observed `to` state, so two monitors with different snapshot
   histories can reach the same final state through different transitions and

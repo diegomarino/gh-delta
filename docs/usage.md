@@ -338,8 +338,10 @@ just `delta.changed`.
 `--enrich <kinds>` is an opt-in, comma-separated selection of body fetches
 (`review`, `comments`, `threads`, `body`, `thread-replies`), off by default.
 After a successful snapshot write, it fetches bodies only for matching
-emitted deltas — one extra GitHub call per matching delta, never one per
-observed item — and attaches the result as transient `delta.enrichment`
+emitted deltas — one extra GitHub call per matching `(delta, kind)` pair, so a
+delta whose classes match multiple selected kinds costs one call per matching
+kind, never one per observed item — and attaches the result as transient
+`delta.enrichment`
 (never written to the snapshot or a durable log, and never affecting
 detection):
 

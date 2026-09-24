@@ -6,8 +6,14 @@
 // From this repo checkout the imports are relative. From the published
 // package they are:
 //   import { detectDeltas } from 'gh-delta/detect';
-//   import { readSnapshot, snapshotPath, writeSnapshotAtomic } from 'gh-delta/snapshot';
+//   import {
+//     readSnapshot,
+//     snapshotPath,
+//     writeSnapshotAtomic,
+//     SNAPSHOT_SCHEMA_VERSION,
+//   } from 'gh-delta/snapshot';
 //   import { DELTA_CLASSES, REPORT_SCHEMA_VERSION } from 'gh-delta/contract';
+//   import { getPackageMetadata } from 'gh-delta/version';
 import { execFileSync } from 'node:child_process';
 import { detectDeltas } from '../../lib/detect.mjs';
 import {
