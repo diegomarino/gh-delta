@@ -127,6 +127,19 @@ test('reset report covers exactly RESET_REPORT_FIELDS', () => {
   assert.match(result.report.logFile, /\.deltalog\.ndjson$/);
 });
 
+test('reset is excluded from config application, so a GH_DELTA_* env var carrying detector-only flags does not break it', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-reset-'));
+  const stateFile = join(dir, 'state.json');
+  seedMonitor(stateFile);
+  const result = run(
+    ['reset', '--repo', REPO, '--monitor-id', MONITOR, '--state-file', stateFile, '--yes'],
+    { now: () => '2026-09-20T12:00:00.000Z', env: { ...process.env, GH_DELTA_DETAIL: 'true' } },
+  );
+  assert.equal(result.code, 0);
+  assert.equal(result.report.command, 'reset');
+  assert.equal(existsSync(stateFile), false);
+});
+
 test('a tick contending for the lock during reset gets busy; once reset completes a later tick starts against clean state', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-reset-lock-'));
   const stateFile = join(dir, 'state.json');

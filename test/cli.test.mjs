@@ -1431,6 +1431,41 @@ test('--ignore-authors + --enrich thread-replies warns (does not silently suppre
   assert.ok(result.warnings.some((w) => /attributable/i.test(w.reason)));
 });
 
+test('--number scope excludes a non-selected PR before the --ignore-authors thread-reply fetch, not after', () => {
+  const { before: before42, after: after42 } = threadReplyFixture(1, 1);
+  const { before: before99, after: after99 } = threadReplyFixture(1, 3);
+  const existing = {
+    pr: { 42: item(prFingerprint(before42)), 99: item(prFingerprint(before99)) },
+    issue: {},
+  };
+  const d = deps(
+    [
+      [
+        { ...after42, number: 42 },
+        { ...after99, number: 99 },
+      ],
+    ],
+    { existing },
+  );
+  d.fetchThreadReplies = () => {
+    throw new Error('must not be called: PR #99 is outside the --number 42 selection');
+  };
+  const result = run(
+    [...FILTER_ARGS, '--number', '42', '--ignore-authors', 'bot', '--enrich', 'thread-replies'],
+    d,
+  );
+  assert.equal(result.code, 10);
+  assert.deepEqual(
+    result.report.deltas.map((delta) => delta.number),
+    [42],
+  );
+  assert.ok(!result.report.deltas[0].classes.includes('review-comments-added'));
+  assert.deepEqual(
+    result.warnings.filter((w) => /thread-repl/i.test(w.label)),
+    [],
+  );
+});
+
 test('--ignore-authors + --enrich thread-replies warns and does not suppress review-comments-added when a brand-new thread only partly explains the rise', () => {
   // T1 is established and rose by 1 (attributable, all-bot). T2 is brand new
   // this tick with 2 comments from a human -- threadReplyIncrements excludes
@@ -3120,6 +3155,8 @@ test('--rate-limit-floor gates fetch after snapshot read and reports a low quota
   assert.equal(result.code, 1);
   assert.equal(result.report.results[0].error.kind, 'rate-limit');
   assert.equal(result.report.results[0].error.resetAt, '2026-07-01T13:00:00.000Z');
+  assert.equal(result.report.results[0].error.remaining, 3);
+  assert.equal(Object.hasOwn(result.report.results[0].error, 'cost'), false);
   assert.match(result.report.results[0].error.message, /remaining 3.*floor 4/);
   assert.deepEqual(order, ['read', 'rate']);
   assert.equal(writes, 0);

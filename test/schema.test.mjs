@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { schemaFor } from '../lib/schema.mjs';
-import { runCommand } from '../lib/cli.mjs';
+import { runCommand, run } from '../lib/cli.mjs';
 
 // Test-only subset validator for precisely the keywords emitted by schema.mjs.
 // `root` is the whole schema document, threaded through recursive calls so a
@@ -264,4 +264,27 @@ test('early repository-free compact and NDJSON errors validate without undefined
   assert.equal(Object.hasOwn(end, 'repo'), false);
   assert.equal(Object.hasOwn(end, 'repos'), false);
   assert.ok(validates(schemaFor('ndjson'), end));
+});
+
+test('a post-resolution failed tick validates against the json schema', () => {
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'],
+    {
+      acquireLock: () => ({ ok: true, token: 'test-lock-token' }),
+      releaseLock: () => ({ ok: true, released: true }),
+      assertLockOwned: () => true,
+      fetchPRs: () => ({ rows: [], rateLimit: { cost: 1, remaining: 4999, resetAt: 'now' } }),
+      fetchIssues: () => ({ rows: [], rateLimit: { cost: 1, remaining: 4999, resetAt: 'now' } }),
+      readSnapshot: () => {
+        throw new Error('invalid snapshot JSON at /tmp/x.json');
+      },
+      writeSnapshotAtomic: () => {},
+      now: () => 'now',
+    },
+  );
+  assert.equal(code, 2);
+  assert.equal(report.results[0].error.kind, 'snapshot');
+  assert.equal(report.results[0].repoSource, 'flag');
+  assert.equal(report.results[0].stateFile, '/tmp/x.json');
+  assert.ok(validates(schemaFor('json'), report));
 });
