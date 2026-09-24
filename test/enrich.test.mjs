@@ -2,16 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { enrichEmittedDeltas, extractMentions } from '../lib/enrich.mjs';
 
+// Schema v2: `from`/`to` are snapshot items (`{ fingerprint, context, meta }`).
+const item = (fingerprint) => ({ fingerprint, context: {}, meta: {} });
+
 test('enrichment uses final delta identities, keeps successful siblings, and preserves mention order', () => {
   const delta = {
     classes: ['review-changed', 'new-comments', 'unresolved-threads-added'],
-    from: {
+    from: item({
       reviewDetails: [{ id: 'R1', state: 'CHANGES_REQUESTED', submittedAt: 'old', commit: 'a' }],
       conversationComments: 1,
       commentNodes: [{ id: 'C1', author: 'old' }],
       threadStates: [{ id: 'T1', isResolved: true }],
-    },
-    to: {
+    }),
+    to: item({
       reviewDetails: [{ id: 'R1', state: 'CHANGES_REQUESTED', submittedAt: 'new', commit: 'b' }],
       conversationComments: 2,
       commentNodes: [
@@ -19,7 +22,7 @@ test('enrichment uses final delta identities, keeps successful siblings, and pre
         { id: 'C2', author: 'new' },
       ],
       threadStates: [{ id: 'T1', isResolved: false }],
-    },
+    }),
   };
   const calls = [];
   const warnings = enrichEmittedDeltas([delta], ['review', 'comments', 'threads'], {
@@ -71,7 +74,11 @@ test('enrichment uses final delta identities, keeps successful siblings, and pre
 });
 
 test('enrichment skips opaque identities and turns one boundary failure into a warning', () => {
-  const delta = { classes: ['new-comments'], from: { comments: 1 }, to: { comments: 2 } };
+  const delta = {
+    classes: ['new-comments'],
+    from: item({ comments: 1 }),
+    to: item({ comments: 2 }),
+  };
   let calls = 0;
   const warnings = enrichEmittedDeltas([delta], ['comments'], { fetch: () => calls++ });
   assert.equal(calls, 0);
@@ -80,8 +87,8 @@ test('enrichment skips opaque identities and turns one boundary failure into a w
 
   const good = {
     classes: ['new-comments'],
-    from: { conversationComments: 1, commentNodes: [{ id: 'C1' }] },
-    to: { conversationComments: 2, commentNodes: [{ id: 'C1' }, { id: 'C2' }] },
+    from: item({ conversationComments: 1, commentNodes: [{ id: 'C1' }] }),
+    to: item({ conversationComments: 2, commentNodes: [{ id: 'C1' }, { id: 'C2' }] }),
   };
   const failure = enrichEmittedDeltas([good], ['comments'], {
     fetch: () => {
@@ -95,8 +102,8 @@ test('enrichment skips opaque identities and turns one boundary failure into a w
 test('a zero-count prior comment fingerprint may use an absent identity window as empty', () => {
   const delta = {
     classes: ['new-comments'],
-    from: { conversationComments: 0 },
-    to: { conversationComments: 1, commentNodes: [{ id: 'C1' }] },
+    from: item({ conversationComments: 0 }),
+    to: item({ conversationComments: 1, commentNodes: [{ id: 'C1' }] }),
   };
   const calls = [];
   const warnings = enrichEmittedDeltas([delta], ['comments'], {
@@ -111,8 +118,8 @@ test('a zero-count prior comment fingerprint may use an absent identity window a
 
   const opaque = {
     classes: ['new-comments'],
-    from: { conversationComments: 1 },
-    to: { conversationComments: 2, commentNodes: [{ id: 'C2' }] },
+    from: item({ conversationComments: 1 }),
+    to: item({ conversationComments: 2, commentNodes: [{ id: 'C2' }] }),
   };
   enrichEmittedDeltas([opaque], ['comments'], { fetch: () => calls.push('must not fetch') });
   assert.deepEqual(calls, [{ kind: 'comments', ids: ['C1'] }]);
@@ -121,7 +128,7 @@ test('a zero-count prior comment fingerprint may use an absent identity window a
 
 test('selected kinds with no final matching class make no calls, while a failed sibling does not remove successful enrichment', () => {
   let calls = 0;
-  const ignored = { classes: ['updated'], from: {}, to: {} };
+  const ignored = { classes: ['updated'], from: item({}), to: item({}) };
   assert.deepEqual(
     enrichEmittedDeltas([ignored], ['review', 'comments', 'threads'], {
       fetch: () => calls++,
@@ -132,12 +139,12 @@ test('selected kinds with no final matching class make no calls, while a failed 
 
   const delta = {
     classes: ['review-changed', 'new-comments'],
-    from: { reviewDetails: [], conversationComments: 0, commentNodes: [] },
-    to: {
+    from: item({ reviewDetails: [], conversationComments: 0, commentNodes: [] }),
+    to: item({
       reviewDetails: [{ id: 'R1', state: 'CHANGES_REQUESTED' }],
       conversationComments: 1,
       commentNodes: [{ id: 'C1' }],
-    },
+    }),
   };
   const warnings = enrichEmittedDeltas([delta], ['review', 'comments'], {
     fetch: (kind) => {

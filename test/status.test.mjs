@@ -6,16 +6,28 @@ import { join } from 'node:path';
 import { run, runCommand } from '../lib/cli.mjs';
 import { detectDeltas } from '../lib/detect.mjs';
 
+// Schema v2 item shape: `{ fingerprint, context, meta }`.
+const item = (fingerprint = { state: 'OPEN' }, meta = {}) => ({
+  fingerprint,
+  context: {},
+  meta: {
+    seenAt: null,
+    changedAt: null,
+    ticksSinceChange: 0,
+    missingTicks: 0,
+    staleEmittedFor: null,
+    ...meta,
+  },
+});
+
 test('status reads local snapshot summaries without GitHub or writes', () => {
   const result = run(['status', '--repo', 'o/r', '--state-file', '/tmp/status.json'], {
     readSnapshot: () => ({
       pr: {
-        42: {
-          state: 'OPEN',
-          ciChecks: [],
-          lastChangedAt: '2026-09-20T00:00:00.000Z',
-          ticksSinceChange: 3,
-        },
+        42: item(
+          { state: 'OPEN', ciChecks: [] },
+          { changedAt: '2026-09-20T00:00:00.000Z', ticksSinceChange: 3 },
+        ),
       },
       issue: {},
     }),
@@ -109,7 +121,7 @@ test('status --watch-dir reads the economical PR snapshot without GitHub', () =>
     readSnapshot: (path) => {
       stateFile = path;
       return {
-        pr: { 42: { state: 'OPEN', ciChecks: [] } },
+        pr: { 42: item({ state: 'OPEN', ciChecks: [] }) },
         issue: {},
       };
     },
@@ -119,7 +131,7 @@ test('status --watch-dir reads the economical PR snapshot without GitHub', () =>
   assert.equal(result.code, 0);
   assert.match(stateFile, /__watch-pr\.json$/);
   assert.deepEqual(
-    result.report.items.map((item) => item.number),
+    result.report.items.map((i) => i.number),
     [42],
   );
 });
@@ -139,10 +151,13 @@ test('status includes selected open issues and applies --number to every entity'
     ],
     {
       readSnapshot: () => ({
-        pr: { 42: { state: 'OPEN', ciChecks: [] } },
+        pr: { 42: item({ state: 'OPEN', ciChecks: [] }) },
         issue: {
-          7: { state: 'OPEN', lastChangedAt: '2026-09-20T00:00:00.000Z', ticksSinceChange: 2 },
-          8: { state: 'OPEN' },
+          7: item(
+            { state: 'OPEN' },
+            { changedAt: '2026-09-20T00:00:00.000Z', ticksSinceChange: 2 },
+          ),
+          8: item({ state: 'OPEN' }),
         },
       }),
     },
@@ -166,7 +181,10 @@ test('status text output renders each returned item truthfully', async () => {
       readSnapshot: () => ({
         pr: {},
         issue: {
-          7: { state: 'OPEN', lastChangedAt: '2026-09-20T00:00:00.000Z', ticksSinceChange: 2 },
+          7: item(
+            { state: 'OPEN' },
+            { changedAt: '2026-09-20T00:00:00.000Z', ticksSinceChange: 2 },
+          ),
         },
       }),
     },
@@ -178,7 +196,10 @@ test('status text output renders each returned item truthfully', async () => {
   assert.match(result.output, /ticksSinceChange=2/);
 });
 
-test('status --refresh preserves stale bookkeeping for an unchanged item', () => {
+test('status --refresh keeps tracking meta bookkeeping for an unchanged item, without a --stale-after flag', () => {
+  // Schema v2: meta.changedAt/ticksSinceChange/staleEmittedFor are tracked on
+  // every tick regardless of whether --stale-after is passed this run;
+  // --stale-after only gates whether the `stale` delta class fires.
   const current = {
     number: 42,
     title: 'quiet',
@@ -197,8 +218,8 @@ test('status --refresh preserves stale bookkeeping for an unchanged item', () =>
     { pr: [current], issue: [] },
     { at: '2026-09-18T00:00:00.000Z', staleAfterMs: 1 },
   ).snapshot;
-  snapshot.pr[42].ticksSinceChange = 5;
-  snapshot.pr[42].staleEmittedFor = '2026-09-19';
+  snapshot.pr[42].meta.ticksSinceChange = 5;
+  snapshot.pr[42].meta.staleEmittedFor = '2026-09-19';
   let written;
   const result = run(
     ['status', '--refresh', '--repo', 'o/r', '--state-file', '/tmp/status-refresh.json'],
@@ -216,9 +237,9 @@ test('status --refresh preserves stale bookkeeping for an unchanged item', () =>
     },
   );
   assert.equal(result.code, 0);
-  assert.equal(written.pr[42].lastChangedAt, '2026-09-18T00:00:00.000Z');
-  assert.equal(written.pr[42].ticksSinceChange, 5);
-  assert.equal(written.pr[42].staleEmittedFor, '2026-09-19');
+  assert.equal(written.pr[42].meta.changedAt, '2026-09-18T00:00:00.000Z');
+  assert.equal(written.pr[42].meta.ticksSinceChange, 6);
+  assert.equal(written.pr[42].meta.staleEmittedFor, '2026-09-19');
 });
 
 test('status --refresh reuses the repository resolved by the detector', () => {

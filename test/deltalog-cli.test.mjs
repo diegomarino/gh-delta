@@ -16,9 +16,22 @@ import { dirname, join, resolve } from 'node:path';
 import { run, runCommand } from '../lib/cli.mjs';
 import { appendDeltaLog, readCursor, readDeltaLog, setCursorAtomic } from '../lib/deltalog.mjs';
 
+// Schema v2: a snapshot item is `{ fingerprint, context, meta }`.
+const item = (fingerprint) => ({
+  fingerprint,
+  context: {},
+  meta: {
+    seenAt: null,
+    changedAt: null,
+    ticksSinceChange: 0,
+    missingTicks: 0,
+    staleEmittedFor: null,
+  },
+});
+
 const before = {
   pr: {
-    42: {
+    42: item({
       state: 'OPEN',
       updatedAt: '2026-09-20T10:00:00Z',
       isDraft: false,
@@ -27,9 +40,8 @@ const before = {
       reviews: 'a',
       mergeable: 'UNKNOWN',
       comments: 0,
-      commentsOverflow: false,
       head: 'one',
-    },
+    }),
   },
   issue: {},
 };

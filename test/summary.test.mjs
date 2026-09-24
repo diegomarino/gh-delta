@@ -175,7 +175,13 @@ test('prSummary normalizes types and names headSha unambiguously', () => {
 });
 
 test('deltaSummary applies only to PR deltas with an observed to-state', () => {
-  const to = { state: 'OPEN', ciChecks: [], review: '', mergeable: 'MERGEABLE' };
+  // `to` is a snapshot item (`{ fingerprint, context, meta }`); deltaSummary
+  // reads only `to.fingerprint`.
+  const to = {
+    fingerprint: { state: 'OPEN', ciChecks: [], review: '', mergeable: 'MERGEABLE' },
+    context: {},
+    meta: {},
+  };
   assert.equal(deltaSummary({ entity: 'pr', to }).ciRollup, 'none');
   assert.equal(deltaSummary({ entity: 'issue', to }), null);
   assert.equal(deltaSummary({ entity: 'pr', to: null }), null);

@@ -141,7 +141,15 @@ test('explain requires explicit local input and demo never contacts the public r
     now: () => '2026-01-01T00:00:00Z',
     readFileSync: () =>
       JSON.stringify({
-        deltas: [{ id, classes: ['closed'], from: { state: 'OPEN' }, to: { state: 'CLOSED' } }],
+        deltas: [
+          {
+            id,
+            classes: ['closed'],
+            // Schema v2: `from`/`to` are snapshot items (`{ fingerprint, context, meta }`).
+            from: { fingerprint: { state: 'OPEN' }, context: {}, meta: {} },
+            to: { fingerprint: { state: 'CLOSED' }, context: {}, meta: {} },
+          },
+        ],
       }),
   });
   assert.equal(explain.code, 0);

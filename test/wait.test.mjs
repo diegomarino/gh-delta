@@ -18,6 +18,10 @@ const prWithGreenCi = {
   headRefOid: 'abc123',
 };
 
+// Schema v2: a delta's `to` is a snapshot item (`{ fingerprint, context, meta }`),
+// not a bare fingerprint.
+const item = (fingerprint) => ({ fingerprint, context: {}, meta: {} });
+
 const noopLock = {
   acquireLock: () => ({ ok: true, token: 'test-lock' }),
   assertLockOwned: () => true,
@@ -293,10 +297,10 @@ test('wait from-log derives --until-summary from delta.to rather than a rendered
               number: 42,
               classes: ['updated'],
               summary: { ciRollup: 'failed' },
-              to: {
+              to: item({
                 state: 'OPEN',
                 ciChecks: [{ name: 'CI', status: 'COMPLETED', conclusion: 'SUCCESS' }],
-              },
+              }),
             },
           },
         ],
@@ -463,7 +467,7 @@ test('wait keeps log records for --until-summary when --until names a different 
               entity: 'pr',
               number: 42,
               classes: ['updated'],
-              to: { state: 'OPEN', isDraft: true, ciChecks: [] },
+              to: item({ state: 'OPEN', isDraft: true, ciChecks: [] }),
             },
           },
         ],

@@ -29,6 +29,28 @@ const basePr = {
   headRefOid: 'sha1',
 };
 
+// Schema v2 snapshot item shape: `{ fingerprint, context, meta }` (see
+// lib/snapshot.mjs). Wraps a bare fingerprint fragment (often built by
+// prFingerprint) into the shape a persisted snapshot map now stores.
+const item = (fingerprint, meta = {}) => ({
+  fingerprint,
+  context: {},
+  meta: {
+    seenAt: null,
+    changedAt: null,
+    ticksSinceChange: 0,
+    missingTicks: 0,
+    staleEmittedFor: null,
+    ...meta,
+  },
+});
+
+// The prior-tick fingerprint most `existing` snapshot fixtures below start
+// from: PR 42 at rest, matching a fresh fetch of `basePr` (empty CI rollup,
+// empty reviews, no labels/assignees/reviewRequests, etc). Deviating fixtures
+// build their own via `prFingerprint({ ...basePr, ...overrides })` instead.
+const openFp = prFingerprint(basePr);
+
 test('outpostSignature matches the published HMAC-SHA256 known vector', () => {
   assert.equal(
     outpostSignature('The quick brown fox jumps over the lazy dog', 'key'),
@@ -78,7 +100,7 @@ test('--outpost-secret reads the injected environment and does not leak its valu
   const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: {
       pr: {
-        42: {
+        42: item({
           state: 'OPEN',
           updatedAt: '2026-07-01T10:00:00Z',
           isDraft: false,
@@ -88,7 +110,7 @@ test('--outpost-secret reads the injected environment and does not leak its valu
           mergeable: 'UNKNOWN',
           comments: 0,
           head: 'sha1',
-        },
+        }),
       },
       issue: {},
     },
@@ -333,8 +355,8 @@ test('removing a watch projects old economical state without a missing delta', (
   const d = deps([], {
     existing: {
       pr: {
-        3: prFingerprint({ ...basePr, number: 3 }),
-        9: prFingerprint({ ...basePr, number: 9 }),
+        3: item(prFingerprint({ ...basePr, number: 3 })),
+        9: item(prFingerprint({ ...basePr, number: 9 })),
       },
       issue: {},
     },
@@ -356,7 +378,7 @@ test('a null alias for a still-watched PR enters the normal missing lifecycle', 
     JSON.stringify({ entity: 'pr', number: 3, until: 'merged', addedAt: '2026-07-01T00:00:00Z' }),
   );
   const d = deps([], {
-    existing: { pr: { 3: prFingerprint({ ...basePr, number: 3 }) }, issue: {} },
+    existing: { pr: { 3: item(prFingerprint({ ...basePr, number: 3 })) }, issue: {} },
   });
   d.fetchPRsByNumber = () => [];
   const result = run(
@@ -377,7 +399,7 @@ test('economical watch logs derive from the selected state identity for explicit
     JSON.stringify({ entity: 'pr', number: 42, until: 'merged', addedAt: '2026-07-01T00:00:00Z' }),
   );
   const runEconomical = (stateArgs) => {
-    const d = deps([], { existing: { pr: { 42: prFingerprint(basePr) }, issue: {} } });
+    const d = deps([], { existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} } });
     d.fetchPRsByNumber = () => [{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }];
     let appended;
     d.appendDeltaLog = (file) => {
@@ -486,7 +508,7 @@ test('watch cleanup failure warns after snapshot publication', () => {
     '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
   );
   const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
-    existing: { pr: { 42: prFingerprint(basePr) }, issue: {} },
+    existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} },
   });
   d.fetchPRsByNumber = () => [{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }];
   d.removeWatchUnchanged = () => {
@@ -516,7 +538,7 @@ test('ignored merged terminal delta keeps its watch entry while snapshot advance
     '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
   );
   const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
-    existing: { pr: { 42: prFingerprint(basePr) }, issue: {} },
+    existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} },
   });
   d.fetchPRsByNumber = () => [{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }];
   let cleanup = false;
@@ -574,18 +596,7 @@ test('a delta returns code 10 and rewrites the snapshot', () => {
   const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: {
       pr: {
-        42: {
-          state: 'OPEN',
-          updatedAt: '2026-07-01T10:00:00Z',
-          isDraft: false,
-          ci: 'da39a3ee5e6b',
-          review: 'REVIEW_REQUIRED',
-          reviews: 'da39a3ee5e6b',
-          mergeable: 'UNKNOWN',
-          comments: 0,
-          commentsOverflow: false,
-          head: 'sha1',
-        },
+        42: item(openFp),
       },
       issue: {},
     },
@@ -622,22 +633,22 @@ test('a gh failure returns code 1 and does NOT write the snapshot', () => {
   assert.equal(code, 1);
 });
 
+// A prior tick's fingerprint whose CI digest ('x') cannot be explained by its
+// (absent) ciChecks summary -- exercises the opaque ci-changed fallback -- but
+// which is otherwise a real prFingerprint() output, so every other compared
+// field (base, labels, assignees, reviewRequests, mergeStateStatus, thread
+// bookkeeping) already matches what a fresh fetch of `basePr` would produce.
+function opaqueCiFixture() {
+  const fp = prFingerprint({ ...basePr, updatedAt: '2026-07-01T10:00:00Z' });
+  delete fp.ciChecks;
+  fp.ci = 'x';
+  return fp;
+}
+
 test('--summary-line attaches only the human summary line to each delta', () => {
   const d = deps([[{ ...basePr, totalCommentsCount: 2, updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: {
-      pr: {
-        42: {
-          state: 'OPEN',
-          updatedAt: '2026-07-01T10:00:00Z',
-          isDraft: false,
-          ci: 'x',
-          review: 'REVIEW_REQUIRED',
-          reviews: 'da39a3ee5e6b',
-          mergeable: 'UNKNOWN',
-          comments: 0,
-          head: 'sha1',
-        },
-      },
+      pr: { 42: item(opaqueCiFixture()) },
       issue: {},
     },
   });
@@ -653,19 +664,7 @@ test('--summary-line attaches only the human summary line to each delta', () => 
 test('--detail keeps line compatibility and adds structured class details', () => {
   const d = deps([[{ ...basePr, totalCommentsCount: 2, updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: {
-      pr: {
-        42: {
-          state: 'OPEN',
-          updatedAt: '2026-07-01T10:00:00Z',
-          isDraft: false,
-          ci: 'x',
-          review: 'REVIEW_REQUIRED',
-          reviews: 'da39a3ee5e6b',
-          mergeable: 'UNKNOWN',
-          comments: 0,
-          head: 'sha1',
-        },
-      },
+      pr: { 42: item(opaqueCiFixture()) },
       issue: {},
     },
   });
@@ -695,39 +694,6 @@ test('--detail keeps line compatibility and adds structured class details', () =
   ]);
 });
 
-test('--detail suppresses additive-field rows the old snapshot predates (no phantom transitions)', () => {
-  // Upgrade path: the stored fingerprint predates base/labels/assignees/
-  // reviewRequests (and mergeStateStatus). A same-tick catch-all change (head
-  // bump) fires `updated`; its details must not report `null -> current` rows
-  // for fields whose first appearance the detector itself suppressed.
-  const legacy = prFingerprint({ ...basePr, totalCommentsCount: 0 });
-  for (const field of ['base', 'labels', 'assignees', 'reviewRequests', 'mergeStateStatus']) {
-    delete legacy[field];
-  }
-  const after = {
-    ...basePr,
-    updatedAt: '2026-07-01T11:00:00Z',
-    headRefOid: 'sha2',
-    baseRefName: 'main',
-    labels: [{ name: 'bug' }],
-    assignees: ['alice'],
-    reviewRequests: ['bob'],
-  };
-  const d = deps([[after]], { existing: { pr: { 42: legacy }, issue: {} } });
-  const { report } = run(
-    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--detail'],
-    d,
-  );
-  const delta = report.deltas[0];
-  // head genuinely moved (sha1 -> sha2), so `head-changed` now coexists with
-  // the `updated` catch-all (see lib/detect.mjs classifyPr). Each class
-  // explains itself independently, so `head` is named twice: once by
-  // `head-changed`, once by `updated`'s generic field sweep.
-  assert.deepEqual(delta.classes.sort(), ['head-changed', 'updated']);
-  const detailFields = delta.details.map((row) => row.field).sort();
-  assert.deepEqual(detailFields, ['head', 'head', 'updatedAt']);
-});
-
 test('--detail explains the audit-driven classes: set diffs, base transition, comment removal', () => {
   const before = {
     ...basePr,
@@ -745,7 +711,7 @@ test('--detail explains the audit-driven classes: set diffs, base transition, co
     reviewRequests: ['carol', 'org/platform-team'],
   };
   const d = deps([[after]], {
-    existing: { pr: { 42: prFingerprint(before) }, issue: {} },
+    existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} },
   });
   const { report } = run(
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--detail'],
@@ -824,7 +790,7 @@ test('--detail names the added and removed thread ids for a same-count thread sw
       { id: 'RT_2', isResolved: false },
     ],
   };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const { code, report } = run(
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--detail'],
     d,
@@ -881,7 +847,7 @@ test('--detail does not leak threadDigest/threadStates into generic updated rows
       { id: 'RT_2', isResolved: false },
     ],
   };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const { code, report } = run(
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--detail'],
     d,
@@ -953,7 +919,7 @@ test('--detail names the exact checks and reviews that changed when the snapshot
       },
     ],
   };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const { code, report } = run(
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--detail'],
     d,
@@ -1015,7 +981,7 @@ test('--detail falls back to opaque when duplicate check names would collapse th
       { name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS' },
     ],
   };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const { report } = run(
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--detail'],
     d,
@@ -1025,19 +991,6 @@ test('--detail falls back to opaque when duplicate check names would collapse th
   assert.equal(ci.added, undefined);
   assert.equal(ci.removed, undefined);
   assert.equal(ci.changed, undefined);
-});
-
-test('pre-summary snapshots upgrade without phantom deltas and persist summaries', () => {
-  const { ciChecks: _ci, reviewSummary: _reviews, ...legacy } = prFingerprint(basePr);
-  const d = deps([[basePr]], { existing: { pr: { 42: legacy }, issue: {} } });
-  const { code, report } = run(
-    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'],
-    d,
-  );
-  assert.equal(code, 0);
-  assert.deepEqual(report.deltas, []);
-  assert.deepEqual(d.stored.pr['42'].ciChecks, []);
-  assert.deepEqual(d.stored.pr['42'].reviewSummary, []);
 });
 
 const SUMMARIES_ARGS = [
@@ -1059,7 +1012,7 @@ test('--summaries acceptance: posting a successful status makes summary.ciRollup
     updatedAt: '2026-07-01T11:00:00Z',
     statusCheckRollup: [{ context: 'ci/deploy', state: 'SUCCESS' }],
   };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const { code, report } = run(SUMMARIES_ARGS, d);
   assert.equal(code, 10);
   const delta = report.deltas[0];
@@ -1087,7 +1040,7 @@ test('--summaries surfaces mergeStateStatus behind for an up-to-date-required br
     mergeStateStatus: 'BEHIND',
     statusCheckRollup: [{ context: 'ci/deploy', state: 'SUCCESS' }],
   };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const { code, report } = run(SUMMARIES_ARGS, d);
   assert.equal(code, 10);
   assert.equal(report.deltas[0].summary.mergeStateStatus, 'behind');
@@ -1099,7 +1052,7 @@ test('a mergeStateStatus-only transition fires an updated delta end-to-end', () 
   // consumer never re-evaluates merge readiness.
   const before = { ...basePr, mergeStateStatus: 'CLEAN' };
   const after = { ...basePr, mergeStateStatus: 'BEHIND' };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const { code, report } = run(SUMMARIES_ARGS, d);
   assert.equal(code, 10);
   assert.deepEqual(report.deltas[0].classes, ['updated']);
@@ -1136,7 +1089,7 @@ test('--baseline-emit-state on: baseline exits 10 with baseline:true and non-emp
   const delta = report.deltas[0];
   assert.deepEqual(delta.classes, ['baseline-state']);
   assert.equal(delta.from, null);
-  assert.equal(delta.to.state, 'OPEN');
+  assert.equal(delta.to.fingerprint.state, 'OPEN');
   assert.match(delta.id, /^[0-9a-f]{64}$/);
 });
 
@@ -1173,7 +1126,7 @@ test('--help-json advertises --baseline-emit-state', () => {
 test('--summaries acceptance: a PR that lost its checks reports ciRollup none, not green', () => {
   const before = { ...basePr, statusCheckRollup: [{ context: 'ci/deploy', state: 'SUCCESS' }] };
   const after = { ...basePr, updatedAt: '2026-07-01T11:00:00Z', statusCheckRollup: [] };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const { code, report } = run(SUMMARIES_ARGS, d);
   assert.equal(code, 10);
   const delta = report.deltas[0];
@@ -1188,7 +1141,7 @@ test('--summaries is purely additive: delta.id and every other field are byte-id
     updatedAt: '2026-07-01T11:00:00Z',
     statusCheckRollup: [{ context: 'ci/deploy', state: 'SUCCESS' }],
   };
-  const seed = () => ({ pr: { 42: prFingerprint(before) }, issue: {} });
+  const seed = () => ({ pr: { 42: item(prFingerprint(before)) }, issue: {} });
   const baseArgs = ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'];
   const withFlag = run([...baseArgs, '--summaries'], deps([[after]], { existing: seed() })).report
     .deltas[0];
@@ -1221,12 +1174,12 @@ test('--ignore-authors suppresses fully covered bot comments but advances the sn
       { id: 'C1', author: 'GitHub-Actions[bot]' },
     ],
   };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const result = run([...FILTER_ARGS, '--ignore-authors', 'github-actions[bot]'], d);
   assert.equal(result.code, 0);
   assert.deepEqual(result.report.deltas, []);
   assert.equal(result.report.filteredDeltas, 1);
-  assert.equal(d.stored.pr['42'].comments, 2);
+  assert.equal(d.stored.pr['42'].fingerprint.comments, 2);
 });
 
 test('--ignore-authors fails open and --detail is opaque for an unusable new comment row', () => {
@@ -1246,7 +1199,7 @@ test('--ignore-authors fails open and --detail is opaque for an unusable new com
       { id: null, author: null },
     ],
   };
-  const existing = { pr: { 42: prFingerprint(before) }, issue: {} };
+  const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
   const filtered = run(
     [...FILTER_ARGS, '--ignore-authors', 'human'],
     deps([[after]], { existing }),
@@ -1275,7 +1228,7 @@ test('--ignore-authors and --detail fail open when PR aggregate comments include
     conversationComments: 1,
     commentNodes: [{ id: 'C0', author: 'github-actions[bot]' }],
   };
-  const existing = { pr: { 42: prFingerprint(before) }, issue: {} };
+  const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
   const filtered = run(
     [...FILTER_ARGS, '--ignore-authors', 'github-actions[bot]'],
     deps([[after]], { existing }),
@@ -1317,14 +1270,18 @@ test('class filters run before ignored authors and filteredDeltas excludes survi
       '--ignore-authors',
       'github-actions[bot]',
     ],
-    deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } }),
+    deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } }),
   );
   assert.equal(result.code, 10);
   assert.deepEqual(result.report.deltas[0].classes, ['head-changed', 'updated']);
   assert.equal(result.report.filteredDeltas, 0);
 });
 
-test('--detail gates actionable check, review, and comment identity metadata', () => {
+test('--detail explains check, review, and comment identity metadata carried in the fingerprint', () => {
+  // Schema v2: ciDetails/reviewDetails/commentNodes/conversationComments are
+  // ordinary `fingerprint` fields now (no more hideInternalDetails gate), so
+  // they are always present in `to`/`from`, with or without --detail. What
+  // --detail adds is the structured, named breakdown in `details`.
   const before = {
     ...basePr,
     statusCheckRollup: [
@@ -1377,11 +1334,11 @@ test('--detail gates actionable check, review, and comment identity metadata', (
       { id: 'C1', author: 'bot' },
     ],
   };
-  const existing = { pr: { 42: prFingerprint(before) }, issue: {} };
+  const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
   const plain = run(FILTER_ARGS, deps([[after]], { existing })).report.deltas[0];
-  assert.equal(JSON.stringify(plain).includes('https://ci/build'), false);
-  assert.equal(JSON.stringify(plain).includes('R2'), false);
-  assert.equal(JSON.stringify(plain).includes('C1'), false);
+  assert.equal(JSON.stringify(plain).includes('https://ci/build'), true);
+  assert.equal(JSON.stringify(plain).includes('R2'), true);
+  assert.equal(JSON.stringify(plain).includes('C1'), true);
   const detailed = run([...FILTER_ARGS, '--detail'], deps([[after]], { existing })).report
     .deltas[0];
   assert.equal(
@@ -1421,12 +1378,12 @@ test('--only-classes with no matching delta suppresses attention without changin
     updatedAt: '2026-07-01T11:00:00Z',
     statusCheckRollup: [{ context: 'ci/test', state: 'SUCCESS' }],
   };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const { code, report } = run([...FILTER_ARGS, '--only-classes', 'review-changed'], d);
   assert.equal(code, 0);
   assert.deepEqual(report.deltas, []);
   assert.equal(report.filteredDeltas, 1);
-  assert.equal(d.stored.pr['42'].updatedAt, after.updatedAt);
+  assert.equal(d.stored.pr['42'].fingerprint.updatedAt, after.updatedAt);
 });
 
 test('--only-classes keeps matching deltas and still exits 10', () => {
@@ -1442,7 +1399,7 @@ test('--only-classes keeps matching deltas and still exits 10', () => {
   const updateAfter = { ...updateBefore, updatedAt: '2026-07-01T11:00:00Z' };
   const d = deps([[ciAfter, updateAfter]], {
     existing: {
-      pr: { 42: prFingerprint(ciBefore), 43: prFingerprint(updateBefore) },
+      pr: { 42: item(prFingerprint(ciBefore)), 43: item(prFingerprint(updateBefore)) },
       issue: {},
     },
   });
@@ -1464,7 +1421,7 @@ test('--ignore-classes removes a class but retains a multi-class delta, and drop
   };
   const retained = run(
     [...FILTER_ARGS, '--ignore-classes', 'updated'],
-    deps([[headAfter]], { existing: { pr: { 42: prFingerprint(headBefore) }, issue: {} } }),
+    deps([[headAfter]], { existing: { pr: { 42: item(prFingerprint(headBefore)) }, issue: {} } }),
   );
   assert.equal(retained.code, 10);
   assert.deepEqual(retained.report.deltas[0].classes, ['head-changed']);
@@ -1474,7 +1431,9 @@ test('--ignore-classes removes a class but retains a multi-class delta, and drop
   const updateAfter = { ...updateBefore, updatedAt: '2026-07-01T11:00:00Z' };
   const dropped = run(
     [...FILTER_ARGS, '--ignore-classes', 'updated'],
-    deps([[updateAfter]], { existing: { pr: { 42: prFingerprint(updateBefore) }, issue: {} } }),
+    deps([[updateAfter]], {
+      existing: { pr: { 42: item(prFingerprint(updateBefore)) }, issue: {} },
+    }),
   );
   assert.equal(dropped.code, 0);
   assert.deepEqual(dropped.report.deltas, []);
@@ -1512,9 +1471,9 @@ test('--settled drops pending and unknown PRs, keeps ciRollup none, and implies 
   const d = deps([[pendingAfter, unknownAfter, noneAfter]], {
     existing: {
       pr: {
-        42: prFingerprint(pendingBefore),
-        43: prFingerprint(unknownBefore),
-        44: prFingerprint(noneBefore),
+        42: item(prFingerprint(pendingBefore)),
+        43: item(prFingerprint(unknownBefore)),
+        44: item(prFingerprint(noneBefore)),
       },
       issue: {},
     },
@@ -1539,7 +1498,7 @@ test('combined attention filters apply only before ignore, making ignore the fin
     headRefOid: 'sha2',
     statusCheckRollup: [{ context: 'ci/test', state: 'SUCCESS' }],
   };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const { code, report } = run(
     [...FILTER_ARGS, '--only-classes', 'ci-changed', '--ignore-classes', 'ci-changed'],
     d,
@@ -1866,17 +1825,7 @@ test('unknown arguments return structured code 2 error', () => {
 test('--entities pr preserves existing issue snapshot entries', () => {
   const existing = {
     pr: {
-      42: {
-        state: 'OPEN',
-        updatedAt: '2026-07-01T10:00:00Z',
-        isDraft: false,
-        ci: 'da39a3ee5e6b',
-        review: 'REVIEW_REQUIRED',
-        reviews: 'da39a3ee5e6b',
-        mergeable: 'UNKNOWN',
-        comments: 0,
-        head: 'sha1',
-      },
+      42: item(openFp),
     },
     issue: { 7: { state: 'OPEN', updatedAt: '2026-07-01T10:00:00Z', labels: [], comments: 0 } },
   };
@@ -1995,18 +1944,7 @@ test('gh-delta sends outpost payloads with monitor id after the snapshot write',
   const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: {
       pr: {
-        42: {
-          state: 'OPEN',
-          updatedAt: '2026-07-01T10:00:00Z',
-          isDraft: false,
-          ci: 'da39a3ee5e6b',
-          review: 'REVIEW_REQUIRED',
-          reviews: 'da39a3ee5e6b',
-          mergeable: 'UNKNOWN',
-          comments: 0,
-          commentsOverflow: false,
-          head: 'sha1',
-        },
+        42: item(openFp),
       },
       issue: {},
     },
@@ -2049,18 +1987,7 @@ test('--format text prints operator output from the main gh-delta binary', async
   const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: {
       pr: {
-        42: {
-          state: 'OPEN',
-          updatedAt: '2026-07-01T10:00:00Z',
-          isDraft: false,
-          ci: 'da39a3ee5e6b',
-          review: 'REVIEW_REQUIRED',
-          reviews: 'da39a3ee5e6b',
-          mergeable: 'UNKNOWN',
-          comments: 0,
-          commentsOverflow: false,
-          head: 'sha1',
-        },
+        42: item(openFp),
       },
       issue: {},
     },
@@ -2258,7 +2185,7 @@ test('outpost eventId repeats across different observed states while id does not
       number: 42,
       title: 'x',
       classes: ['ci-changed'],
-      to: { state: 'OPEN', ciRollup: 'red' },
+      to: item({ state: 'OPEN', ciRollup: 'red' }),
     },
   });
   const second = buildOutpostPayload({
@@ -2268,7 +2195,7 @@ test('outpost eventId repeats across different observed states while id does not
       number: 42,
       title: 'x',
       classes: ['ci-changed'],
-      to: { state: 'OPEN', ciRollup: 'green' },
+      to: item({ state: 'OPEN', ciRollup: 'green' }),
     },
   });
   assert.equal(first.eventId, second.eventId);
@@ -2282,7 +2209,7 @@ test('outpost id is stable across runs and across monitorId values for the same 
     number: 42,
     title: 'x',
     classes: ['merged'],
-    to: { state: 'MERGED' },
+    to: item({ state: 'MERGED' }),
   };
   const a = buildOutpostPayload({
     report: { repo: 'o/r', monitorId: 'main', at: '2026-07-01T12:00:00Z' },
@@ -2312,7 +2239,7 @@ test('outpost payload has exactly the documented key set (shape/byte-stability g
       title: 'x',
       classes: ['merged'],
       headRefName: 'feature',
-      to: { state: 'MERGED', labels: [] },
+      to: item({ state: 'MERGED', labels: [] }),
     },
   });
   assert.deepEqual(
@@ -2386,7 +2313,7 @@ test('--enrich decorates surviving deltas only after snapshot publication and le
     ],
     reviewThreadNodes: [{ id: 'T1', isResolved: false }],
   };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const order = [];
   d.writeSnapshotAtomic = (_path, value) => {
     order.push('snapshot');
@@ -2483,17 +2410,7 @@ test('duplicate --outpost-url uses last-wins like every other flag', async () =>
   const { runWithOutpost } = await import('../lib/cli.mjs');
   const existing = {
     pr: {
-      42: {
-        state: 'OPEN',
-        updatedAt: '2026-07-01T10:00:00Z',
-        isDraft: false,
-        ci: 'da39a3ee5e6b',
-        review: 'REVIEW_REQUIRED',
-        reviews: 'da39a3ee5e6b',
-        mergeable: 'UNKNOWN',
-        comments: 0,
-        head: 'sha1',
-      },
+      42: item(openFp),
     },
     issue: {},
   };
@@ -2612,17 +2529,7 @@ test('outpost warnings land inside the JSON report, not on stderr', async () => 
   const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: {
       pr: {
-        42: {
-          state: 'OPEN',
-          updatedAt: '2026-07-01T10:00:00Z',
-          isDraft: false,
-          ci: 'da39a3ee5e6b',
-          review: 'REVIEW_REQUIRED',
-          reviews: 'da39a3ee5e6b',
-          mergeable: 'UNKNOWN',
-          comments: 0,
-          head: 'sha1',
-        },
+        42: item(openFp),
       },
       issue: {},
     },
@@ -2898,19 +2805,7 @@ test('--detail reports the current missing tick for still-missing', () => {
     fetchIssues: () => [],
     readSnapshot: () => ({
       pr: {
-        42: {
-          state: 'OPEN',
-          updatedAt: '2026-07-01T10:00:00Z',
-          isDraft: false,
-          ci: 'da39a3ee5e6b',
-          review: 'REVIEW_REQUIRED',
-          reviews: 'da39a3ee5e6b',
-          mergeable: 'UNKNOWN',
-          comments: 0,
-          head: 'sha1',
-          missing: true,
-          missingTicks: 1,
-        },
+        42: item(openFp, { missingTicks: 1 }),
       },
       issue: {},
     }),
@@ -2944,17 +2839,7 @@ test('mixed-case --repo shares one snapshot and one eventId space', async () => 
   const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: {
       pr: {
-        42: {
-          state: 'OPEN',
-          updatedAt: '2026-07-01T10:00:00Z',
-          isDraft: false,
-          ci: 'da39a3ee5e6b',
-          review: 'REVIEW_REQUIRED',
-          reviews: 'da39a3ee5e6b',
-          mergeable: 'UNKNOWN',
-          comments: 0,
-          head: 'sha1',
-        },
+        42: item(openFp),
       },
       issue: {},
     },
@@ -3492,7 +3377,7 @@ test('schema rejects an unknown format as configuration error', () => {
 test('single-repo compact output derives per-delta repo and URL from the report', async () => {
   const before = { ...basePr, updatedAt: '2026-07-01T10:00:00Z' };
   const after = { ...basePr, updatedAt: '2026-07-01T11:00:00Z', state: 'CLOSED' };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const result = await runCommand(
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--format', 'compact'],
     d,
