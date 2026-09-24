@@ -281,8 +281,33 @@ developer polling loops or webhook-driven automation.
 - Do not edit snapshot files by hand. The tool owns them.
 - On exit `2` for an unreadable, corrupt, or pre-schema-v2 snapshot/log, run
   `gh-delta reset --repo <owner/name> --monitor-id <id>
-(--state-file <path>|--state-dir <dir>) --yes` — the documented recovery —
-  then let the next tick re-seed the baseline. See
+(--state-file <path>|--state-dir <dir>) --entities <entities> --yes` — the
+  documented recovery — then let the next tick re-seed the baseline. When
+  using `--state-dir`, `--entities` must match the monitor's own entity
+  selection: the snapshot filename is scoped by the canonical entity set, and
+  omitting `--entities` reverts to the default `pr,issue`. Against a monitor
+  running with a narrower selection (e.g. `--entities pr`) that resolves to a
+  different, likely nonexistent, snapshot path — deleting it is a silent
+  no-op (exit `0`) that leaves the actual corrupt snapshot in place, so the
+  next tick fails with the same exit `2`.
+  **`--watch-dir` monitors are a separate case `--entities` cannot fix.** A
+  monitor run with `--watch-dir` and at most ten PR-only watch entries stores
+  its state at an "economical" path that `reset` cannot derive: `reset` has
+  no `--watch-dir` flag and always computes the standard entity-scoped path,
+  never the watch one. For such a monitor the real snapshot lives at
+  `<state-file>.watch.json` (if the monitor was run with an explicit
+  `--state-file`) or at
+  `<state-dir>/repo-<owner%2Fname>__monitor-<id>__watch-pr.json` (if the
+  monitor was run with `--state-dir`). Recover it by pointing `reset`
+  directly at that path with `--state-file`, bypassing derivation entirely —
+  `--entities`/`--state-dir` will not find it:
+  `gh-delta reset --repo <owner/name> --monitor-id <id> --state-file
+<the-watch-snapshot-path-above> --yes` (this also clears the matching
+  `<path>.deltalog.ndjson`). A success exit `0` from `reset` is never proof
+  the right file was cleared — it exits `0` just as happily when the target
+  path doesn't exist — so if the next tick repeats the same exit `2`, that is
+  the signal you targeted the wrong path, not that the corruption persisted
+  through a real reset. See
   [Troubleshooting](docs/troubleshooting.md) for the full recovery flow.
 - Keep scheduler logs for tick output. A delta is acknowledged by snapshot
   advancement before any downstream action completes.
