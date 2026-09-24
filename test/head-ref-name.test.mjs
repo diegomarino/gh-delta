@@ -111,8 +111,8 @@ test('headRefName is present across families with a current object, absent on mi
   // reappeared
   const missing = detectDeltas(base.snapshot, { pr: [], issue: [] });
   assert.deepEqual(missing.deltas[0].classes, ['missing']);
-  // headRefName carries over from the last known context even with no current
-  // object; only `title` is nulled on the missing lifecycle.
+  // The whole last-known context, headRefName and title alike, carries over
+  // even with no current object (see lib/detect.mjs's missing lifecycle).
   assert.equal(missing.deltas[0].context.headRefName, 'b/u');
   const back = detectDeltas(missing.snapshot, { pr: [pr({ headRefName: 'b/u' })], issue: [] });
   assert.deepEqual(back.deltas[0].classes, ['reappeared']);
@@ -163,12 +163,12 @@ test('the outpost payload embeds the report delta verbatim, headRefName included
   );
 });
 
-test('headRefName carries over from the last known context on presumed-deleted', () => {
+test('headRefName and title carry over from the last known context on presumed-deleted', () => {
   let s = detectDeltas(null, { pr: [pr()], issue: [] }).snapshot;
   const t1 = detectDeltas(s, { pr: [], issue: [] });
   const t2 = detectDeltas(t1.snapshot, { pr: [], issue: [] });
   const t3 = detectDeltas(t2.snapshot, { pr: [], issue: [] });
   assert.deepEqual(t3.deltas[0].classes, ['presumed-deleted']);
   assert.equal(t3.deltas[0].context.headRefName, 'feature/widget');
-  assert.equal(t3.deltas[0].context.title, null);
+  assert.equal(t3.deltas[0].context.title, 'add widget');
 });

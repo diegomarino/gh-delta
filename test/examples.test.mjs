@@ -50,15 +50,15 @@ test('every example report covers exactly the frozen REPORT_FIELDS', () => {
   }
 });
 
-test('fully enriched deltas jointly cover exactly the frozen DELTA_FIELDS, minus the reserved R4/R6 fields', () => {
+test('fully enriched deltas jointly cover exactly the frozen DELTA_FIELDS, minus the reserved R4 field', () => {
   // No single delta carries every field: `missingTicks` is missing-lifecycle
   // only (to === null, no current object), while `headRefName` is PR-only and
   // only present when a current object exists (to !== null). They are mutually
   // exclusive, so coverage is asserted over the union of a missing delta and a
   // PR change delta. --detail is the richest mode (summaryLine, details).
-  // `firstObserved`/`seq` are reserved for R6/R4 and never populated yet, so
-  // they are excluded from this coverage union deliberately, not omitted by
-  // oversight.
+  // `seq` is reserved for R4 and never populated yet, so it is excluded from
+  // this coverage union deliberately, not omitted by oversight. `firstObserved`
+  // (R6) is now populated -- covered below by adding it to the `change` delta.
   // Schema v2: `from`/`to` are snapshot items (`{ fingerprint, context, meta }`).
   const item = (fingerprint, meta = {}) => ({ fingerprint, context: {}, meta });
   const missing = {
@@ -81,6 +81,10 @@ test('fully enriched deltas jointly cover exactly the frozen DELTA_FIELDS, minus
       url: 'https://github.com/owner/repo/pull/7',
     },
     classes: ['new-comments'],
+    // Covers `firstObserved` here rather than on a dedicated third
+    // representative delta -- this synthetic object exists only to exercise
+    // field coverage, not to model a realistic classes/firstObserved pairing.
+    firstObserved: true,
     from: item({ state: 'OPEN', comments: 1 }),
     to: item({ state: 'OPEN', comments: 3 }),
     enrichment: {
@@ -111,7 +115,7 @@ test('fully enriched deltas jointly cover exactly the frozen DELTA_FIELDS, minus
     ...keySet(change),
     ...detailReport.deltas.flatMap((delta) => Object.keys(delta)),
   ]);
-  const expected = [...DELTA_FIELDS].filter((field) => !['firstObserved', 'seq'].includes(field));
+  const expected = [...DELTA_FIELDS].filter((field) => field !== 'seq');
   assert.deepEqual(
     [...union].sort(),
     [...expected].sort(),

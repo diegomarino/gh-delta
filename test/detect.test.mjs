@@ -1,6 +1,7 @@
 // Pure detector tests: each case protects one semantic delta class.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync, readdirSync } from 'node:fs';
 import { detectDeltas, threadReplyIncrements } from '../lib/detect.mjs';
 import { enrichDelta } from '../lib/cli.mjs';
 import {
@@ -536,7 +537,7 @@ test('review thread total changes emit review-threads-changed when unresolved co
   assert.deepEqual(r.deltas[0].classes, ['review-threads-changed']);
 });
 
-test('a push changes the head SHA, emitting head-changed alongside updated', () => {
+test('a push with no other change emits head-changed alone, not paired with updated', () => {
   const base = detectDeltas(null, { pr: [pr({ headSha: 'sha1' })], issue: [] }, { at: AT });
   const r = detectDeltas(
     base.snapshot,
@@ -544,12 +545,12 @@ test('a push changes the head SHA, emitting head-changed alongside updated', () 
     { at: '2026-07-01T11:00:00Z' },
   );
   const delta = r.deltas[0];
-  assert.deepEqual(delta.classes.sort(), ['head-changed', 'updated']);
+  assert.deepEqual(delta.classes, ['head-changed']);
   assert.equal(delta.from.fingerprint.headSha, 'sha1');
   assert.equal(delta.to.fingerprint.headSha, 'sha2');
 });
 
-test('a head SHA change alongside another specific class still carries head-changed', () => {
+test('a head SHA change alongside another specific class carries head-changed but never updated', () => {
   const base = detectDeltas(
     null,
     { pr: [pr({ headSha: 'sha1', mergeable: 'conflicting' })], issue: [] },
@@ -566,6 +567,32 @@ test('a head SHA change alongside another specific class still carries head-chan
   const delta = r.deltas[0];
   assert.ok(delta.classes.includes('head-changed'));
   assert.ok(delta.classes.includes('became-mergeable'));
+  assert.ok(!delta.classes.includes('updated'));
+});
+
+test('a push plus a label change surfaces head-changed and relabeled, still no updated', () => {
+  const base = detectDeltas(
+    null,
+    { pr: [pr({ headSha: 'sha1', labels: [{ name: 'worker' }] })], issue: [] },
+    { at: AT },
+  );
+  const r = detectDeltas(
+    base.snapshot,
+    {
+      pr: [
+        pr({
+          headSha: 'sha2',
+          labels: [{ name: 'backend' }],
+          updatedAt: '2026-07-01T11:00:00Z',
+        }),
+      ],
+      issue: [],
+    },
+    { at: '2026-07-01T11:00:00Z' },
+  );
+  const delta = r.deltas[0];
+  assert.deepEqual(delta.classes.sort(), ['head-changed', 'relabeled']);
+  assert.ok(!delta.classes.includes('updated'));
 });
 
 // --- Review-thread IDENTITY, not just counters (headline regression) -------
@@ -782,6 +809,83 @@ test('missing demotes to presumed-deleted on the third absent tick, then goes si
   const t4 = detectDeltas(t3.snapshot, { pr: [], issue: [] }, { at: AT });
   assert.deepEqual(t4.deltas, []);
   assert.equal(t4.snapshot.pr['42'].meta.missingTicks, 4); // memory intact
+});
+
+test('a missing delta carries the real last-observed context.title, not a sentinel', () => {
+  const base = detectDeltas(null, { pr: [pr({ title: 'add widget' })], issue: [] }, { at: AT });
+  const r = detectDeltas(base.snapshot, { pr: [], issue: [] }, { at: AT });
+  assert.deepEqual(r.deltas[0].classes, ['missing']);
+  assert.equal(r.deltas[0].context.title, 'add widget');
+  assert.notEqual(r.deltas[0].context.title, null);
+});
+
+test('still-missing and presumed-deleted also carry the real title, not null or a sentinel', () => {
+  const base = detectDeltas(null, { pr: [pr({ title: 'add widget' })], issue: [] }, { at: AT });
+  const t1 = detectDeltas(base.snapshot, { pr: [], issue: [] }, { at: AT });
+  const t2 = detectDeltas(t1.snapshot, { pr: [], issue: [] }, { at: AT });
+  const t3 = detectDeltas(t2.snapshot, { pr: [], issue: [] }, { at: AT });
+  assert.equal(t2.deltas[0].classes[0], 'still-missing');
+  assert.equal(t2.deltas[0].context.title, 'add widget');
+  assert.equal(t3.deltas[0].classes[0], 'presumed-deleted');
+  assert.equal(t3.deltas[0].context.title, 'add widget');
+});
+
+test('the missing-from-current-fetch sentinel string was removed and must not creep back into lib/', () => {
+  const libDir = new URL('../lib/', import.meta.url);
+  const walk = (dirUrl) => {
+    const files = [];
+    for (const entry of readdirSync(dirUrl, { withFileTypes: true })) {
+      const entryUrl = new URL(entry.name, dirUrl);
+      if (entry.isDirectory()) files.push(...walk(new URL(`${entry.name}/`, dirUrl)));
+      else if (entry.name.endsWith('.mjs')) files.push(entryUrl);
+    }
+    return files;
+  };
+  for (const fileUrl of walk(libDir)) {
+    const contents = readFileSync(fileUrl, 'utf8');
+    assert.ok(
+      !contents.includes('(missing from current fetch)'),
+      `${fileUrl.pathname} must not reintroduce the removed missing-title sentinel`,
+    );
+  }
+});
+
+test('firstObserved is true for new, first-seen, and baseline-state, and absent otherwise', () => {
+  const newBase = detectDeltas(null, { pr: [], issue: [] }, { at: AT });
+  const newRun = detectDeltas(newBase.snapshot, { pr: [pr()], issue: [] }, { at: AT });
+  assert.deepEqual(newRun.deltas[0].classes, ['new']);
+  assert.equal(newRun.deltas[0].firstObserved, true);
+
+  const firstSeenBase = detectDeltas(null, { pr: [], issue: [] }, { at: AT });
+  const firstSeenRun = detectDeltas(
+    firstSeenBase.snapshot,
+    { pr: [pr({ state: 'merged', updatedAt: '2026-07-01T09:00:00Z' })], issue: [] },
+    { at: AT },
+  );
+  assert.deepEqual(firstSeenRun.deltas[0].classes, ['first-seen']);
+  assert.equal(firstSeenRun.deltas[0].firstObserved, true);
+
+  const baselineRun = detectDeltas(
+    null,
+    { pr: [pr()], issue: [] },
+    { emitBaselineState: true, at: AT },
+  );
+  assert.deepEqual(baselineRun.deltas[0].classes, ['baseline-state']);
+  assert.equal(baselineRun.deltas[0].firstObserved, true);
+
+  // Absent (never `false`) on every other class, including a plain update.
+  const updatedBase = detectDeltas(null, { pr: [pr()], issue: [] }, { at: AT });
+  const updatedRun = detectDeltas(
+    updatedBase.snapshot,
+    { pr: [pr({ updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
+    { at: '2026-07-01T11:00:00Z' },
+  );
+  assert.deepEqual(updatedRun.deltas[0].classes, ['updated']);
+  assert.equal('firstObserved' in updatedRun.deltas[0], false);
+
+  const missingRun = detectDeltas(updatedBase.snapshot, { pr: [], issue: [] }, { at: AT });
+  assert.deepEqual(missingRun.deltas[0].classes, ['missing']);
+  assert.equal('firstObserved' in missingRun.deltas[0], false);
 });
 
 test('an archived (presumed-deleted) object that reappears emits reappeared', () => {
@@ -1021,7 +1125,7 @@ test('every emitted detail key is declared in the exported contract, across ever
   );
   deltas.push(...tCf.deltas);
 
-  // head-changed (coexists with updated)
+  // head-changed (fires alone, decoupled from updated since R6)
   const sH = detectDeltas(
     null,
     { pr: [pr({ number: 90, headSha: 'sha1' })], issue: [] },

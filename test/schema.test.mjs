@@ -137,9 +137,10 @@ test('summary schema accepts the full PR shape, the minimal issue shape, and nul
   assert.ok(validates(summarySchema, { state: 'open' }));
 });
 
-test('reserved firstObserved/seq fields are declared on the shared def but never required', () => {
+test('firstObserved (populated, boolean-true-only) and reserved seq are declared but never required', () => {
   const deltaDef = schemaFor('json').$defs.delta;
   assert.ok(deltaDef.properties.firstObserved);
+  assert.deepEqual(deltaDef.properties.firstObserved, { const: true });
   assert.ok(deltaDef.properties.seq);
   assert.equal(deltaDef.required.includes('firstObserved'), false);
   assert.equal(deltaDef.required.includes('seq'), false);

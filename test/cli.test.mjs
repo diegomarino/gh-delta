@@ -872,9 +872,11 @@ test('--detail names the added and removed thread ids for a same-count thread sw
 });
 
 test('--detail does not leak threads into generic updated rows (P2-2)', () => {
-  // Head SHA and thread states change in the same tick: `threads` differs
-  // between from/to, but its meaningful expression is the dedicated `threads`
-  // row on unresolved-threads-*, not a generic `updated` field row (which the
+  // Head SHA and thread states change in the same tick: both are specific
+  // classes (head-changed decoupled from updated per R6; unresolved-threads-*
+  // always specific), so `updated` never fires here at all -- and `threads`'
+  // meaningful expression is the dedicated `threads` row on
+  // unresolved-threads-*, never a generic `updated` field row (which the
   // exported contract does not declare for the `updated` class).
   const before = {
     ...basePr,
@@ -900,12 +902,13 @@ test('--detail does not leak threads into generic updated rows (P2-2)', () => {
   );
   assert.equal(code, 10);
   const delta = report.deltas[0];
-  assert.ok(delta.classes.includes('updated'));
+  assert.ok(!delta.classes.includes('updated'));
   assert.ok(delta.classes.includes('head-changed'));
 
   const updatedFields = delta.details
     .filter((row) => row.class === 'updated')
     .map((row) => row.field);
+  assert.deepEqual(updatedFields, []);
   assert.ok(!updatedFields.includes('threads'));
 
   // Every emitted key must fall within the declared contract for its class.
@@ -1556,7 +1559,10 @@ test('class filters run before ignored authors and filteredDeltas excludes survi
     deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } }),
   );
   assert.equal(result.code, 10);
-  assert.deepEqual(result.report.deltas[0].classes, ['head-changed', 'updated']);
+  // new-comments is stripped by --ignore-authors (the only newly inferred
+  // comment is bot-authored); head-changed no longer drags in a forced
+  // `updated` pairing, so it is the sole survivor.
+  assert.deepEqual(result.report.deltas[0].classes, ['head-changed']);
   assert.equal(result.report.filteredDeltas, 0);
 });
 
@@ -1696,14 +1702,15 @@ test('--only-classes keeps matching deltas and still exits 10', () => {
 test('--ignore-classes removes a class but retains a multi-class delta, and drops empty deltas', () => {
   // A filter that deletes the whole multi-class delta loses an actionable head
   // change; one that retains an empty class list emits an invalid delta.
-  const headBefore = { ...basePr };
+  const headBefore = { ...basePr, isDraft: true };
   const headAfter = {
     ...headBefore,
     updatedAt: '2026-07-01T11:00:00Z',
     headSha: 'sha2',
+    isDraft: false,
   };
   const retained = run(
-    [...FILTER_ARGS, '--ignore-classes', 'updated'],
+    [...FILTER_ARGS, '--ignore-classes', 'draft-ready'],
     deps([[headAfter]], { existing: { pr: { 42: item(prFingerprint(headBefore)) }, issue: {} } }),
   );
   assert.equal(retained.code, 10);
@@ -1773,7 +1780,7 @@ test('--settled drops pending and unknown PRs, keeps ciRollup none, and implies 
 
 test('combined attention filters apply only before ignore, making ignore the final class veto', () => {
   // Reversing the order would drop this delta after ci-changed is vetoed,
-  // instead of retaining its independent head/update classes.
+  // instead of retaining its independent head-changed class.
   const before = { ...basePr, checks: [] };
   const after = {
     ...before,
@@ -1787,7 +1794,7 @@ test('combined attention filters apply only before ignore, making ignore the fin
     d,
   );
   assert.equal(code, 10);
-  assert.deepEqual(report.deltas[0].classes, ['head-changed', 'updated']);
+  assert.deepEqual(report.deltas[0].classes, ['head-changed']);
   assert.equal(report.filteredDeltas, 0);
 });
 
