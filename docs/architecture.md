@@ -310,7 +310,7 @@ exit result unchanged. Authentication, retry policy, durable queues, endpoint
 filtering, dedupe, and action execution belong downstream.
 
 The exact payload envelope and event identity semantics are specified in
-[Outpost Payload](contract.md#outpost-payload-schema-v1).
+[Outpost Payload](contract.md#outpost-payload-schema-v2).
 
 ## Future Entity and Selector Research
 

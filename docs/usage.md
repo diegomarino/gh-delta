@@ -254,7 +254,7 @@ for processing idempotency, and by `delta.id` (the content-addressed identity
 of the observed change) to collapse duplicates reported by several monitors.
 
 The exact payload and warning semantics are specified
-in [Outpost Payload](contract.md#outpost-payload-schema-v1).
+in [Outpost Payload](contract.md#outpost-payload-schema-v2).
 
 Worked receiver:
 [examples/outpost-ntfy-receiver/](https://github.com/diegomarino/gh-delta/tree/main/examples/outpost-ntfy-receiver)
@@ -284,8 +284,9 @@ local types if they need compile-time checking.
 
 Use `--format compact` for one self-contained JSON envelope, or `--format
 ndjson` for one JSON record per deterministic delta plus a final `end` record.
-They imply semantic summaries and preserve detector snapshots and delta IDs.
-Use `--detail` only when the structured detail rows are needed. Schemas are
+`delta.summary` is unconditional in both, and they preserve detector
+snapshots and delta IDs. Use `--detail` only when the structured detail rows
+are needed. Schemas are
 available locally with `gh-delta schema --format compact`.
 
 Text output consists of an ISO timestamp heartbeat line followed by one block per

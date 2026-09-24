@@ -126,18 +126,18 @@ access through `gh-delta schema --format compact|ndjson|json`.
 
 ## What an agent usually does
 
-| Class                                       | Meaning                             | Usual agent response                                                    |
-| ------------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------- |
-| `new`, `first-seen`                         | New or newly observed work          | Inspect and queue the item; do not assume ownership.                    |
-| `ci-changed`                                | CI state changed                    | Green: inspect review/merge state. Failed: relay the failing check.     |
-| `review-changed`, `review-requests-changed` | Review decision or audience changed | Notify the right reviewer or return requested changes to the worker.    |
-| `head-changed`, `base-changed`              | Code or target base changed         | Re-check CI and reviews before trusting earlier approval.               |
-| `merged`, `closed`, `reopened`              | Lifecycle changed                   | Verify it, then propose branch/work-queue follow-up.                    |
-| `new-comments`, `unresolved-threads-added`  | New discussion needs attention      | Read the discussion before merge or dispatch.                           |
-| `became-mergeable`, `became-conflicting`    | Mergeability changed                | Inspect protections/conflicts; never merge only because CI is green.    |
-| `stale`                                     | No meaningful change for a period   | Send one bounded reminder to the current owner/reviewer.                |
-| `missing`, `presumed-deleted`, `reappeared` | Observation continuity changed      | Check scope/permissions; only treat the terminal class as gone.         |
-| `updated`, `relabeled`, `assignees-changed` | Other meaningful metadata changed   | Reassess routing and inspect GitHub when the delta lacks enough detail. |
+| Class                                                               | Meaning                             | Usual agent response                                                                                                                 |
+| ------------------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `new`, `first-seen`                                                 | New or newly observed work          | Inspect and queue the item; do not assume ownership.                                                                                 |
+| `ci-changed`                                                        | CI state changed                    | Green: inspect review/merge state. Failed: relay the failing check.                                                                  |
+| `review-changed`, `review-requests-changed`                         | Review decision or audience changed | Notify the right reviewer or return requested changes to the worker.                                                                 |
+| `head-changed`, `base-changed`                                      | Code or target base changed         | Re-check CI and reviews before trusting earlier approval.                                                                            |
+| `merged`, `closed`, `reopened`                                      | Lifecycle changed                   | Verify it, then propose branch/work-queue follow-up.                                                                                 |
+| `new-comments`, `review-comments-added`, `unresolved-threads-added` | New discussion needs attention      | Read the discussion before merge or dispatch. `new-comments` is conversation-only; `review-comments-added` is inline review replies. |
+| `became-mergeable`, `became-conflicting`                            | Mergeability changed                | Inspect protections/conflicts; never merge only because CI is green.                                                                 |
+| `stale`                                                             | No meaningful change for a period   | Send one bounded reminder to the current owner/reviewer.                                                                             |
+| `missing`, `presumed-deleted`, `reappeared`                         | Observation continuity changed      | Check scope/permissions; only treat the terminal class as gone.                                                                      |
+| `updated`, `relabeled`, `assignees-changed`                         | Other meaningful metadata changed   | Reassess routing and inspect GitHub when the delta lacks enough detail.                                                              |
 
 The [contract](docs/contract.md) is canonical for class semantics, exit codes,
 schemas, snapshots, and every flag.

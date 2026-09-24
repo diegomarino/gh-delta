@@ -48,8 +48,8 @@
 
 - One coordinator fetches GitHub with `--log`; workers read the published log
   without owning or copying the snapshot.
-- Obtain the actual `logFile` from the producer report. Never reconstruct its
-  encoded filename.
+- Obtain the actual `logFile` from the producer report's `results[0].logFile`
+  (there is no top-level `logFile`). Never reconstruct its encoded filename.
 - Give one cursor per consumer and one active process per cursor.
 - Read without `--advance`, durably complete or enqueue the work, then set the
   cursor to the report's `cursor.to`. `read --advance` is appropriate only when

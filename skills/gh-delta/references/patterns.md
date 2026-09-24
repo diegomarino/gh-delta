@@ -76,7 +76,6 @@ gh-delta \
   --monitor-id "$MONITOR_ID" \
   --state-dir "$STATE_DIR" \
   --entities pr \
-  --summaries \
   --format compact
 ```
 
@@ -158,7 +157,7 @@ gh-delta \
   --log \
   --format json > "$REPORT_DIR/last-tick.json"
 
-LOG=$(jq -r '.logFile' "$REPORT_DIR/last-tick.json")
+LOG=$(jq -r '.results[0].logFile' "$REPORT_DIR/last-tick.json")
 gh-delta cursor set "$SCENARIO_ROOT/reviewer.cursor.json" 0 --log-file "$LOG"
 ```
 
@@ -235,6 +234,7 @@ readback. Never clean with a broad agent-prefix glob.
 - `json`: complete integration contract and structured detail.
 - `text`: operator logs, not machine parsing.
 - `--detail`: exact changed fields when the consumer must explain a delta.
-- `--summaries`: current semantic PR state without a second GitHub fetch.
+- `delta.summary`: current semantic PR state, always present, derived without a
+  second GitHub fetch (`--summaries` is a deprecated no-op).
 - `--enrich`: fetch review/comment/thread bodies only for matching emitted
   deltas, after snapshot publication.
