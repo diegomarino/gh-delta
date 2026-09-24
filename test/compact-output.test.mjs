@@ -103,6 +103,22 @@ test('compactDelta includes from/to only under the full option', () => {
   assert.deepEqual(withFull.deltas[0].to, delta.to);
 });
 
+test('compactDelta propagates firstObserved and seq -- the agent formats are the reason those fields exist', () => {
+  const observed = { ...delta, firstObserved: true, seq: 42 };
+  const compact = compactReport(baseReport({ deltas: [observed] }), 10, []);
+  assert.equal(compact.deltas[0].firstObserved, true);
+  assert.equal(compact.deltas[0].seq, 42);
+
+  const withoutEither = compactReport(baseReport(), 10, []);
+  assert.equal(Object.hasOwn(withoutEither.deltas[0], 'firstObserved'), false);
+  assert.equal(Object.hasOwn(withoutEither.deltas[0], 'seq'), false);
+
+  const ndjsonEnd = ndjsonReport(baseReport({ deltas: [observed] }), 10, []);
+  const record = ndjsonEnd.trimEnd().split('\n').map(JSON.parse)[0];
+  assert.equal(record.firstObserved, true);
+  assert.equal(record.seq, 42);
+});
+
 test('ndjsonReport ends with an end record and newline', () => {
   const output = ndjsonReport(baseReport(), 10, []);
   const lines = output.trimEnd().split('\n').map(JSON.parse);
@@ -174,7 +190,13 @@ test('a per-repo error folds into the compact errors array, keyed by repo', () =
 // the per-repo error path -- so an added, removed, or renamed field in
 // either direction breaks this test rather than quietly reaching consumers.
 test('AGENT_COMPACT_*/AGENT_NDJSON_END_FIELDS catalogs match every key compact/ndjson can actually emit', () => {
-  const fullDelta = { ...delta, missingTicks: 2, enrichment: { threadReplies: [] } };
+  const fullDelta = {
+    ...delta,
+    missingTicks: 2,
+    firstObserved: true,
+    seq: 3,
+    enrichment: { threadReplies: [] },
+  };
   const happyReport = compactReport(baseReport({ deltas: [fullDelta] }), 10, [], {
     detail: true,
     full: true,
