@@ -161,7 +161,7 @@ test('a tick contending for the lock during reset gets busy; once reset complete
   assert.equal(resetResult.code, 0);
   assert.ok(nested, 'the nested tick must have run while reset held the lock');
   assert.equal(nested.code, 1);
-  assert.equal(nested.report.kind, 'busy');
+  assert.equal(nested.report.results[0].error.kind, 'busy');
 
   // Lock released; a later tick against the same --state-file now sees fully
   // clean state (no leftover snapshot or log), not a half-deleted monitor.
@@ -174,5 +174,5 @@ test('a tick contending for the lock during reset gets busy; once reset complete
     },
   );
   assert.equal(after.code, 0);
-  assert.equal(after.report.baseline, true);
+  assert.equal(after.report.results[0].baseline, true);
 });

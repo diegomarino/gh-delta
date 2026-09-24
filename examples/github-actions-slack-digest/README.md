@@ -33,8 +33,8 @@ actions/cache save (skip exit 2)
   exit `2` (permanent config error) **fails the job** so it shows red instead
   of silently retrying a broken configuration forever. See
   [exit codes](../../docs/contract.md#exit-codes).
-- **`--detail` is load-bearing**: the digest reads `.deltas[].line`, which is
-  only present with `--detail`.
+- **`--detail` is load-bearing**: the digest reads `.deltas[].summaryLine`,
+  which is only present with `--detail` (or `--summary-line`).
 - **Cache as state, honestly**: `actions/cache` evicts entries after ~7 days
   without hits. If the restore misses, the tick re-seeds a baseline and any
   deltas in the gap were never observed — the workflow surfaces that as a

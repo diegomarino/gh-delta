@@ -111,7 +111,7 @@ test('main --log appends emitted post-filter delta before snapshot and exposes l
     deps,
   );
   assert.equal(result.code, 10);
-  assert.equal(result.report.logFile, '/tmp/state.json.deltalog.ndjson');
+  assert.equal(result.report.results[0].logFile, '/tmp/state.json.deltalog.ndjson');
   assert.equal(deps.events[0][0], 'log');
   assert.equal(deps.events[1], 'snapshot');
   assert.equal(deps.events[0][2].deltas[0].id, result.report.deltas[0].id);
@@ -236,16 +236,19 @@ test('--log resolves only opt-in log paths while preserving relative snapshot pa
     ['--repo', 'o/r', '--monitor-id', 'm', '--state-file', stateFile, '--entities', 'pr', '--log'],
     producerDeps(),
   );
-  assert.equal(byFile.report.stateFile, stateFile);
-  assert.equal(byFile.report.logFile, resolve(`${stateFile}.deltalog.ndjson`));
+  assert.equal(byFile.report.results[0].stateFile, stateFile);
+  assert.equal(byFile.report.results[0].logFile, resolve(`${stateFile}.deltalog.ndjson`));
 
   const stateDir = 'relative-state-dir';
   const byDir = run(
     ['--repo', 'o/r', '--monitor-id', 'm', '--state-dir', stateDir, '--entities', 'pr', '--log'],
     producerDeps(),
   );
-  assert.equal(byDir.report.stateFile, `${stateDir}/repo-o%2Fr__monitor-m__pr.json`);
-  assert.equal(byDir.report.logFile, resolve(`${stateDir}/log-o%2Fr__monitor-m__pr.ndjson`));
+  assert.equal(byDir.report.results[0].stateFile, `${stateDir}/repo-o%2Fr__monitor-m__pr.json`);
+  assert.equal(
+    byDir.report.results[0].logFile,
+    resolve(`${stateDir}/log-o%2Fr__monitor-m__pr.ndjson`),
+  );
 });
 
 test('actual append write and fsync finish before snapshot publication, and fsync failure blocks it', () => {
@@ -359,7 +362,7 @@ test('manifest directory fsync failure prevents snapshot publication and preserv
     }),
   );
   assert.equal(result.code, 1);
-  assert.equal(result.report.kind, 'io');
+  assert.equal(result.report.results[0].error.kind, 'io');
   assert.equal(snapshotCalls, 0);
   assert.deepEqual(readFileSync(stateFile), beforeBytes);
 });
@@ -382,7 +385,7 @@ test('snapshot failure after durable append retries the same id at a later seque
     producerDeps({ appendDeltaLog }),
   );
   assert.equal(retry.code, 10);
-  const entries = readDeltaLog(retry.report.logFile, { afterSeq: 0 }).entries;
+  const entries = readDeltaLog(retry.report.results[0].logFile, { afterSeq: 0 }).entries;
   assert.deepEqual(
     entries.map((entry) => entry.seq),
     [1, 2],
@@ -416,7 +419,6 @@ test('attention filtering stores the exact fully decorated surviving report delt
   assert.deepEqual(logged, result.report.deltas);
   assert.ok(logged[0].summary);
   assert.ok(logged[0].summaryLine);
-  assert.ok(logged[0].line);
   assert.ok(logged[0].details.length > 0);
 });
 
@@ -427,7 +429,7 @@ test('no --log leaves the log seam unopened and report omits logFile', () => {
     deps,
   );
   assert.equal(result.code, 10);
-  assert.equal(result.report.logFile, undefined);
+  assert.equal(result.report.results[0].logFile, undefined);
 });
 
 test('a zero-delta --log tick reports logFile but never opens the append seam', () => {
@@ -451,7 +453,7 @@ test('a zero-delta --log tick reports logFile but never opens the append seam', 
     deps,
   );
   assert.equal(result.code, 0);
-  assert.equal(result.report.logFile, '/tmp/empty.json.deltalog.ndjson');
+  assert.equal(result.report.results[0].logFile, '/tmp/empty.json.deltalog.ndjson');
   assert.deepEqual(deps.events, ['snapshot']);
 });
 
@@ -476,7 +478,7 @@ test('producer append failure is io and leaves snapshot publication untouched', 
     deps,
   );
   assert.equal(result.code, 1);
-  assert.equal(result.report.kind, 'io');
+  assert.equal(result.report.results[0].error.kind, 'io');
   assert.deepEqual(deps.events, []);
 });
 
@@ -506,7 +508,7 @@ test('lock loss from the append fence maps to busy and skips snapshot publicatio
     deps,
   );
   assert.equal(result.code, 1);
-  assert.equal(result.report.kind, 'busy');
+  assert.equal(result.report.results[0].error.kind, 'busy');
   assert.deepEqual(deps.events, []);
 });
 

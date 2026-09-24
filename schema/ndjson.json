@@ -2,25 +2,11 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "NDJSON record",
   "schemaVersion": 1,
-  "oneOf": [
-    {
+  "$defs": {
+    "delta": {
       "type": "object",
-      "required": [
-        "type",
-        "id",
-        "repo",
-        "entity",
-        "number",
-        "title",
-        "url",
-        "classes",
-        "summary",
-        "changed"
-      ],
+      "required": ["id", "repo", "entity", "number", "context", "classes", "summary", "changed"],
       "properties": {
-        "type": {
-          "const": "delta"
-        },
         "id": {
           "type": "string"
         },
@@ -34,11 +20,29 @@
           "type": "integer",
           "minimum": 1
         },
-        "title": {
-          "type": "string"
-        },
-        "url": {
-          "type": "string"
+        "context": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": ["string", "null"]
+            },
+            "title": {
+              "type": ["string", "null"]
+            },
+            "url": {
+              "type": ["string", "null"]
+            },
+            "author": {
+              "type": ["string", "null"]
+            },
+            "createdAt": {
+              "type": ["string", "null"]
+            },
+            "headRefName": {
+              "type": ["string", "null"]
+            }
+          },
+          "additionalProperties": true
         },
         "classes": {
           "type": "array",
@@ -132,6 +136,16 @@
                 }
               },
               "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "required": ["state"],
+              "properties": {
+                "state": {
+                  "enum": ["open", "closed", "merged"]
+                }
+              },
+              "additionalProperties": false
             }
           ]
         },
@@ -139,13 +153,41 @@
           "type": "object",
           "additionalProperties": true
         },
+        "from": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "to": {
+          "type": "object",
+          "additionalProperties": true
+        },
         "missingTicks": {
           "type": "integer",
           "minimum": 1
         },
+        "firstObserved": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "summaryLine": {
+          "type": "string"
+        },
         "enrichment": {
           "type": "object",
           "additionalProperties": true
+        },
+        "staleAt": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
         },
         "detail": {
           "type": "array",
@@ -155,33 +197,28 @@
           }
         }
       },
-      "additionalProperties": true,
-      "not": {
-        "anyOf": [
-          {
-            "required": ["from"]
-          },
-          {
-            "required": ["to"]
-          },
-          {
-            "required": ["summaryLine"]
-          },
-          {
-            "required": ["line"]
-          },
-          {
-            "required": ["details"]
-          },
-          {
-            "required": ["updatedAt"]
+      "additionalProperties": true
+    }
+  },
+  "oneOf": [
+    {
+      "allOf": [
+        {
+          "$ref": "#/$defs/delta"
+        },
+        {
+          "required": ["type"],
+          "properties": {
+            "type": {
+              "const": "delta"
+            }
           }
-        ]
-      }
+        }
+      ]
     },
     {
       "type": "object",
-      "required": ["type", "schemaVersion", "at", "repo", "baseline", "counts", "exitCode"],
+      "required": ["type", "schemaVersion", "at", "counts", "warnings", "exitCode"],
       "properties": {
         "type": {
           "const": "end"
@@ -190,50 +227,6 @@
           "const": 1
         },
         "at": {
-          "type": "string"
-        },
-        "warnings": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["label", "reason"],
-            "properties": {
-              "label": {
-                "type": "string"
-              },
-              "reason": {
-                "type": "string"
-              }
-            },
-            "additionalProperties": true
-          }
-        },
-        "errors": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["kind", "message"],
-            "properties": {
-              "repo": {
-                "type": "string"
-              },
-              "kind": {
-                "enum": ["config", "snapshot", "github", "io", "busy", "log", "rate-limit"]
-              },
-              "message": {
-                "type": "string"
-              },
-              "hint": {
-                "type": "string"
-              },
-              "resetAt": {
-                "type": "string"
-              }
-            },
-            "additionalProperties": true
-          }
-        },
-        "repo": {
           "type": "string"
         },
         "repos": {
@@ -247,7 +240,7 @@
         },
         "counts": {
           "type": "object",
-          "required": ["deltas", "byClass"],
+          "required": ["deltas", "byClass", "filteredDeltas"],
           "properties": {
             "deltas": {
               "type": "integer",
@@ -385,436 +378,50 @@
             }
           },
           "additionalProperties": true
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind", "message"],
+            "properties": {
+              "repo": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": ["config", "snapshot", "github", "io", "busy", "log", "rate-limit"]
+              },
+              "message": {
+                "type": "string"
+              },
+              "hint": {
+                "type": "string"
+              },
+              "resetAt": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["label", "reason"],
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
         },
         "exitCode": {
           "enum": [0, 1, 2, 10]
-        }
-      },
-      "additionalProperties": true
-    },
-    {
-      "type": "object",
-      "required": ["type", "schemaVersion", "at", "repos", "counts", "exitCode"],
-      "properties": {
-        "type": {
-          "const": "end"
-        },
-        "schemaVersion": {
-          "const": 1
-        },
-        "at": {
-          "type": "string"
-        },
-        "warnings": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["label", "reason"],
-            "properties": {
-              "label": {
-                "type": "string"
-              },
-              "reason": {
-                "type": "string"
-              }
-            },
-            "additionalProperties": true
-          }
-        },
-        "errors": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["kind", "message"],
-            "properties": {
-              "repo": {
-                "type": "string"
-              },
-              "kind": {
-                "enum": ["config", "snapshot", "github", "io", "busy", "log", "rate-limit"]
-              },
-              "message": {
-                "type": "string"
-              },
-              "hint": {
-                "type": "string"
-              },
-              "resetAt": {
-                "type": "string"
-              }
-            },
-            "additionalProperties": true
-          }
-        },
-        "repo": {
-          "type": "string"
-        },
-        "repos": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "baseline": {
-          "type": "boolean"
-        },
-        "counts": {
-          "type": "object",
-          "required": ["deltas", "byClass"],
-          "properties": {
-            "deltas": {
-              "type": "integer",
-              "minimum": 0
-            },
-            "byClass": {
-              "type": "object",
-              "properties": {
-                "new": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "first-seen": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "baseline-state": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "closed": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "reopened": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "new-comments": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "updated": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "missing": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "still-missing": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "presumed-deleted": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "reappeared": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "merged": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "draft-ready": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "converted-to-draft": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "ci-changed": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "review-changed": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "became-mergeable": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "became-conflicting": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "head-changed": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "stale": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "unresolved-threads-added": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "unresolved-threads-resolved": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "review-threads-changed": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "relabeled": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "comments-removed": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "assignees-changed": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "review-requests-changed": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "base-changed": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "review-comments-added": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "review-comments-removed": {
-                  "type": "integer",
-                  "minimum": 1
-                }
-              },
-              "additionalProperties": false
-            },
-            "filteredDeltas": {
-              "type": "integer",
-              "minimum": 0
-            }
-          },
-          "additionalProperties": true
-        },
-        "exitCode": {
-          "enum": [0, 1, 2, 10]
-        }
-      },
-      "additionalProperties": true
-    },
-    {
-      "type": "object",
-      "required": ["type", "schemaVersion", "at", "counts", "errors", "exitCode"],
-      "properties": {
-        "type": {
-          "const": "end"
-        },
-        "schemaVersion": {
-          "const": 1
-        },
-        "at": {
-          "type": "string"
-        },
-        "warnings": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["label", "reason"],
-            "properties": {
-              "label": {
-                "type": "string"
-              },
-              "reason": {
-                "type": "string"
-              }
-            },
-            "additionalProperties": true
-          }
-        },
-        "errors": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "type": "object",
-            "required": ["kind", "message"],
-            "properties": {
-              "repo": {
-                "type": "string"
-              },
-              "kind": {
-                "enum": ["config", "snapshot", "github", "io", "busy", "log", "rate-limit"]
-              },
-              "message": {
-                "type": "string"
-              },
-              "hint": {
-                "type": "string"
-              },
-              "resetAt": {
-                "type": "string"
-              }
-            },
-            "additionalProperties": true
-          }
-        },
-        "repo": {
-          "type": "string"
-        },
-        "repos": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "baseline": {
-          "type": "boolean"
-        },
-        "counts": {
-          "type": "object",
-          "required": ["deltas", "byClass"],
-          "properties": {
-            "deltas": {
-              "type": "integer",
-              "minimum": 0
-            },
-            "byClass": {
-              "type": "object",
-              "properties": {
-                "new": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "first-seen": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "baseline-state": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "closed": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "reopened": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "new-comments": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "updated": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "missing": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "still-missing": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "presumed-deleted": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "reappeared": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "merged": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "draft-ready": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "converted-to-draft": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "ci-changed": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "review-changed": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "became-mergeable": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "became-conflicting": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "head-changed": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "stale": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "unresolved-threads-added": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "unresolved-threads-resolved": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "review-threads-changed": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "relabeled": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "comments-removed": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "assignees-changed": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "review-requests-changed": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "base-changed": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "review-comments-added": {
-                  "type": "integer",
-                  "minimum": 1
-                },
-                "review-comments-removed": {
-                  "type": "integer",
-                  "minimum": 1
-                }
-              },
-              "additionalProperties": false
-            },
-            "filteredDeltas": {
-              "type": "integer",
-              "minimum": 0
-            }
-          },
-          "additionalProperties": true
-        },
-        "exitCode": {
-          "enum": [1, 2]
         }
       },
       "additionalProperties": true

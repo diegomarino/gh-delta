@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   REPORT_FIELDS,
+  REPORT_RESULT_FIELDS,
   DELTA_FIELDS,
   DELTA_DETAIL_FIELDS,
   DELTA_DETAIL_FIELDS_BY_CLASS,
@@ -24,55 +25,46 @@ import { baselineReport, deltaReport, detailReport } from '../tools/examples/fix
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const keySet = (obj) => new Set(Object.keys(obj));
 
-test('every example report covers exactly the frozen REPORT_FIELDS, minus the omit-when-empty ones', () => {
-  // lib/cli.mjs's run() never puts `warnings` on the base report object; it is
-  // only spliced in by runCommand() when outpost delivery returned at least
-  // one warning (see the `!result.warnings?.length` guard there).
-  // `filteredDeltas` is similarly absent without an attention-filter flag.
-  // A live run on the common no-warning/no-filter path these fixtures depict
-  // `logFile` is likewise absent unless the opt-in --log flag is supplied.
-  // A live run on the common no-warning/no-filter/no-log/non-economical path these
-  // fixtures depict therefore omits those keys (including scope, emitted only by
-  // economical watch reports), so the frozen field list minus those keys is
-  // what a real report covers here — asserting the raw REPORT_FIELDS set would
-  // require a key no live run actually emits (audit finding F10.1).
-  const OMIT_WHEN_EMPTY = new Set([
-    'warnings',
-    'filteredDeltas',
-    'logFile',
-    'scope',
-    'repos',
-    'errors',
-  ]);
-  const expected = [...REPORT_FIELDS].filter((field) => !OMIT_WHEN_EMPTY.has(field));
+test('every example report covers exactly the frozen REPORT_FIELDS', () => {
+  // Schema v2: `repos`/`results`/`filteredDeltas`/`warnings` are always
+  // present now (0/[] on the common no-filter/no-warning path these fixtures
+  // depict), so the frozen field list is exactly what a live run emits --
+  // no more omit-when-empty carve-outs.
+  // `logFile` (opt-in --log) and `error` (a per-repo failure) are the only
+  // REPORT_RESULT_FIELDS a live success-path, no-log run omits.
+  const RESULT_OMIT_WHEN_EMPTY = new Set(['logFile', 'error']);
+  const expectedResultFields = [...REPORT_RESULT_FIELDS].filter(
+    (field) => !RESULT_OMIT_WHEN_EMPTY.has(field),
+  );
   for (const [name, report] of Object.entries({ baselineReport, deltaReport, detailReport })) {
     assert.deepEqual(
       [...keySet(report)].sort(),
-      [...expected].sort(),
+      [...REPORT_FIELDS].sort(),
       `${name} must exercise exactly the contract report fields a live run would populate`,
     );
-    for (const field of OMIT_WHEN_EMPTY) {
-      assert.equal(
-        field in report,
-        false,
-        `${name} must omit "${field}" the way a live run does when it is empty`,
-      );
-    }
+    assert.deepEqual(
+      [...keySet(report.results[0])].sort(),
+      [...expectedResultFields].sort(),
+      `${name}'s results[0] must exercise exactly the fields a live no-log, successful tick populates`,
+    );
   }
 });
 
-test('fully enriched deltas jointly cover exactly the frozen DELTA_FIELDS', () => {
+test('fully enriched deltas jointly cover exactly the frozen DELTA_FIELDS, minus the reserved R4/R6 fields', () => {
   // No single delta carries every field: `missingTicks` is missing-lifecycle
   // only (to === null, no current object), while `headRefName` is PR-only and
   // only present when a current object exists (to !== null). They are mutually
   // exclusive, so coverage is asserted over the union of a missing delta and a
-  // PR change delta. --detail is the richest mode (summaryLine, line, details).
+  // PR change delta. --detail is the richest mode (summaryLine, details).
+  // `firstObserved`/`seq` are reserved for R6/R4 and never populated yet, so
+  // they are excluded from this coverage union deliberately, not omitted by
+  // oversight.
   // Schema v2: `from`/`to` are snapshot items (`{ fingerprint, context, meta }`).
   const item = (fingerprint, meta = {}) => ({ fingerprint, context: {}, meta });
   const missing = {
     entity: 'pr',
     number: 42,
-    title: '(missing from current fetch)',
+    context: { title: null },
     classes: ['still-missing'],
     missingTicks: 2,
     from: item({ state: 'OPEN' }, { missingTicks: 1 }),
@@ -82,10 +74,12 @@ test('fully enriched deltas jointly cover exactly the frozen DELTA_FIELDS', () =
     repo: 'owner/repo',
     entity: 'pr',
     number: 7,
-    title: 'Add widget',
-    headRefName: 'feature/widget',
-    author: 'octocat',
-    url: 'https://github.com/owner/repo/pull/7',
+    context: {
+      title: 'Add widget',
+      headRefName: 'feature/widget',
+      author: 'octocat',
+      url: 'https://github.com/owner/repo/pull/7',
+    },
     classes: ['new-comments'],
     from: item({ state: 'OPEN', comments: 1 }),
     to: item({ state: 'OPEN', comments: 3 }),
@@ -105,10 +99,11 @@ test('fully enriched deltas jointly cover exactly the frozen DELTA_FIELDS', () =
   // attach it to both representative deltas so the union also covers `id`.
   missing.id = deltaId(deltaIdentity('owner/repo', missing));
   change.id = deltaId(deltaIdentity('owner/repo', change));
-  // `summaries: true` on the PR change delta (which has a to-state) adds `summary`;
-  // the missing delta (to === null) correctly gets none, so the union covers it.
-  enrichDelta(missing, { summaryLine: true, legacyLine: true, details: true, summaries: true });
-  enrichDelta(change, { summaryLine: true, legacyLine: true, details: true, summaries: true });
+  // summary/changed are always-on now (enrichDelta computes them
+  // unconditionally); the missing delta (to === null) correctly gets a null
+  // summary, still covering the key.
+  enrichDelta(missing, { summaryLine: true, details: true });
+  enrichDelta(change, { summaryLine: true, details: true });
   // The public detail fixture contributes a representative stale delta, whose
   // UTC period is a public field rather than fingerprint state.
   const union = new Set([
@@ -116,10 +111,11 @@ test('fully enriched deltas jointly cover exactly the frozen DELTA_FIELDS', () =
     ...keySet(change),
     ...detailReport.deltas.flatMap((delta) => Object.keys(delta)),
   ]);
+  const expected = [...DELTA_FIELDS].filter((field) => !['firstObserved', 'seq'].includes(field));
   assert.deepEqual(
     [...union].sort(),
-    [...DELTA_FIELDS].sort(),
-    'the detail fixture deltas must jointly exercise every contract delta field',
+    [...expected].sort(),
+    'the detail fixture deltas must jointly exercise every non-reserved contract delta field',
   );
 });
 
@@ -132,7 +128,7 @@ test('every example delta carries the canonical content-addressed id', () => {
       assert.match(delta.id, /^[0-9a-f]{64}$/, `${name} #${delta.number} must carry a hex id`);
       assert.equal(
         delta.id,
-        deltaId(deltaIdentity(report.repo, delta)),
+        deltaId(deltaIdentity(report.repos[0], delta)),
         `${name} #${delta.number} id must be the canonical hash of its identity`,
       );
     }
@@ -146,17 +142,17 @@ test('PR example deltas carry headRefName; issue example deltas do not', () => {
     for (const delta of report.deltas) {
       if (delta.entity === 'pr') {
         assert.equal(
-          'headRefName' in delta,
+          'headRefName' in delta.context,
           true,
           `${name} PR #${delta.number} must carry headRefName`,
         );
         assert.ok(
-          typeof delta.headRefName === 'string' || delta.headRefName === null,
+          typeof delta.context.headRefName === 'string' || delta.context.headRefName === null,
           `${name} PR #${delta.number} headRefName must be a string or null`,
         );
       } else {
         assert.equal(
-          'headRefName' in delta,
+          'headRefName' in delta.context,
           false,
           `${name} issue #${delta.number} must not carry headRefName`,
         );
@@ -206,7 +202,7 @@ test('the detail report is internally consistent: command, entities, and stateFi
     'a flag-free command must echo both entities, matching the __pr-issue state file',
   );
   assert.match(
-    detailReport.stateFile,
+    detailReport.results[0].stateFile,
     /__pr-issue\.json$/,
     'stateFile must carry the __pr-issue segment that matches entities: ["pr", "issue"]',
   );

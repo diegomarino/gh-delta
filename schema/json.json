@@ -1,29 +1,226 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "legacy JSON report",
+  "title": "JSON report",
   "schemaVersion": 1,
-  "oneOf": [
-    {
+  "$defs": {
+    "delta": {
       "type": "object",
-      "required": ["schemaVersion", "at", "deltas"],
+      "required": ["id", "repo", "entity", "number", "context", "classes", "summary", "changed"],
       "properties": {
-        "schemaVersion": {
-          "const": 1
-        },
-        "at": {
+        "id": {
           "type": "string"
-        },
-        "baseline": {
-          "type": "boolean"
         },
         "repo": {
           "type": "string"
         },
-        "repos": {
+        "entity": {
+          "enum": ["pr", "issue"]
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "context": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": ["string", "null"]
+            },
+            "title": {
+              "type": ["string", "null"]
+            },
+            "url": {
+              "type": ["string", "null"]
+            },
+            "author": {
+              "type": ["string", "null"]
+            },
+            "createdAt": {
+              "type": ["string", "null"]
+            },
+            "headRefName": {
+              "type": ["string", "null"]
+            }
+          },
+          "additionalProperties": true
+        },
+        "classes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "new",
+              "first-seen",
+              "baseline-state",
+              "closed",
+              "reopened",
+              "new-comments",
+              "updated",
+              "missing",
+              "still-missing",
+              "presumed-deleted",
+              "reappeared",
+              "merged",
+              "draft-ready",
+              "converted-to-draft",
+              "ci-changed",
+              "review-changed",
+              "became-mergeable",
+              "became-conflicting",
+              "head-changed",
+              "stale",
+              "unresolved-threads-added",
+              "unresolved-threads-resolved",
+              "review-threads-changed",
+              "relabeled",
+              "comments-removed",
+              "assignees-changed",
+              "review-requests-changed",
+              "base-changed",
+              "review-comments-added",
+              "review-comments-removed"
+            ]
+          }
+        },
+        "summary": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "ciRollup",
+                "reviewDecision",
+                "mergeable",
+                "mergeStateStatus",
+                "state",
+                "isDraft",
+                "unresolvedReviewThreads",
+                "headSha"
+              ],
+              "properties": {
+                "ciRollup": {
+                  "enum": ["green", "failed", "pending", "none"]
+                },
+                "reviewDecision": {
+                  "enum": ["approved", "changes_requested", "review_required", "none"]
+                },
+                "mergeable": {
+                  "enum": ["mergeable", "conflicting", "unknown"]
+                },
+                "mergeStateStatus": {
+                  "enum": [
+                    "behind",
+                    "blocked",
+                    "clean",
+                    "dirty",
+                    "draft",
+                    "has_hooks",
+                    "unstable",
+                    "unknown"
+                  ]
+                },
+                "state": {
+                  "enum": ["open", "closed", "merged"]
+                },
+                "isDraft": {
+                  "type": "boolean"
+                },
+                "unresolvedReviewThreads": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "headSha": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "required": ["state"],
+              "properties": {
+                "state": {
+                  "enum": ["open", "closed", "merged"]
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "changed": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "from": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "to": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "missingTicks": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "firstObserved": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "summaryLine": {
+          "type": "string"
+        },
+        "enrichment": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "staleAt": {
+          "type": "string"
+        },
+        "details": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "object",
+            "additionalProperties": true
           }
+        },
+        "detail": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "detectedAt",
+        "monitorId",
+        "entities",
+        "repos",
+        "results",
+        "deltas",
+        "filteredDeltas",
+        "warnings",
+        "summary"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "detectedAt": {
+          "type": "string"
         },
         "monitorId": {
           "type": "string"
@@ -34,20 +231,88 @@
             "enum": ["pr", "issue"]
           }
         },
-        "stateFile": {
-          "type": "string"
+        "repos": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["repo", "baseline", "repoSource", "stateFile", "rateLimit"],
+            "properties": {
+              "repo": {
+                "type": "string"
+              },
+              "baseline": {
+                "type": "boolean"
+              },
+              "repoSource": {
+                "type": "string"
+              },
+              "stateFile": {
+                "type": "string"
+              },
+              "logFile": {
+                "type": "string"
+              },
+              "rateLimit": {
+                "type": ["object", "null"],
+                "properties": {
+                  "cost": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "remaining": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "resetAt": {
+                    "type": "string"
+                  }
+                }
+              },
+              "error": {
+                "type": "object",
+                "required": ["kind", "message"],
+                "properties": {
+                  "kind": {
+                    "enum": ["config", "snapshot", "github", "io", "busy", "log", "rate-limit"]
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "hint": {
+                    "type": "string"
+                  },
+                  "resetAt": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": true
+              }
+            },
+            "additionalProperties": true
+          }
         },
         "deltas": {
-          "type": "array"
+          "type": "array",
+          "items": {
+            "allOf": [
+              {
+                "$ref": "#/$defs/delta"
+              },
+              {
+                "required": ["from", "to"]
+              }
+            ]
+          }
         },
-        "error": {
-          "type": "string"
-        },
-        "kind": {
-          "enum": ["config", "snapshot", "github", "io", "busy", "log", "rate-limit"]
-        },
-        "hint": {
-          "type": "string"
+        "filteredDeltas": {
+          "type": "integer",
+          "minimum": 0
         },
         "warnings": {
           "type": "array",
@@ -64,6 +329,9 @@
             },
             "additionalProperties": true
           }
+        },
+        "summary": {
+          "type": "string"
         }
       },
       "additionalProperties": true
@@ -78,33 +346,6 @@
         "at": {
           "type": "string"
         },
-        "baseline": {
-          "type": "boolean"
-        },
-        "repo": {
-          "type": "string"
-        },
-        "repos": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "monitorId": {
-          "type": "string"
-        },
-        "entities": {
-          "type": "array",
-          "items": {
-            "enum": ["pr", "issue"]
-          }
-        },
-        "stateFile": {
-          "type": "string"
-        },
-        "deltas": {
-          "type": "array"
-        },
         "error": {
           "type": "string"
         },
@@ -114,21 +355,14 @@
         "hint": {
           "type": "string"
         },
-        "warnings": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["label", "reason"],
-            "properties": {
-              "label": {
-                "type": "string"
-              },
-              "reason": {
-                "type": "string"
-              }
-            },
-            "additionalProperties": true
-          }
+        "repo": {
+          "type": "string"
+        },
+        "monitorId": {
+          "type": "string"
+        },
+        "resetAt": {
+          "type": "string"
         }
       },
       "additionalProperties": true

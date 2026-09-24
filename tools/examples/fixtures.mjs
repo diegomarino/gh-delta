@@ -9,12 +9,20 @@
 // D5, the "impossible delta"). test/examples.test.mjs asserts these objects
 // still cover the frozen contract field lists, so a schema change fails loudly.
 import { deltaId, deltaIdentity } from '../../lib/fingerprint.mjs';
+import { diffFingerprint } from '../../lib/diff.mjs';
+import { deltaSummary } from '../../lib/summary.mjs';
 
 const REPO = 'owner/repo';
 
-// Stamp the content-addressed id exactly as lib/cli.mjs run() does, so a fixture
-// delta is byte-identical to a live one (id leads the object).
-const withId = (delta) => ({ id: deltaId(deltaIdentity(REPO, delta)), ...delta });
+// Stamp the content-addressed id and the always-on changed/summary fields
+// exactly as lib/cli.mjs's run()/enrichDelta do, so a fixture delta is
+// byte-identical to a live one.
+const withId = (delta) => {
+  const withRepo = { id: deltaId(deltaIdentity(REPO, delta)), repo: REPO, ...delta };
+  withRepo.changed = diffFingerprint(withRepo.from?.fingerprint, withRepo.to?.fingerprint);
+  withRepo.summary = deltaSummary(withRepo);
+  return withRepo;
+};
 // Zero-config default: `--monitor-id` derives to `host-<sha1(hostname)[:12]>`.
 // A realistic frozen value so the demo command can stay flag-free yet honest.
 const MONITOR = 'host-9c1f7b2a4e83';
@@ -38,18 +46,17 @@ const item = (fingerprint, context = {}) => ({
 // `review-requests-changed` co-occur — the exact interplay the contract
 // documents.
 const pr42Context = {
+  id: 'PR_pr42',
   title: 'Add billing webhook',
   headRefName: 'feature/billing-webhook',
   author: 'alice',
+  createdAt: '2026-06-28T09:00:00Z',
   url: 'https://github.com/owner/repo/pull/42',
 };
 const pr42 = withId({
   entity: 'pr',
   number: 42,
-  title: 'Add billing webhook',
-  headRefName: 'feature/billing-webhook',
-  author: 'alice',
-  url: 'https://github.com/owner/repo/pull/42',
+  context: pr42Context,
   classes: ['ci-changed', 'review-changed', 'review-requests-changed'],
   from: item(
     {
@@ -110,16 +117,16 @@ const pr42 = withId({
 });
 
 const issue17Context = {
+  id: 'I_issue17',
   title: 'Backfill customer imports',
   author: 'carol',
+  createdAt: '2026-06-20T09:00:00Z',
   url: 'https://github.com/owner/repo/issues/17',
 };
 const issue17 = withId({
   entity: 'issue',
   number: 17,
-  title: 'Backfill customer imports',
-  author: 'carol',
-  url: 'https://github.com/owner/repo/issues/17',
+  context: issue17Context,
   classes: ['relabeled'],
   from: item({ state: 'open', labels: ['worker'] }, issue17Context),
   to: item({ state: 'open', labels: ['backend', 'worker'] }, issue17Context),
@@ -128,18 +135,17 @@ const issue17 = withId({
 // An unchanged open PR that has crossed the explicit inactivity threshold. Its
 // UTC period is part of the public, content-addressed stale delta identity.
 const pr88Context = {
+  id: 'PR_pr88',
   title: 'Refresh release notes',
   headRefName: 'docs/release-notes',
   author: 'bob',
+  createdAt: '2026-06-25T09:00:00Z',
   url: 'https://github.com/owner/repo/pull/88',
 };
 const pr88Stale = withId({
   entity: 'pr',
   number: 88,
-  title: 'Refresh release notes',
-  headRefName: 'docs/release-notes',
-  author: 'bob',
-  url: 'https://github.com/owner/repo/pull/88',
+  context: pr88Context,
   classes: ['stale'],
   staleAt: '2026-07-01',
   from: item({ state: 'open', headSha: 'd0c5' }, pr88Context),
@@ -151,18 +157,17 @@ const pr88Stale = withId({
 // vs. a reply inside an existing review thread, split into their own
 // classes instead of one ambiguous aggregate).
 const pr51Context = {
+  id: 'PR_pr51',
   title: 'Paginate the audit log endpoint',
   headRefName: 'feature/audit-log-pagination',
   author: 'dave',
+  createdAt: '2026-06-15T09:00:00Z',
   url: 'https://github.com/owner/repo/pull/51',
 };
 const pr51Comments = withId({
   entity: 'pr',
   number: 51,
-  title: 'Paginate the audit log endpoint',
-  headRefName: 'feature/audit-log-pagination',
-  author: 'dave',
-  url: 'https://github.com/owner/repo/pull/51',
+  context: pr51Context,
   classes: ['new-comments', 'review-comments-added'],
   from: item(
     {
@@ -184,38 +189,47 @@ const pr51Comments = withId({
   ),
 });
 
-// lib/cli.mjs never puts a `warnings` key on the base report object (see
-// run()); it is only spliced in by runCommand() when outpost delivery
-// returned at least one non-empty warning. A live run therefore *omits*
-// `warnings` entirely on the common path these fixtures depict, so the
-// fixtures must omit it too (fixes audit finding F10.1, the "impossible
-// warnings key").
+// lib/cli.mjs never puts a `warnings` key beyond the always-on empty array on
+// the base report object; outpost delivery warnings (spliced in by
+// runCommand -- see run()) are the only thing that can make it non-empty. A
+// live run therefore has `warnings: []` on the common path these fixtures
+// depict, so the fixtures do too.
+function result(overrides = {}) {
+  return {
+    repo: REPO,
+    baseline: false,
+    repoSource: 'flag',
+    stateFile: STATE_FILE,
+    rateLimit: null,
+    ...overrides,
+  };
+}
 
 /** Run 1 — zero-config baseline seed. */
 export const baselineReport = Object.freeze({
   schemaVersion: 1,
-  baseline: true,
-  repo: REPO,
-  repoSource: 'flag',
+  detectedAt: AT_BASELINE,
   monitorId: MONITOR,
   entities: ['pr', 'issue'],
-  stateFile: STATE_FILE,
-  at: AT_BASELINE,
+  repos: [REPO],
+  results: [result({ baseline: true })],
   deltas: [],
+  filteredDeltas: 0,
+  warnings: [],
   summary: 'baseline established: 1 PRs, 1 issues',
 });
 
 /** Run 2 — second tick, three deltas, text output. */
 export const deltaReport = Object.freeze({
   schemaVersion: 1,
-  baseline: false,
-  repo: REPO,
-  repoSource: 'flag',
+  detectedAt: AT,
   monitorId: MONITOR,
   entities: ['pr', 'issue'],
-  stateFile: STATE_FILE,
-  at: AT,
+  repos: [REPO],
+  results: [result()],
   deltas: [pr42, issue17, pr51Comments],
+  filteredDeltas: 0,
+  warnings: [],
   summary: '3 delta(s)',
 });
 
@@ -226,13 +240,13 @@ export const deltaReport = Object.freeze({
 /** Run 3 — PR #42 plus inactivity, `--format json --detail --stale-after 24h`. */
 export const detailReport = Object.freeze({
   schemaVersion: 1,
-  baseline: false,
-  repo: REPO,
-  repoSource: 'flag',
+  detectedAt: AT,
   monitorId: MONITOR,
   entities: ['pr', 'issue'],
-  stateFile: STATE_FILE,
-  at: AT,
+  repos: [REPO],
+  results: [result()],
   deltas: [pr42, pr88Stale],
+  filteredDeltas: 0,
+  warnings: [],
   summary: '2 delta(s)',
 });

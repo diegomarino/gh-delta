@@ -209,7 +209,7 @@ test('prSummary.failedChecks is empty for a PR with no checks or no failing chec
   );
 });
 
-test('deltaSummary applies only to PR deltas with an observed to-state', () => {
+test('deltaSummary dispatches by entity and requires an observed to-state', () => {
   // `to` is a snapshot item (`{ fingerprint, context, meta }`); deltaSummary
   // reads only `to.fingerprint`.
   const to = {
@@ -218,8 +218,9 @@ test('deltaSummary applies only to PR deltas with an observed to-state', () => {
     meta: {},
   };
   assert.equal(deltaSummary({ entity: 'pr', to }).ciRollup, 'none');
-  assert.equal(deltaSummary({ entity: 'issue', to }), null);
+  assert.deepEqual(deltaSummary({ entity: 'issue', to }), { state: 'open' });
   assert.equal(deltaSummary({ entity: 'pr', to: null }), null);
+  assert.equal(deltaSummary({ entity: 'issue', to: null }), null);
   assert.equal(deltaSummary(null), null);
 });
 

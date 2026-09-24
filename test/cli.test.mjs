@@ -259,7 +259,7 @@ test('first run returns code 0 (baseline) and writes the snapshot', () => {
   );
   assert.equal(code, 0);
   assert.equal(report.schemaVersion, 1);
-  assert.equal(report.baseline, true);
+  assert.equal(report.results[0].baseline, true);
   assert.equal(report.monitorId, 'main');
   assert.deepEqual(report.entities, ['pr', 'issue']);
   assert.equal(d.writes, 1);
@@ -324,7 +324,7 @@ test('eligible PR-only watch uses the economical fetch and separate explicit sta
   assert.equal(result.code, 0);
   assert.deepEqual(targeted.numbers, [3, 9]);
   assert.equal(targeted.options.onProgress instanceof Function, true);
-  assert.equal(result.report.stateFile, '/tmp/economical.json.watch.json');
+  assert.equal(result.report.results[0].stateFile, '/tmp/economical.json.watch.json');
   assert.equal(d.readPath, '/tmp/economical.json.watch.json');
   assert.equal(d.writePath, '/tmp/economical.json.watch.json');
   assert.deepEqual(Object.keys(d.stored.pr), ['3', '9']);
@@ -347,7 +347,7 @@ test('empty eligible watch makes no GitHub calls and snapshots an empty PR unive
     d,
   );
   assert.equal(result.code, 0);
-  assert.equal(result.report.stateFile, '/tmp/empty-economical.json.watch.json');
+  assert.equal(result.report.results[0].stateFile, '/tmp/empty-economical.json.watch.json');
   assert.deepEqual(d.stored.pr, {});
   assert.deepEqual(d.stored.issue, {});
 });
@@ -369,7 +369,7 @@ test('ineligible watch lists retain broad fetch and ordinary state history', () 
     d,
   );
   assert.equal(result.code, 0);
-  assert.equal(result.report.stateFile, '/tmp/broad-watch.json');
+  assert.equal(result.report.results[0].stateFile, '/tmp/broad-watch.json');
   assert.equal(d.readPath, '/tmp/broad-watch.json');
 });
 
@@ -440,17 +440,20 @@ test('economical watch logs derive from the selected state identity for explicit
     return { result, appended };
   };
   const explicit = runEconomical(['--state-file', '/tmp/economical-log.json']);
-  assert.equal(explicit.result.report.stateFile, '/tmp/economical-log.json.watch.json');
+  assert.equal(explicit.result.report.results[0].stateFile, '/tmp/economical-log.json.watch.json');
   assert.equal(
-    explicit.result.report.logFile,
+    explicit.result.report.results[0].logFile,
     '/tmp/economical-log.json.watch.json.deltalog.ndjson',
   );
-  assert.equal(explicit.appended, explicit.result.report.logFile);
+  assert.equal(explicit.appended, explicit.result.report.results[0].logFile);
 
   const derived = runEconomical(['--state-dir', '/tmp/economical-log-state']);
-  assert.match(derived.result.report.stateFile, /__watch-pr\.json$/);
-  assert.equal(derived.result.report.logFile, `${derived.result.report.stateFile}.deltalog.ndjson`);
-  assert.equal(derived.appended, derived.result.report.logFile);
+  assert.match(derived.result.report.results[0].stateFile, /__watch-pr\.json$/);
+  assert.equal(
+    derived.result.report.results[0].logFile,
+    `${derived.result.report.results[0].stateFile}.deltalog.ndjson`,
+  );
+  assert.equal(derived.appended, derived.result.report.results[0].logFile);
 });
 
 test('--entities issue makes a PR-only watch list retain normal full-fetch state', () => {
@@ -477,7 +480,7 @@ test('--entities issue makes a PR-only watch list retain normal full-fetch state
     d,
   );
   assert.equal(result.code, 0);
-  assert.equal(result.report.stateFile, '/tmp/issue-watch.json');
+  assert.equal(result.report.results[0].stateFile, '/tmp/issue-watch.json');
   assert.deepEqual(d.stored.pr, {});
   assert.deepEqual(d.stored.issue, {});
 });
@@ -697,7 +700,7 @@ test('--summary-line attaches only the human summary line to each delta', () => 
   assert.equal(report.deltas[0].details, undefined);
 });
 
-test('--detail keeps line compatibility and adds structured class details', () => {
+test('--detail adds summaryLine and structured class details', () => {
   const d = deps([[{ ...basePr, conversationComments: 2, updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: {
       pr: { 42: item(opaqueCiFixture()) },
@@ -709,8 +712,8 @@ test('--detail keeps line compatibility and adds structured class details', () =
     d,
   );
   const delta = report.deltas[0];
-  assert.equal(delta.line, 'PR #42 "add widget": ci-changed, new-comments');
-  assert.equal(delta.summaryLine, delta.line);
+  assert.equal(delta.summaryLine, 'PR #42 "add widget": ci-changed, new-comments');
+  assert.equal(Object.hasOwn(delta, 'line'), false);
   assert.deepEqual(delta.details, [
     {
       class: 'ci-changed',
@@ -1160,7 +1163,7 @@ test('--baseline-emit-state off: baseline stays exit 0 with empty deltas', () =>
     d,
   );
   assert.equal(code, 0);
-  assert.equal(report.baseline, true);
+  assert.equal(report.results[0].baseline, true);
   assert.deepEqual(report.deltas, []);
 });
 
@@ -1168,7 +1171,7 @@ test('--baseline-emit-state on: baseline exits 10 with baseline:true and non-emp
   const d = deps([[basePr]]);
   const { code, report } = run(BASELINE_EMIT_ARGS, d);
   assert.equal(code, 10);
-  assert.equal(report.baseline, true);
+  assert.equal(report.results[0].baseline, true);
   assert.equal(report.deltas.length, 1);
   const delta = report.deltas[0];
   assert.deepEqual(delta.classes, ['baseline-state']);
@@ -1221,7 +1224,7 @@ test('--summaries acceptance: a PR that lost its checks reports ciRollup none, n
   assert.equal(delta.summary.ciRollup, 'none');
 });
 
-test('--summaries is purely additive: delta.id and every other field are byte-identical', () => {
+test('--summaries is a deprecated no-op: delta.summary is byte-identical with or without it', () => {
   const before = { ...basePr, checks: [] };
   const after = {
     ...basePr,
@@ -1233,13 +1236,11 @@ test('--summaries is purely additive: delta.id and every other field are byte-id
   const withFlag = run([...baseArgs, '--summaries'], deps([[after]], { existing: seed() })).report
     .deltas[0];
   const without = run(baseArgs, deps([[after]], { existing: seed() })).report.deltas[0];
-  // The opaque fingerprints already sit in `to`; the only difference the flag makes
-  // is the extra sibling `summary` key. Same content-addressed id, same everything else.
+  // summary/changed are always-on now (schema v2): the flag makes no
+  // difference at all, not even an additive one.
   assert.equal(withFlag.id, without.id);
-  assert.equal('summary' in without, false, 'without the flag there is no summary field');
-  const { summary, ...withFlagRest } = withFlag;
-  assert.ok(summary, 'the flag adds a summary');
-  assert.deepEqual(withFlagRest, without);
+  assert.ok(without.summary, 'summary is present regardless of the flag');
+  assert.deepEqual(withFlag, without);
 });
 
 const FILTER_ARGS = ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'];
@@ -2023,8 +2024,8 @@ test('missing state flags default to a per-user tmpdir-derived snapshot', () => 
   assert.equal(code, 0);
   assert.ok(d.readPath.startsWith(join(tmpdir(), 'gh-delta-')), d.readPath);
   assert.ok(d.readPath.endsWith(`${'/'}repo-o%2Fr__monitor-main__pr-issue.json`));
-  assert.equal(report.stateFile, d.readPath);
-  assert.equal(report.baseline, true);
+  assert.equal(report.results[0].stateFile, d.readPath);
+  assert.equal(report.results[0].baseline, true);
 });
 
 test('explicit state flags still resolve verbatim and populate report.stateFile', () => {
@@ -2033,13 +2034,13 @@ test('explicit state flags still resolve verbatim and populate report.stateFile'
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'],
     d,
   );
-  assert.equal(report.stateFile, '/tmp/x.json');
+  assert.equal(report.results[0].stateFile, '/tmp/x.json');
   const d2 = deps([[]]);
   const { report: report2 } = run(
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-dir', '/tmp/state', '--entities', 'pr'],
     d2,
   );
-  assert.equal(report2.stateFile, '/tmp/state/repo-o%2Fr__monitor-main__pr.json');
+  assert.equal(report2.results[0].stateFile, '/tmp/state/repo-o%2Fr__monitor-main__pr.json');
 });
 
 test('invalid --entities returns code 2 before fetching', () => {
@@ -2121,7 +2122,7 @@ test('corrupt snapshot read failure returns code 2 and does NOT write', () => {
   );
   assert.equal(code, 2);
   assert.equal(writes, 0);
-  assert.match(report.error, /invalid snapshot JSON/);
+  assert.match(report.results[0].error.message, /invalid snapshot JSON/);
 });
 
 test('invalid snapshot horizon returns code 2 before fetching', () => {
@@ -2144,8 +2145,8 @@ test('invalid snapshot horizon returns code 2 before fetching', () => {
     },
   );
   assert.equal(code, 2);
-  assert.equal(report.kind, 'snapshot');
-  assert.match(report.error, /invalid snapshot horizon/);
+  assert.equal(report.results[0].error.kind, 'snapshot');
+  assert.match(report.results[0].error.message, /invalid snapshot horizon/);
   assert.equal(fetched, false);
   assert.equal(writes, 0);
 });
@@ -2200,7 +2201,7 @@ test('existing snapshot is read before GitHub fetches', () => {
   assert.equal(code, 2);
   assert.equal(read, true);
   assert.equal(fetched, false);
-  assert.match(report.error, /invalid snapshot/);
+  assert.match(report.results[0].error.message, /invalid snapshot/);
 });
 
 test('gh-delta sends outpost payloads with monitor id after the snapshot write', async () => {
@@ -2280,7 +2281,7 @@ test('--format json prints the detector report JSON from the main gh-delta binar
   assert.equal(code, 0);
   const report = JSON.parse(output);
   assert.equal(report.monitorId, 'main');
-  assert.equal(report.baseline, true);
+  assert.equal(report.results[0].baseline, true);
 });
 
 test('duplicate --format flags use the same last-value rule for parsing and rendering', async () => {
@@ -2300,7 +2301,7 @@ test('duplicate --format flags use the same last-value rule for parsing and rend
     ],
     d,
   );
-  assert.equal(JSON.parse(textThenJson.output).baseline, true);
+  assert.equal(JSON.parse(textThenJson.output).results[0].baseline, true);
 
   const d2 = deps([[]]);
   const jsonThenText = await runCommand(
@@ -2328,7 +2329,9 @@ test('--help-json usage includes detail flags and documents entities grammar', (
   assert.match(help.usage, /\[--detail\]/);
   assert.ok(help.options.some((option) => option.name === '--summary-line'));
   assert.ok(help.output.deltaFields.includes('summaryLine'));
-  assert.ok(help.output.deltaFields.includes('line'));
+  assert.equal(help.output.deltaFields.includes('line'), false);
+  assert.ok(help.output.deltaFields.includes('context'));
+  assert.ok(help.output.deltaFields.includes('changed'));
   assert.ok(help.output.deltaFields.includes('details'));
   assert.ok(help.output.deltaDetailFields.includes('opaque'));
   assert.deepEqual(help.output.deltaDetailFieldsByClass['new-comments'], ['conversationComments']);
@@ -2402,14 +2405,24 @@ test('config validation precedes repo derivation: an invalid --outpost-url short
 
 test('outpost eventId is order-independent across class permutations', async () => {
   const { buildOutpostPayload } = await import('../lib/outpost.mjs');
-  const report = { repo: 'o/r', monitorId: 'main', at: '2026-07-01T12:00:00Z' };
+  const report = { repo: 'o/r', monitorId: 'main', detectedAt: '2026-07-01T12:00:00Z' };
   const a = buildOutpostPayload({
     report,
-    delta: { entity: 'pr', number: 42, title: 'x', classes: ['review-changed', 'ci-changed'] },
+    delta: {
+      entity: 'pr',
+      number: 42,
+      context: { title: 'x' },
+      classes: ['review-changed', 'ci-changed'],
+    },
   });
   const b = buildOutpostPayload({
     report,
-    delta: { entity: 'pr', number: 42, title: 'x', classes: ['ci-changed', 'review-changed'] },
+    delta: {
+      entity: 'pr',
+      number: 42,
+      context: { title: 'x' },
+      classes: ['ci-changed', 'review-changed'],
+    },
   });
   assert.equal(a.eventId, b.eventId);
   assert.equal(a.deliveryId, b.deliveryId);
@@ -2422,13 +2435,13 @@ test('outpost eventId is order-independent across class permutations', async () 
 
 test('outpost eventId is stable across detector timestamps while deliveryId changes', async () => {
   const { buildOutpostPayload } = await import('../lib/outpost.mjs');
-  const delta = { entity: 'pr', number: 42, title: 'x', classes: ['merged'] };
+  const delta = { entity: 'pr', number: 42, context: { title: 'x' }, classes: ['merged'] };
   const first = buildOutpostPayload({
-    report: { repo: 'o/r', monitorId: 'main', at: '2026-07-01T12:00:00Z' },
+    report: { repo: 'o/r', monitorId: 'main', detectedAt: '2026-07-01T12:00:00Z' },
     delta,
   });
   const second = buildOutpostPayload({
-    report: { repo: 'o/r', monitorId: 'main', at: '2026-07-01T12:00:01Z' },
+    report: { repo: 'o/r', monitorId: 'main', detectedAt: '2026-07-01T12:00:01Z' },
     delta,
   });
 
@@ -2438,7 +2451,7 @@ test('outpost eventId is stable across detector timestamps while deliveryId chan
 
 test('outpost eventId repeats across different observed states while id does not (regression: id is the dedupe key, not eventId)', async () => {
   const { buildOutpostPayload } = await import('../lib/outpost.mjs');
-  const report = { repo: 'o/r', monitorId: 'main', at: '2026-07-01T12:00:00Z' };
+  const report = { repo: 'o/r', monitorId: 'main', detectedAt: '2026-07-01T12:00:00Z' };
   // Same PR, same class set (ci-changed), two successive observed states —
   // e.g. CI went red, then green. A receiver that dedupes by eventId would
   // silently drop the second one; this is exactly the bug being fixed.
@@ -2447,7 +2460,7 @@ test('outpost eventId repeats across different observed states while id does not
     delta: {
       entity: 'pr',
       number: 42,
-      title: 'x',
+      context: { title: 'x' },
       classes: ['ci-changed'],
       to: item({ state: 'open', ciRollup: 'red' }),
     },
@@ -2457,7 +2470,7 @@ test('outpost eventId repeats across different observed states while id does not
     delta: {
       entity: 'pr',
       number: 42,
-      title: 'x',
+      context: { title: 'x' },
       classes: ['ci-changed'],
       to: item({ state: 'open', ciRollup: 'green' }),
     },
@@ -2471,20 +2484,20 @@ test('outpost id is stable across runs and across monitorId values for the same 
   const delta = {
     entity: 'pr',
     number: 42,
-    title: 'x',
+    context: { title: 'x' },
     classes: ['merged'],
     to: item({ state: 'merged' }),
   };
   const a = buildOutpostPayload({
-    report: { repo: 'o/r', monitorId: 'main', at: '2026-07-01T12:00:00Z' },
+    report: { repo: 'o/r', monitorId: 'main', detectedAt: '2026-07-01T12:00:00Z' },
     delta,
   });
   const b = buildOutpostPayload({
-    report: { repo: 'o/r', monitorId: 'main', at: '2026-08-01T00:00:00Z' },
+    report: { repo: 'o/r', monitorId: 'main', detectedAt: '2026-08-01T00:00:00Z' },
     delta,
   });
   const c = buildOutpostPayload({
-    report: { repo: 'o/r', monitorId: 'other-monitor', at: '2026-07-01T12:00:00Z' },
+    report: { repo: 'o/r', monitorId: 'other-monitor', detectedAt: '2026-07-01T12:00:00Z' },
     delta,
   });
   assert.equal(a.id, b.id);
@@ -2496,13 +2509,12 @@ test('outpost id is stable across runs and across monitorId values for the same 
 test('outpost payload has exactly the documented key set (shape/byte-stability guard)', async () => {
   const { buildOutpostPayload } = await import('../lib/outpost.mjs');
   const payload = buildOutpostPayload({
-    report: { repo: 'o/r', monitorId: 'main', at: '2026-07-01T12:00:00Z' },
+    report: { repo: 'o/r', monitorId: 'main', detectedAt: '2026-07-01T12:00:00Z' },
     delta: {
       entity: 'pr',
       number: 42,
-      title: 'x',
+      context: { title: 'x', headRefName: 'feature' },
       classes: ['merged'],
-      headRefName: 'feature',
       to: item({ state: 'merged', labels: [] }),
     },
   });
@@ -2534,8 +2546,8 @@ test('outpost payload has exactly the documented key set (shape/byte-stability g
 test('outpost mirrors optional transient enrichment without adding it to legacy payloads', async () => {
   const { buildOutpostPayload } = await import('../lib/outpost.mjs');
   const base = {
-    report: { repo: 'o/r', monitorId: 'main', at: 'now' },
-    delta: { entity: 'issue', number: 1, title: 'x', classes: ['new-comments'] },
+    report: { repo: 'o/r', monitorId: 'main', detectedAt: 'now' },
+    delta: { entity: 'issue', number: 1, context: { title: 'x' }, classes: ['new-comments'] },
   };
   assert.equal(Object.hasOwn(buildOutpostPayload(base), 'enrichment'), false);
   const enrichment = {
@@ -2672,8 +2684,8 @@ test('every delta carries author and url from snapshot context without any flags
   const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const result = run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
   assert.equal(result.code, 10);
-  assert.equal(result.report.deltas[0].author, 'octocat');
-  assert.equal(result.report.deltas[0].url, 'https://github.com/o/r/pull/42');
+  assert.equal(result.report.deltas[0].context.author, 'octocat');
+  assert.equal(result.report.deltas[0].context.url, 'https://github.com/o/r/pull/42');
 });
 
 test('--enrich body fetches the body of a new PR in one nodes() call and attaches mentions', () => {
@@ -2787,7 +2799,7 @@ test('error kinds map to exit codes: config/snapshot=2, github/io/busy=1', () =>
     },
   });
   assert.equal(snapshot.code, 2);
-  assert.equal(snapshot.report.kind, 'snapshot');
+  assert.equal(snapshot.report.results[0].error.kind, 'snapshot');
   const github = run(base, {
     ...noFetch,
     readSnapshot: () => null,
@@ -2797,7 +2809,7 @@ test('error kinds map to exit codes: config/snapshot=2, github/io/busy=1', () =>
     fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
   });
   assert.equal(github.code, 1);
-  assert.equal(github.report.kind, 'github');
+  assert.equal(github.report.results[0].error.kind, 'github');
   const io = run(base, {
     ...noFetch,
     readSnapshot: () => null,
@@ -2808,7 +2820,7 @@ test('error kinds map to exit codes: config/snapshot=2, github/io/busy=1', () =>
     },
   });
   assert.equal(io.code, 1);
-  assert.equal(io.report.kind, 'io');
+  assert.equal(io.report.results[0].error.kind, 'io');
   let fetched = false;
   const busy = run(base, {
     ...noFetch,
@@ -2820,7 +2832,7 @@ test('error kinds map to exit codes: config/snapshot=2, github/io/busy=1', () =>
     fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
   });
   assert.equal(busy.code, 1);
-  assert.equal(busy.report.kind, 'busy');
+  assert.equal(busy.report.results[0].error.kind, 'busy');
   assert.equal(fetched, false); // busy is raised before any GitHub call
 });
 
@@ -2997,14 +3009,9 @@ test('--rate-limit-floor gates fetch after snapshot read and reports a low quota
     },
   );
   assert.equal(result.code, 1);
-  assert.equal(result.report.kind, 'rate-limit');
-  assert.equal(result.report.resetAt, '2026-07-01T13:00:00.000Z');
-  // The pre-fetch REST check shares {cost, remaining, resetAt} with the
-  // post-fetch GraphQL rateLimit; cost is null since a REST quota read has
-  // no per-query cost of its own.
-  assert.equal(result.report.remaining, 3);
-  assert.equal(result.report.cost, null);
-  assert.match(result.report.error, /remaining 3.*floor 4/);
+  assert.equal(result.report.results[0].error.kind, 'rate-limit');
+  assert.equal(result.report.results[0].error.resetAt, '2026-07-01T13:00:00.000Z');
+  assert.match(result.report.results[0].error.message, /remaining 3.*floor 4/);
   assert.deepEqual(order, ['read', 'rate']);
   assert.equal(writes, 0);
   assert.equal(registered.status, 'failure');
@@ -3063,10 +3070,8 @@ test('a tick spanning two entity families accumulates cost and keeps the last re
   };
   const result = run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
   assert.equal(result.code, 0);
-  // TODO(R3): this is the same accumulator the eventual results[].rateLimit
-  // report field will surface; see the TODO comment at its definition site
-  // in lib/cli.mjs's runSingle.
-  assert.deepEqual(result.rateLimit, {
+  // F3's accumulator, surfaced by R3 as results[].rateLimit.
+  assert.deepEqual(result.report.results[0].rateLimit, {
     cost: 6,
     remaining: 98,
     resetAt: '2026-07-01T13:00:01.000Z',
@@ -3114,7 +3119,7 @@ test('enrichment cost accumulates into the same tick-level rateLimit as the obse
   );
   assert.equal(result.code, 10);
   // 4 (PR fetch) + 1 (default issue fetch from deps()) + 1 (enrichment).
-  assert.deepEqual(result.rateLimit, {
+  assert.deepEqual(result.report.results[0].rateLimit, {
     cost: 6,
     remaining: 99,
     resetAt: '2026-07-01T13:00:01.000Z',
@@ -3271,7 +3276,7 @@ test('mixed-case --repo shares one snapshot and one eventId space', async () => 
     d,
   );
   assert.equal(code, 10);
-  assert.equal(report.repo, 'o/r');
+  assert.deepEqual(report.repos, ['o/r']);
   assert.equal(d.readPath, '/tmp/state/repo-o%2Fr__monitor-main__pr-issue.json');
   assert.equal(posts[0].eventId, 'gh-delta.delta.v1:o/r:main:pr:42:merged');
   assert.match(posts[0].links.html, /^https:\/\/github\.com\/o\/r\/pull\/42$/);
@@ -3499,7 +3504,7 @@ test('a registry write failure never changes the run result', () => {
     d,
   );
   assert.equal(code, 0);
-  assert.equal(report.baseline, true);
+  assert.equal(report.results[0].baseline, true);
   assert.equal(d.writes, 1);
 });
 
@@ -3513,7 +3518,7 @@ test('a failed detector attempt updates the registry without changing its result
   d.registerMonitor = (entry) => registered.push(entry);
   const result = run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
   assert.equal(result.code, 1);
-  assert.equal(result.report.kind, 'github');
+  assert.equal(result.report.results[0].error.kind, 'github');
   assert.deepEqual(
     registered.map(({ status, error }) => [status, error?.kind]),
     [['failure', 'github']],
@@ -3528,7 +3533,7 @@ test('a busy detector attempt is recorded as a registry failure', () => {
   d.registerMonitor = (entry) => registered.push(entry);
   const result = run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
   assert.equal(result.code, 1);
-  assert.equal(result.report.kind, 'busy');
+  assert.equal(result.report.results[0].error.kind, 'busy');
   assert.deepEqual(
     registered.map(({ status, error }) => [status, error?.kind]),
     [['failure', 'busy']],
@@ -3659,8 +3664,8 @@ test('explicit --repo never calls resolveRepo and reports repoSource:flag', () =
     }),
   );
   assert.equal(called, false);
-  assert.equal(res.report.repoSource, 'flag');
-  assert.equal(res.report.repo, 'owner/repo');
+  assert.equal(res.report.results[0].repoSource, 'flag');
+  assert.equal(res.report.results[0].repo, 'owner/repo');
 });
 
 test('absent --repo uses the derived repo and its source', () => {
@@ -3675,8 +3680,8 @@ test('absent --repo uses the derived repo and its source', () => {
       }),
     }),
   );
-  assert.equal(res.report.repo, 'acme/proj'); // validateRepo lowercased it
-  assert.equal(res.report.repoSource, 'git-remote');
+  assert.equal(res.report.results[0].repo, 'acme/proj'); // validateRepo lowercased it
+  assert.equal(res.report.results[0].repoSource, 'git-remote');
 });
 
 test('derivation declined -> config error, exit 2', () => {
@@ -3788,7 +3793,7 @@ test('schema rejects an unknown format as configuration error', () => {
   assert.match(result.report.error, /json, compact, or ndjson/);
 });
 
-test('single-repo compact output derives per-delta repo and URL from the report', async () => {
+test('single-repo compact output carries per-delta repo and context from the report', async () => {
   const before = { ...basePr, updatedAt: '2026-07-01T10:00:00Z' };
   const after = { ...basePr, updatedAt: '2026-07-01T11:00:00Z', state: 'closed' };
   const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
@@ -3798,5 +3803,6 @@ test('single-repo compact output derives per-delta repo and URL from the report'
   );
   const report = JSON.parse(result.output);
   assert.equal(report.deltas[0].repo, 'o/r');
-  assert.equal(report.deltas[0].url, 'https://github.com/o/r/pull/42');
+  assert.equal(report.deltas[0].context.title, 'add widget');
+  assert.equal(Object.hasOwn(report.deltas[0], 'url'), false);
 });
