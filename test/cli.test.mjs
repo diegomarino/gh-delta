@@ -5,7 +5,7 @@ import { createHmac } from 'node:crypto';
 
 // Tests must never leave breadcrumbs in the developer's real run registry.
 process.env.GH_DELTA_NO_REGISTRY = '1';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { run, runCommand } from '../lib/cli.mjs';
@@ -544,6 +544,56 @@ test('ignored merged terminal delta keeps its watch entry while snapshot advance
   assert.equal(d.writes, 1);
   assert.equal(cleanup, false);
   assert.ok(readFileSync(entry, 'utf8'));
+});
+
+test('--until closed watch entry is cleaned up when the PR merges', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-until-closed-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"closed","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
+    existing: { pr: { 42: prFingerprint(basePr) }, issue: {} },
+  });
+  d.fetchPRsByNumber = () => [{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }];
+  const { code } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', state, '--watch-dir', watch],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.equal(existsSync(entry), false);
+});
+
+test('--until merged keeps its watch entry when the PR closes without merging', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-until-merged-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const d = deps([[{ ...basePr, state: 'CLOSED', updatedAt: '2026-07-01T11:00:00Z' }]], {
+    existing: { pr: { 42: prFingerprint(basePr) }, issue: {} },
+  });
+  d.fetchPRsByNumber = () => [{ ...basePr, state: 'CLOSED', updatedAt: '2026-07-01T11:00:00Z' }];
+  const { code } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', state, '--watch-dir', watch],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.equal(existsSync(entry), true);
+
+  const ls = run(['watch', 'ls', '--watch-dir', watch], d);
+  assert.equal(ls.code, 0);
+  assert.deepEqual(ls.report.entries, [
+    { entity: 'pr', number: 42, until: 'merged', addedAt: '2026-07-01T00:00:00.000Z' },
+  ]);
 });
 
 test('watch text commands render watch-specific output, never detector deltas', async () => {
