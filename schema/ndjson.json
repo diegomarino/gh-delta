@@ -378,7 +378,7 @@
     },
     {
       "type": "object",
-      "required": ["type", "schemaVersion", "at", "counts", "warnings", "exitCode"],
+      "required": ["type", "schemaVersion", "detectedAt", "counts", "warnings", "exitCode"],
       "properties": {
         "type": {
           "const": "end"
@@ -386,7 +386,7 @@
         "schemaVersion": {
           "const": 2
         },
-        "at": {
+        "detectedAt": {
           "type": "string"
         },
         "repos": {

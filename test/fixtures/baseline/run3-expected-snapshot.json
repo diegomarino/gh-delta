@@ -84,7 +84,7 @@
   },
   "meta": {
     "schemaVersion": 2,
-    "ghDeltaVersion": "0.6.1",
+    "ghDeltaVersion": "<GH_DELTA_VERSION>",
     "repo": "acme/widgets",
     "monitorId": "contract-baseline",
     "entities": [

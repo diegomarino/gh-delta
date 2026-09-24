@@ -361,12 +361,12 @@
     }
   },
   "type": "object",
-  "required": ["schemaVersion", "at", "counts", "deltas", "warnings"],
+  "required": ["schemaVersion", "detectedAt", "counts", "deltas", "warnings"],
   "properties": {
     "schemaVersion": {
       "const": 2
     },
-    "at": {
+    "detectedAt": {
       "type": "string"
     },
     "repos": {
