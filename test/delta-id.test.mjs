@@ -366,6 +366,6 @@ test('buildOutpostPayload stamps id for a delta taken straight from detectDeltas
     report: { repo: 'o/r', monitorId: 'm', at: '2026-07-01T12:00:00Z' },
     delta,
   });
-  assert.match(payload.id, HEX64);
-  assert.equal(payload.id, deltaId(deltaIdentity('o/r', delta)));
+  assert.match(payload.delta.id, HEX64);
+  assert.equal(payload.delta.id, deltaId(deltaIdentity('o/r', delta)));
 });
