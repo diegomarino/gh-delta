@@ -318,12 +318,35 @@ test('baseline (null horizon) fetches only open PRs and normalizes rows', () => 
   assert.deepEqual(rows[0].checks, [
     { name: 'build', kind: 'check', status: 'completed', conclusion: 'success', detailsUrl: null },
   ]);
-  assert.equal(rows[0].comments, 2);
+  assert.equal(rows[0].conversationComments, 0);
+  assert.equal(rows[0].reviewComments, 2);
+  assert.equal(rows[0].comments, undefined);
   assert.deepEqual(rows[0].threads, [
     { id: 'T_A', resolved: false, comments: 0 },
     { id: 'T_B', resolved: true, comments: 0 },
   ]);
   assert.deepEqual(rateLimit, DEFAULT_PAGE_RATE_LIMIT);
+});
+
+test('normalizePr splits conversation and review comment counts', () => {
+  const node = prNode({
+    totalCommentsCount: 7,
+    comments: { totalCount: 3, nodes: [] },
+  });
+  const { rows } = fetchPRs('o/r', { exec: () => page([node]) });
+  assert.equal(rows[0].conversationComments, 3);
+  assert.equal(rows[0].reviewComments, 4);
+  assert.equal(rows[0].comments, undefined);
+});
+
+test('normalizePr clamps a negative reviewComments to zero instead of emitting one', () => {
+  const node = prNode({
+    totalCommentsCount: 2, // fewer than the conversation count: read-replica skew
+    comments: { totalCount: 5, nodes: [] },
+  });
+  const { rows } = fetchPRs('o/r', { exec: () => page([node]) });
+  assert.equal(rows[0].conversationComments, 5);
+  assert.equal(rows[0].reviewComments, 0);
 });
 
 test('queries and normalizes bounded comment identities plus failed check URLs', () => {
@@ -525,7 +548,8 @@ test('fetchIssues normalizes labels and exact comment totals', () => {
   };
   const { rows } = fetchIssues('o/r', { exec, horizonCutoff: null });
   assert.deepEqual(rows[0].labels, [{ name: 'worker' }]);
-  assert.equal(rows[0].comments, 130);
+  assert.equal(rows[0].conversationComments, 130);
+  assert.equal(rows[0].comments, undefined);
 });
 
 test('normalizeIssue filters null elements from labels nodes', () => {
