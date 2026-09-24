@@ -89,7 +89,8 @@ Run the GitHub delta detector for `<owner/name>` and act on what it reports.
    - base-changed: the PR base branch changed. Prior CI/mergeability context
      refers to the old base; re-check both.
    - head-changed: the PR head commit changed (push, rebase, or force-push).
-     Coexists with updated. Re-check CI and review state before trusting prior
+     Fires on its own (does not also carry updated) when no other specific
+     class fired. Re-check CI and review state before trusting prior
      approvals -- a force-push can invalidate them.
    - missing: an open item disappeared from the fetch. Check pagination,
      permissions, or scope before trusting the snapshot.
@@ -99,9 +100,9 @@ Run the GitHub delta detector for `<owner/name>` and act on what it reports.
      GitHub if unexpected. No further ticks will mention it unless it reappears.
    - reappeared: a previously missing object returned. Check why it vanished
      before acting on the return.
-   - updated: catch-all for any other change. Coexists with head-changed on a
-     plain push. Inspect GitHub before dismissing it, including comments and
-     review threads.
+   - updated: catch-all for a change with no other specific class -- a plain
+     push now fires head-changed alone, not updated too. Inspect GitHub
+     before dismissing it, including comments and review threads.
 
 Rules:
 - Do NOT call ScheduleWakeup.
