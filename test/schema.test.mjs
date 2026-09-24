@@ -5,11 +5,20 @@ import { schemaFor } from '../lib/schema.mjs';
 import { runCommand } from '../lib/cli.mjs';
 
 // Test-only subset validator for precisely the keywords emitted by schema.mjs.
-function validates(schema, value) {
-  if (schema.anyOf && !schema.anyOf.some((part) => validates(part, value))) return false;
-  if (schema.oneOf && schema.oneOf.filter((part) => validates(part, value)).length !== 1)
+// `root` is the whole schema document, threaded through recursive calls so a
+// `$ref` (e.g. '#/$defs/delta') can be resolved against its own document's
+// `$defs`, not just the immediate parent schema fragment.
+function resolveRef(root, ref) {
+  const path = ref.replace(/^#\//, '').split('/');
+  return path.reduce((node, key) => node[key], root);
+}
+function validates(schema, value, root = schema) {
+  if (schema.$ref) return validates(resolveRef(root, schema.$ref), value, root);
+  if (schema.allOf && !schema.allOf.every((part) => validates(part, value, root))) return false;
+  if (schema.anyOf && !schema.anyOf.some((part) => validates(part, value, root))) return false;
+  if (schema.oneOf && schema.oneOf.filter((part) => validates(part, value, root)).length !== 1)
     return false;
-  if (schema.not && validates(schema.not, value)) return false;
+  if (schema.not && validates(schema.not, value, root)) return false;
   if (schema.const !== undefined && value !== schema.const) return false;
   if (schema.enum && !schema.enum.includes(value)) return false;
   const types = schema.type ? (Array.isArray(schema.type) ? schema.type : [schema.type]) : [];
@@ -26,7 +35,7 @@ function validates(schema, value) {
   if (schema.required && !schema.required.every((key) => Object.hasOwn(value, key))) return false;
   if (schema.properties && value && typeof value === 'object' && !Array.isArray(value)) {
     for (const [key, child] of Object.entries(schema.properties))
-      if (Object.hasOwn(value, key) && !validates(child, value[key])) return false;
+      if (Object.hasOwn(value, key) && !validates(child, value[key], root)) return false;
     if (
       schema.additionalProperties === false &&
       Object.keys(value).some((key) => !Object.hasOwn(schema.properties, key))
@@ -34,7 +43,9 @@ function validates(schema, value) {
       return false;
   }
   return (
-    !schema.items || !Array.isArray(value) || value.every((row) => validates(schema.items, row))
+    !schema.items ||
+    !Array.isArray(value) ||
+    value.every((row) => validates(schema.items, row, root))
   );
 }
 const summary = {
@@ -77,43 +88,75 @@ test('runtime schemas equal published artifacts', () => {
     );
 });
 
-// Structural guardrail: the three formats' delta schemas share one property
-// set for every field except the one deliberate per-format rename
-// (`details` in json, `detail` in compact/ndjson) and json/compact's own
-// `type` discriminator on the ndjson delta variant.
-test('json/compact/ndjson delta schemas share one common property set', () => {
-  const jsonDelta = schemaFor('json').oneOf[0].properties.deltas.items;
-  const compactDelta = schemaFor('compact').properties.deltas.items;
-  const ndjsonDelta = schemaFor('ndjson').oneOf.find((v) => v.properties.type?.const === 'delta');
+// Structural guardrail: every format's schema document defines its delta
+// shape exactly once, under `$defs.delta`, byte-identical across all three
+// documents (not three independently maintained copies that merely happen to
+// agree), and every place a delta appears is a `$ref` to that one definition
+// -- never an inlined/forked properties block. Per-format divergence (json
+// requiring from/to; the ndjson delta record adding its `type` discriminator)
+// must show up ONLY as an incremental `required`/`properties` layer wrapped
+// around the `$ref` via `allOf`, never as a second definition.
+test('json/compact/ndjson schemas share one $defs.delta, referenced via $ref', () => {
+  const jsonDoc = schemaFor('json');
+  const compactDoc = schemaFor('compact');
+  const ndjsonDoc = schemaFor('ndjson');
 
-  const shared = (obj) => {
-    const { details: _details, detail: _detail, type: _type, ...rest } = obj.properties;
-    return rest;
-  };
-  assert.deepEqual(shared(jsonDelta), shared(compactDelta));
-  assert.deepEqual(shared(jsonDelta), shared(ndjsonDelta));
+  // The definition itself is byte-identical across all three documents.
+  assert.deepEqual(jsonDoc.$defs.delta, compactDoc.$defs.delta);
+  assert.deepEqual(jsonDoc.$defs.delta, ndjsonDoc.$defs.delta);
+  assert.ok(jsonDoc.$defs.delta.properties.context, 'the shared def carries the real delta shape');
 
-  // json requires from/to; compact/ndjson make them optional (present only
-  // under --full).
-  assert.ok(jsonDelta.required.includes('from'));
-  assert.ok(jsonDelta.required.includes('to'));
-  assert.equal(compactDelta.required.includes('from'), false);
-  assert.equal(ndjsonDelta.required.includes('from'), false);
+  const jsonDeltaUsage = jsonDoc.oneOf[0].properties.deltas.items;
+  const compactDeltaUsage = compactDoc.properties.deltas.items;
+  const ndjsonDeltaUsage = ndjsonDoc.oneOf.find(
+    (v) => v.allOf?.[1]?.properties?.type?.const === 'delta',
+  );
+
+  // Every usage is a $ref to the shared def, not an inlined copy -- no usage
+  // may declare its own `properties` for a field the shared def already has.
+  for (const usage of [jsonDeltaUsage, compactDeltaUsage, ndjsonDeltaUsage]) {
+    assert.ok(Array.isArray(usage.allOf), 'delta usage must be an allOf wrapper around a $ref');
+    assert.equal(usage.allOf[0].$ref, '#/$defs/delta');
+    assert.equal(usage.properties, undefined, 'no usage may inline its own delta properties');
+  }
+
+  // The ONLY axis of divergence is the incremental `required`/`properties`
+  // layered on top of the shared $ref.
+  assert.deepEqual(jsonDeltaUsage.allOf[1], { required: ['from', 'to'] });
+  assert.equal(compactDeltaUsage.allOf[1], undefined);
+  assert.deepEqual(ndjsonDeltaUsage.allOf[1], {
+    required: ['type'],
+    properties: { type: { const: 'delta' } },
+  });
 });
 
 test('summary schema accepts the full PR shape, the minimal issue shape, and null', () => {
-  const summarySchema = schemaFor('json').oneOf[0].properties.deltas.items.properties.summary;
+  const summarySchema = schemaFor('json').$defs.delta.properties.summary;
   assert.ok(validates(summarySchema, null));
   assert.ok(validates(summarySchema, summary));
   assert.ok(validates(summarySchema, { state: 'open' }));
 });
 
-test('reserved firstObserved/seq fields are declared but never required', () => {
-  const jsonDelta = schemaFor('json').oneOf[0].properties.deltas.items;
-  assert.ok(jsonDelta.properties.firstObserved);
-  assert.ok(jsonDelta.properties.seq);
-  assert.equal(jsonDelta.required.includes('firstObserved'), false);
-  assert.equal(jsonDelta.required.includes('seq'), false);
+test('reserved firstObserved/seq fields are declared on the shared def but never required', () => {
+  const deltaDef = schemaFor('json').$defs.delta;
+  assert.ok(deltaDef.properties.firstObserved);
+  assert.ok(deltaDef.properties.seq);
+  assert.equal(deltaDef.required.includes('firstObserved'), false);
+  assert.equal(deltaDef.required.includes('seq'), false);
+  // Also unrequired through every format's actual delta usage (the allOf
+  // wrapper only ever adds from/to/type, never these two reserved fields).
+  for (const format of ['json', 'compact', 'ndjson']) {
+    const doc = schemaFor(format);
+    const usage =
+      format === 'json'
+        ? doc.oneOf[0].properties.deltas.items
+        : format === 'compact'
+          ? doc.properties.deltas.items
+          : doc.oneOf.find((v) => v.allOf?.[1]?.properties?.type?.const === 'delta');
+    const extraRequired = usage.allOf[1]?.required ?? [];
+    assert.equal(extraRequired.includes('firstObserved'), false);
+    assert.equal(extraRequired.includes('seq'), false);
+  }
 });
 
 test('schemas accept representative json, compact and NDJSON records', () => {

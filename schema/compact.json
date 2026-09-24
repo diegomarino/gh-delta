@@ -2,6 +2,204 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "compact report",
   "schemaVersion": 1,
+  "$defs": {
+    "delta": {
+      "type": "object",
+      "required": ["id", "repo", "entity", "number", "context", "classes", "summary", "changed"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "entity": {
+          "enum": ["pr", "issue"]
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "context": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": ["string", "null"]
+            },
+            "title": {
+              "type": ["string", "null"]
+            },
+            "url": {
+              "type": ["string", "null"]
+            },
+            "author": {
+              "type": ["string", "null"]
+            },
+            "createdAt": {
+              "type": ["string", "null"]
+            },
+            "headRefName": {
+              "type": ["string", "null"]
+            }
+          },
+          "additionalProperties": true
+        },
+        "classes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "new",
+              "first-seen",
+              "baseline-state",
+              "closed",
+              "reopened",
+              "new-comments",
+              "updated",
+              "missing",
+              "still-missing",
+              "presumed-deleted",
+              "reappeared",
+              "merged",
+              "draft-ready",
+              "converted-to-draft",
+              "ci-changed",
+              "review-changed",
+              "became-mergeable",
+              "became-conflicting",
+              "head-changed",
+              "stale",
+              "unresolved-threads-added",
+              "unresolved-threads-resolved",
+              "review-threads-changed",
+              "relabeled",
+              "comments-removed",
+              "assignees-changed",
+              "review-requests-changed",
+              "base-changed",
+              "review-comments-added",
+              "review-comments-removed"
+            ]
+          }
+        },
+        "summary": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "ciRollup",
+                "reviewDecision",
+                "mergeable",
+                "mergeStateStatus",
+                "state",
+                "isDraft",
+                "unresolvedReviewThreads",
+                "headSha"
+              ],
+              "properties": {
+                "ciRollup": {
+                  "enum": ["green", "failed", "pending", "none"]
+                },
+                "reviewDecision": {
+                  "enum": ["approved", "changes_requested", "review_required", "none"]
+                },
+                "mergeable": {
+                  "enum": ["mergeable", "conflicting", "unknown"]
+                },
+                "mergeStateStatus": {
+                  "enum": [
+                    "behind",
+                    "blocked",
+                    "clean",
+                    "dirty",
+                    "draft",
+                    "has_hooks",
+                    "unstable",
+                    "unknown"
+                  ]
+                },
+                "state": {
+                  "enum": ["open", "closed", "merged"]
+                },
+                "isDraft": {
+                  "type": "boolean"
+                },
+                "unresolvedReviewThreads": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "headSha": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            },
+            {
+              "type": "object",
+              "required": ["state"],
+              "properties": {
+                "state": {
+                  "enum": ["open", "closed", "merged"]
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "changed": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "from": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "to": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "missingTicks": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "firstObserved": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "summaryLine": {
+          "type": "string"
+        },
+        "enrichment": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "staleAt": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "detail": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  },
   "type": "object",
   "required": ["schemaVersion", "at", "counts", "deltas", "warnings"],
   "properties": {
@@ -164,193 +362,11 @@
     "deltas": {
       "type": "array",
       "items": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "repo": {
-            "type": "string"
-          },
-          "entity": {
-            "enum": ["pr", "issue"]
-          },
-          "number": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "context": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": ["string", "null"]
-              },
-              "title": {
-                "type": ["string", "null"]
-              },
-              "url": {
-                "type": ["string", "null"]
-              },
-              "author": {
-                "type": ["string", "null"]
-              },
-              "createdAt": {
-                "type": ["string", "null"]
-              },
-              "headRefName": {
-                "type": ["string", "null"]
-              }
-            },
-            "additionalProperties": true
-          },
-          "classes": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "enum": [
-                "new",
-                "first-seen",
-                "baseline-state",
-                "closed",
-                "reopened",
-                "new-comments",
-                "updated",
-                "missing",
-                "still-missing",
-                "presumed-deleted",
-                "reappeared",
-                "merged",
-                "draft-ready",
-                "converted-to-draft",
-                "ci-changed",
-                "review-changed",
-                "became-mergeable",
-                "became-conflicting",
-                "head-changed",
-                "stale",
-                "unresolved-threads-added",
-                "unresolved-threads-resolved",
-                "review-threads-changed",
-                "relabeled",
-                "comments-removed",
-                "assignees-changed",
-                "review-requests-changed",
-                "base-changed",
-                "review-comments-added",
-                "review-comments-removed"
-              ]
-            }
-          },
-          "summary": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "object",
-                "required": [
-                  "ciRollup",
-                  "reviewDecision",
-                  "mergeable",
-                  "mergeStateStatus",
-                  "state",
-                  "isDraft",
-                  "unresolvedReviewThreads",
-                  "headSha"
-                ],
-                "properties": {
-                  "ciRollup": {
-                    "enum": ["green", "failed", "pending", "none"]
-                  },
-                  "reviewDecision": {
-                    "enum": ["approved", "changes_requested", "review_required", "none"]
-                  },
-                  "mergeable": {
-                    "enum": ["mergeable", "conflicting", "unknown"]
-                  },
-                  "mergeStateStatus": {
-                    "enum": [
-                      "behind",
-                      "blocked",
-                      "clean",
-                      "dirty",
-                      "draft",
-                      "has_hooks",
-                      "unstable",
-                      "unknown"
-                    ]
-                  },
-                  "state": {
-                    "enum": ["open", "closed", "merged"]
-                  },
-                  "isDraft": {
-                    "type": "boolean"
-                  },
-                  "unresolvedReviewThreads": {
-                    "type": "integer",
-                    "minimum": 0
-                  },
-                  "headSha": {
-                    "type": "string"
-                  }
-                },
-                "additionalProperties": true
-              },
-              {
-                "type": "object",
-                "required": ["state"],
-                "properties": {
-                  "state": {
-                    "enum": ["open", "closed", "merged"]
-                  }
-                },
-                "additionalProperties": false
-              }
-            ]
-          },
-          "changed": {
-            "type": "object",
-            "additionalProperties": true
-          },
-          "from": {
-            "type": "object",
-            "additionalProperties": true
-          },
-          "to": {
-            "type": "object",
-            "additionalProperties": true
-          },
-          "missingTicks": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "firstObserved": {
-            "type": "string"
-          },
-          "seq": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "summaryLine": {
-            "type": "string"
-          },
-          "enrichment": {
-            "type": "object",
-            "additionalProperties": true
-          },
-          "staleAt": {
-            "type": "string"
-          },
-          "detail": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": true
-            }
+        "allOf": [
+          {
+            "$ref": "#/$defs/delta"
           }
-        },
-        "required": ["id", "repo", "entity", "number", "context", "classes", "summary", "changed"],
-        "additionalProperties": true
+        ]
       }
     },
     "errors": {

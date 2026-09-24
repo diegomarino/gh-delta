@@ -2,13 +2,11 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "NDJSON record",
   "schemaVersion": 1,
-  "oneOf": [
-    {
+  "$defs": {
+    "delta": {
       "type": "object",
+      "required": ["id", "repo", "entity", "number", "context", "classes", "summary", "changed"],
       "properties": {
-        "type": {
-          "const": "delta"
-        },
         "id": {
           "type": "string"
         },
@@ -184,6 +182,13 @@
         "staleAt": {
           "type": "string"
         },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
         "detail": {
           "type": "array",
           "items": {
@@ -192,18 +197,24 @@
           }
         }
       },
-      "required": [
-        "type",
-        "id",
-        "repo",
-        "entity",
-        "number",
-        "context",
-        "classes",
-        "summary",
-        "changed"
-      ],
       "additionalProperties": true
+    }
+  },
+  "oneOf": [
+    {
+      "allOf": [
+        {
+          "$ref": "#/$defs/delta"
+        },
+        {
+          "required": ["type"],
+          "properties": {
+            "type": {
+              "const": "delta"
+            }
+          }
+        }
+      ]
     },
     {
       "type": "object",
