@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   canonicalizeCiRollup,
-  comparableFingerprint,
+  deltaId,
   hashReviews,
   hashReviewThreads,
   prFingerprint,
@@ -81,35 +81,19 @@ test('summarizeReviews extracts compact sorted author/state rows', () => {
   assert.deepEqual(summarizeReviews(), []);
 });
 
-test('comparableFingerprint drops the detail-only summaries', () => {
-  const fp = prFingerprint({
-    state: 'OPEN',
-    updatedAt: '2026-07-01T10:00:00Z',
-    statusCheckRollup: [{ name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' }],
-    latestReviews: [{ author: { login: 'alice' }, state: 'APPROVED' }],
-  });
-  const comparable = comparableFingerprint(fp);
-  assert.equal('ciChecks' in comparable, false);
-  assert.equal('reviewSummary' in comparable, false);
-  // A pre-summary snapshot of the same PR must compare equal to a current one.
-  const { ciChecks: _ci, reviewSummary: _reviews, ...legacy } = fp;
-  assert.deepEqual(comparableFingerprint(legacy), comparable);
-});
-
-test('prFingerprint stores mergeStateStatus and comparableFingerprint keeps it (a compared field)', () => {
-  // Unlike ciChecks/reviewSummary (detail mirrors of a compared digest),
-  // mergeStateStatus has no compared counterpart, so it must participate in
-  // comparison itself — otherwise a CLEAN->BEHIND-only transition is invisible.
-  // It is treated like `mergeable`: part of the change comparison and the id.
+test('prFingerprint carries mergeStateStatus, ciChecks, and reviewSummary directly (no drop-list)', () => {
+  // Schema v2: `fingerprint` is exactly the compared fields, with nothing
+  // stripped before hashing or comparison -- there is no drop-list anymore.
   const fp = prFingerprint({
     state: 'OPEN',
     updatedAt: '2026-07-01T10:00:00Z',
     mergeStateStatus: 'BLOCKED',
-    statusCheckRollup: [],
-    latestReviews: [],
+    statusCheckRollup: [{ name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+    latestReviews: [{ author: { login: 'alice' }, state: 'APPROVED' }],
   });
   assert.equal(fp.mergeStateStatus, 'BLOCKED');
-  assert.equal(comparableFingerprint(fp).mergeStateStatus, 'BLOCKED');
+  assert.ok('ciChecks' in fp);
+  assert.ok('reviewSummary' in fp);
 });
 
 test('hashReviews is order-independent and reflects state', () => {
@@ -193,7 +177,7 @@ test('prFingerprint sorts labels, assignees, and reviewRequests, and stores the 
   assert.deepEqual(fp.reviewRequests, ['bob', 'org/platform-team']);
 });
 
-test('prFingerprint defaults the new compared fields when input predates them', () => {
+test('prFingerprint defaults the compared list/enum fields when input omits them', () => {
   const fp = prFingerprint({ state: 'OPEN', updatedAt: '2026-07-01T10:00:00Z' });
   assert.equal(fp.base, '');
   assert.deepEqual(fp.labels, []);
@@ -251,10 +235,6 @@ test('prFingerprint always carries threadDigest/threadStates, even with zero thr
 });
 
 test('prFingerprint never omits threadDigest/threadStates keys, regardless of input shape', () => {
-  // Direct key-presence assertion (Object.hasOwn), distinct from the value
-  // checks above: this is the guard against the conditional-presence
-  // (`...(pr.reviewThreadNodes !== undefined ? {...} : {})`) approach
-  // creeping back in.
   const zeroThreads = prFingerprint({
     state: 'OPEN',
     updatedAt: '2026-07-01T10:00:00Z',
@@ -276,17 +256,6 @@ test('prFingerprint carries threadDigest/threadStates when reviewThreadNodes is 
   });
   assert.equal(typeof fp.threadDigest, 'string');
   assert.deepEqual(fp.threadStates, [{ id: 'T_A', isResolved: false }]);
-});
-
-test('comparableFingerprint drops threadDigest/threadStates so they never reach the delta id', () => {
-  const fp = prFingerprint({
-    state: 'OPEN',
-    updatedAt: '2026-07-01T10:00:00Z',
-    reviewThreadNodes: [{ id: 'T_A', isResolved: false }],
-  });
-  const comparable = comparableFingerprint(fp);
-  assert.equal('threadDigest' in comparable, false);
-  assert.equal('threadStates' in comparable, false);
 });
 
 test('issueFingerprint sorts assignees', () => {
@@ -321,4 +290,17 @@ test('issueFingerprint sorts labels and counts comments', () => {
   assert.deepEqual(fp.labels, ['backend', 'worker']);
   assert.equal(fp.comments, 2);
   assert.equal('commentsOverflow' in fp, false);
+});
+
+// deltaId / no-drop-list guarantee ------------------------------------------
+
+test('deltaId over a fingerprint with extra injected keys differs from the id of the clean fingerprint', () => {
+  // Proves there is no silent dropping anymore: any key present in the
+  // fingerprint that feeds deltaIdentity changes the hash. (See
+  // lib/fingerprint.mjs's deltaIdentity, which hashes `to.fingerprint` /
+  // `from.fingerprint` directly -- no comparableFingerprint filter.)
+  const clean = { state: 'OPEN', ci: 'abc' };
+  const injected = { ...clean, unexpectedExtra: 'sneaky' };
+  const identityFor = (fp) => ({ repo: 'owner/repo', entity: 'pr', number: 1, to: fp });
+  assert.notEqual(deltaId(identityFor(clean)), deltaId(identityFor(injected)));
 });

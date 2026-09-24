@@ -13,6 +13,21 @@ import {
   defaultStateDir,
 } from '../lib/snapshot.mjs';
 
+// Schema v2 item shape: `{ fingerprint, context, meta }` -- see
+// docs/contract.md "Snapshot Semantics" and lib/detect.mjs.
+const item = (fingerprint = { state: 'OPEN' }, context = {}, meta = {}) => ({
+  fingerprint,
+  context,
+  meta: {
+    seenAt: null,
+    changedAt: null,
+    ticksSinceChange: 0,
+    missingTicks: 0,
+    staleEmittedFor: null,
+    ...meta,
+  },
+});
+
 test('economical snapshot paths are distinct for derived and explicit state', () => {
   const ordinary = snapshotPath('owner/repo', 'main', 'pr-issue', '/tmp/state');
   const economical = economicalSnapshotPath('owner/repo', 'main', 'pr-issue', '/tmp/state');
@@ -60,11 +75,12 @@ test('readSnapshot throws for valid JSON with invalid snapshot shape', () => {
   assert.throws(() => readSnapshot(p), /invalid snapshot shape/);
 });
 
-test('readSnapshot accepts only plain pr and issue maps', () => {
+test('readSnapshot accepts only plain pr and issue maps of three-section items', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-'));
   const p = join(dir, 'snap.json');
-  writeFileSync(p, JSON.stringify({ pr: { 42: { state: 'OPEN' } }, issue: {} }));
-  assert.deepEqual(readSnapshot(p), { pr: { 42: { state: 'OPEN' } }, issue: {} });
+  const data = { pr: { 42: item() }, issue: {} };
+  writeFileSync(p, JSON.stringify(data));
+  assert.deepEqual(readSnapshot(p), data);
 
   const bad = join(dir, 'bad.json');
   writeFileSync(bad, JSON.stringify({ pr: [], issue: {} }));
@@ -74,7 +90,7 @@ test('readSnapshot accepts only plain pr and issue maps', () => {
 test('writeSnapshotAtomic round-trips and leaves no temp file', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-'));
   const p = join(dir, 'snap.json');
-  const data = { pr: { 42: { state: 'OPEN' } }, issue: {} };
+  const data = { pr: { 42: item() }, issue: {} };
   writeSnapshotAtomic(p, data);
   assert.deepEqual(JSON.parse(readFileSync(p, 'utf8')), data);
   assert.deepEqual(readSnapshot(p), data);
@@ -114,20 +130,38 @@ test('snapshots reject an invalid meta.horizon', () => {
   );
 });
 
-test('snapshots reject an invalid persisted stale lastChangedAt but allow legacy fingerprints', () => {
+test('snapshots reject an invalid persisted item.meta.changedAt/seenAt', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-'));
-  const invalid = join(dir, 'invalid-stale.json');
+  const invalidChangedAt = join(dir, 'invalid-changed-at.json');
   writeFileSync(
-    invalid,
-    JSON.stringify({ pr: { 42: { state: 'OPEN', lastChangedAt: 'not-a-date' } }, issue: {} }),
+    invalidChangedAt,
+    JSON.stringify({
+      pr: { 42: item({ state: 'OPEN' }, {}, { changedAt: 'not-a-date' }) },
+      issue: {},
+    }),
   );
-  assert.throws(() => readSnapshot(invalid), /lastChangedAt must be an ISO date string/);
-  const legacy = join(dir, 'legacy.json');
-  writeFileSync(legacy, JSON.stringify({ pr: { 42: { state: 'OPEN' } }, issue: {} }));
-  assert.deepEqual(readSnapshot(legacy), { pr: { 42: { state: 'OPEN' } }, issue: {} });
+  assert.throws(() => readSnapshot(invalidChangedAt), /meta\.changedAt must be an ISO date string/);
+
+  const invalidSeenAt = join(dir, 'invalid-seen-at.json');
+  writeFileSync(
+    invalidSeenAt,
+    JSON.stringify({
+      pr: { 42: item({ state: 'OPEN' }, {}, { seenAt: 'not-a-date' }) },
+      issue: {},
+    }),
+  );
+  assert.throws(() => readSnapshot(invalidSeenAt), /meta\.seenAt must be an ISO date string/);
+
+  const valid = join(dir, 'valid.json');
+  const data = {
+    pr: { 42: item({ state: 'OPEN' }, {}, { changedAt: '2026-07-01T10:00:00.000Z' }) },
+    issue: {},
+  };
+  writeFileSync(valid, JSON.stringify(data));
+  assert.deepEqual(readSnapshot(valid), data);
 });
 
-test('horizonCutoff derives from meta, falls back to fingerprints, honors overlap', () => {
+test('horizonCutoff derives from meta, falls back to item fingerprints, honors overlap', () => {
   assert.equal(horizonCutoff(null), null);
   assert.equal(
     horizonCutoff({ pr: {}, issue: {}, meta: { horizon: '2026-07-01T12:05:00.000Z' } }),
@@ -135,19 +169,19 @@ test('horizonCutoff derives from meta, falls back to fingerprints, honors overla
   );
   assert.equal(
     horizonCutoff({
-      pr: { 42: { state: 'OPEN', updatedAt: '2026-07-01T10:05:00.000Z' } },
+      pr: { 42: item({ state: 'OPEN', updatedAt: '2026-07-01T10:05:00.000Z' }) },
       issue: {},
     }),
-    '2026-07-01T10:00:00.000Z', // legacy: max fingerprint updatedAt
+    '2026-07-01T10:00:00.000Z', // no meta.horizon: max item fingerprint updatedAt
   );
-  assert.equal(horizonCutoff({ pr: {}, issue: {} }), null); // empty legacy: open-only tick
+  assert.equal(horizonCutoff({ pr: {}, issue: {} }), null); // empty: open-only tick
 });
 
-test('horizonCutoff rejects invalid legacy fingerprint dates', () => {
+test('horizonCutoff rejects invalid fingerprint updatedAt dates', () => {
   assert.throws(
     () =>
       horizonCutoff({
-        pr: { 42: { state: 'OPEN', updatedAt: 'not-a-date' } },
+        pr: { 42: item({ state: 'OPEN', updatedAt: 'not-a-date' }) },
         issue: {},
       }),
     /invalid snapshot horizon/,
@@ -196,6 +230,27 @@ test('writeSnapshotAtomic validates shape before writing', () => {
   assert.throws(
     () => writeSnapshotAtomic(join(dir, 'bad.json'), { pr: [], issue: {} }),
     /invalid snapshot shape/,
+  );
+});
+
+test('writeSnapshotAtomic rejects an item missing any of the three sections', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-'));
+  for (const missing of ['fingerprint', 'context', 'meta']) {
+    const full = item();
+    delete full[missing];
+    assert.throws(
+      () => writeSnapshotAtomic(join(dir, `${missing}.json`), { pr: { 42: full }, issue: {} }),
+      new RegExp(`pr\\.42\\.${missing} must be an object`),
+    );
+  }
+});
+
+test('writeSnapshotAtomic rejects unknown top-level keys in an item', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-'));
+  const withExtra = { ...item(), missing: true };
+  assert.throws(
+    () => writeSnapshotAtomic(join(dir, 'extra.json'), { pr: { 42: withExtra }, issue: {} }),
+    /pr\.42 has unknown key\(s\): missing/,
   );
 });
 
