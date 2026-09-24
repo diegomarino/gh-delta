@@ -44,6 +44,18 @@ const before = {
     }),
   },
   issue: {},
+  // Schema v2 snapshot-wide meta is mandatory -- see lib/snapshot.mjs.
+  meta: {
+    schemaVersion: 2,
+    ghDeltaVersion: '0.0.0-test',
+    repo: 'o/r',
+    monitorId: 'm',
+    entities: ['pr'],
+    scope: 'poll',
+    horizon: '2026-09-20T11:00:00.000Z',
+    createdAt: '2026-09-20T11:00:00.000Z',
+    updatedAt: '2026-09-20T11:00:00.000Z',
+  },
 };
 const pr = {
   number: 42,
@@ -112,10 +124,14 @@ test('log compact retains a producer-derived suffix and read warns a cursor behi
   appendDeltaLog(log, {
     detectedAt: '2026-09-20T10:00:00.000Z',
     deltas: [{ id: 'a'.repeat(64), entity: 'pr', number: 1, title: 'old', classes: ['new'] }],
+    repo: 'o/r',
+    monitorId: 'm',
   });
   appendDeltaLog(log, {
     detectedAt: '2026-09-20T12:00:00.000Z',
     deltas: [{ id: 'b'.repeat(64), entity: 'pr', number: 2, title: 'new', classes: ['new'] }],
+    repo: 'o/r',
+    monitorId: 'm',
   });
   const compacted = run(
     [
@@ -164,6 +180,8 @@ test('duration compaction can retain zero records and warnings render in JSON an
   appendDeltaLog(log, {
     detectedAt: '2026-09-20T10:00:00.000Z',
     deltas: [{ id: 'a'.repeat(64), entity: 'pr', number: 1, title: 'old', classes: ['new'] }],
+    repo: 'o/r',
+    monitorId: 'm',
   });
   const args = [
     'log',
@@ -415,7 +433,7 @@ test('no --log leaves the log seam unopened and report omits logFile', () => {
 test('a zero-delta --log tick reports logFile but never opens the append seam', () => {
   const deps = producerDeps({
     fetchPRs: () => ({ rows: [], rateLimit: RATE_LIMIT }),
-    readSnapshot: () => ({ pr: {}, issue: {} }),
+    readSnapshot: () => ({ pr: {}, issue: {}, meta: before.meta }),
     appendDeltaLog: () => assert.fail('empty ticks must not open the delta log'),
   });
   const result = run(
@@ -502,6 +520,8 @@ test('read re-delivers without advance, filters by number, and advance records t
       { id: 'a'.repeat(64), entity: 'pr', number: 42, title: 'a', classes: ['new'] },
       { id: 'b'.repeat(64), entity: 'pr', number: 7, title: 'b', classes: ['ci-changed'] },
     ],
+    repo: 'o/r',
+    monitorId: 'm',
   });
   setCursorAtomic(cursor, { cursorVersion: 1, logFile: log, seq: 0 });
   const first = run(['read', '--cursor', cursor, '--number', '42'], {
@@ -537,6 +557,8 @@ test('same-cursor advance contender is busy before read, delivery, or rewind', (
       { id: 'a'.repeat(64), entity: 'pr', number: 42, title: 'a', classes: ['new'] },
       { id: 'b'.repeat(64), entity: 'pr', number: 7, title: 'b', classes: ['ci-changed'] },
     ],
+    repo: 'o/r',
+    monitorId: 'm',
   });
   setCursorAtomic(cursor, { cursorVersion: 1, logFile: log, seq: 0 });
   let nested;
@@ -573,6 +595,8 @@ test('cursor set contends with an advancing reader and non-advancing reads stay 
   appendDeltaLog(log, {
     detectedAt: '2026-09-20T12:00:00.000Z',
     deltas: [{ id: 'a'.repeat(64), entity: 'pr', number: 42, title: 'a', classes: ['new'] }],
+    repo: 'o/r',
+    monitorId: 'm',
   });
   setCursorAtomic(cursor, { cursorVersion: 1, logFile: log, seq: 0 });
   let nested;
@@ -602,6 +626,8 @@ test('advance lock loss before cursor replacement is busy, preserves bytes, and 
   appendDeltaLog(log, {
     detectedAt: '2026-09-20T12:00:00.000Z',
     deltas: [{ id: 'a'.repeat(64), entity: 'pr', number: 42, title: 'a', classes: ['new'] }],
+    repo: 'o/r',
+    monitorId: 'm',
   });
   setCursorAtomic(cursor, { cursorVersion: 1, logFile: log, seq: 0 });
   const beforeBytes = readFileSync(cursor);
@@ -629,6 +655,8 @@ test('cursor set bootstraps, accepts replay, and rejects above the complete log 
   appendDeltaLog(log, {
     detectedAt: '2026-09-20T12:00:00.000Z',
     deltas: [{ id: 'a'.repeat(64), entity: 'pr', number: 42, title: 'a', classes: ['new'] }],
+    repo: 'o/r',
+    monitorId: 'm',
   });
   assert.equal(
     run(['cursor', 'set', cursor, '1', '--log-file', log], {
