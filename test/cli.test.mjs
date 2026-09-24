@@ -924,6 +924,47 @@ test('--detail does not leak threads into generic updated rows (P2-2)', () => {
   }
 });
 
+test('an updated delta with a same-count recentComments rotation does not emit an undeclared detail field', () => {
+  // recentComments is a bounded rolling window: one comment can drop off
+  // while another enters, leaving conversationComments unchanged but the
+  // window's contents different. That rotation alone must not surface as an
+  // `updated` detail field -- recentComments is deliberately excluded from
+  // changedFingerprintFields (see lib/cli.mjs) and is not declared in
+  // DELTA_DETAIL_FIELDS_BY_CLASS.updated.
+  const before = {
+    ...basePr,
+    recentComments: [{ id: 'C1', author: 'alice' }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    recentComments: [{ id: 'C2', author: 'bob' }],
+  };
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--detail'],
+    d,
+  );
+  assert.equal(code, 10);
+  const delta = report.deltas[0];
+  assert.ok(delta.classes.includes('updated'));
+  const updatedFields = delta.details
+    .filter((row) => row.class === 'updated')
+    .map((row) => row.field);
+  assert.ok(!updatedFields.includes('recentComments'));
+
+  for (const row of delta.details) {
+    const allowed = DELTA_DETAIL_FIELDS_BY_CLASS[row.class];
+    assert.ok(allowed, `no field map for class "${row.class}"`);
+    if (!['presence', 'unknown'].includes(row.field)) {
+      assert.ok(
+        allowed.includes(row.field),
+        `field "${row.field}" not declared for class "${row.class}"`,
+      );
+    }
+  }
+});
+
 test('--detail names the exact checks and reviews that changed when the snapshot carries summaries', () => {
   const before = {
     ...basePr,
