@@ -6,6 +6,7 @@ import {
   fetchPRsByNumber,
   fetchIssues,
   fetchEnrichment,
+  fetchThreadReplies,
   fetchRateLimit,
   DEFAULT_GH_TIMEOUT_MS,
 } from '../lib/gh.mjs';
@@ -844,5 +845,88 @@ test('body enrichment fails closed on a node type that is neither Issue nor Pull
           }),
       }),
     /unexpected shape \(node type\)/,
+  );
+});
+
+test('fetchThreadReplies requests one aliased node(id:) per thread with its own last:N and returns replies', () => {
+  const calls = [];
+  const exec = (cmd, args) => {
+    calls.push(args);
+    return JSON.stringify({
+      data: {
+        rateLimit: { cost: 1, remaining: 100, resetAt: '2026-07-01T12:00:00Z' },
+        t0: {
+          __typename: 'PullRequestReviewThread',
+          id: 'T1',
+          comments: {
+            nodes: [
+              { id: 'C10', author: { login: 'bob' }, createdAt: '2026-07-01T11:00:00Z', body: 'reply' },
+            ],
+          },
+        },
+        t1: {
+          __typename: 'PullRequestReviewThread',
+          id: 'T2',
+          comments: {
+            nodes: [
+              { id: 'C20', author: { login: 'carol' }, createdAt: '2026-07-01T11:01:00Z', body: 'r1' },
+              { id: 'C21', author: null, createdAt: '2026-07-01T11:02:00Z', body: 'r2' },
+            ],
+          },
+        },
+      },
+    });
+  };
+  const { rows, rateLimit } = fetchThreadReplies(
+    [
+      { id: 'T1', increment: 1 },
+      { id: 'T2', increment: 2 },
+    ],
+    { exec },
+  );
+  const query = calls[0].find((a) => a.startsWith('query='));
+  assert.match(query, /t0: node\(id: \$id0\)/);
+  assert.match(query, /comments\(last: 1\)/);
+  assert.match(query, /t1: node\(id: \$id1\)/);
+  assert.match(query, /comments\(last: 2\)/);
+  assert.deepEqual(rows, [
+    {
+      id: 'T1',
+      replies: [{ id: 'C10', author: 'bob', createdAt: '2026-07-01T11:00:00Z', body: 'reply' }],
+    },
+    {
+      id: 'T2',
+      replies: [
+        { id: 'C20', author: 'carol', createdAt: '2026-07-01T11:01:00Z', body: 'r1' },
+        { id: 'C21', author: null, createdAt: '2026-07-01T11:02:00Z', body: 'r2' },
+      ],
+    },
+  ]);
+  assert.deepEqual(rateLimit, { cost: 1, remaining: 100, resetAt: '2026-07-01T12:00:00Z' });
+});
+
+test('fetchThreadReplies with an empty entries array makes no call', () => {
+  const { rows, rateLimit } = fetchThreadReplies([], {
+    exec: () => {
+      throw new Error('must not call');
+    },
+  });
+  assert.deepEqual(rows, []);
+  assert.equal(rateLimit, null);
+});
+
+test('fetchThreadReplies rejects a non-positive increment', () => {
+  assert.throws(() => fetchThreadReplies([{ id: 'T1', increment: 0 }], { exec: () => '' }));
+});
+
+test("fetchThreadReplies rejects an increment above GitHub's connection-argument cap", () => {
+  assert.throws(
+    () =>
+      fetchThreadReplies([{ id: 'T1', increment: 101 }], {
+        exec: () => {
+          throw new Error('must not call');
+        },
+      }),
+    /last/i,
   );
 });
