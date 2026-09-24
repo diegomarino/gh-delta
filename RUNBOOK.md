@@ -49,9 +49,10 @@ gh-delta \
   --format json
 ```
 
-The first successful run should return a report with `"baseline": true` and exit
-`0`. That is normal. It seeds the snapshot so the first scheduled tick compares
-against known state instead of reporting every existing issue or PR as new.
+The first successful run should return a report whose `results[0].baseline` is
+`true` (there is no top-level `baseline` field) and exit `0`. That is normal.
+It seeds the snapshot so the first scheduled tick compares against known
+state instead of reporting every existing issue or PR as new.
 
 To audit which monitors already exist on a machine — before adding one, or when
 inheriting a host — run the read-only inventory:
@@ -128,7 +129,7 @@ Heartbeat format:
 
 Use `--format json` when another program needs the raw structured report.
 
-**Cadence and rate limit:** a typical tick costs ~18 GraphQL points (7 per PR
+**Cadence and rate limit:** a typical tick costs ~20 GraphQL points (8 per PR
 page + 2 per issue page, × two fetch phases) against GitHub's 5,000
 points/hour-per-token budget — generous for one monitor, shared across all
 monitors on the same token. Numbers and how to spend less:
@@ -144,24 +145,35 @@ When the detector exits `10`, `gh-delta` sends one JSON `POST` per delta with
 POST failure, timeout, DNS failure, `4xx`, or `5xx` prints an `outpost warning`
 but does not change the detector result.
 
-Payloads use schema v1: see [Outpost payload schema v1](docs/contract.md#outpost-payload-schema-v1) for the full envelope.
+Payloads use schema v2: see [Outpost Payload](docs/contract.md#outpost-payload-schema-v2) for the full envelope.
 
-Outpost is best-effort notification. `eventId` is the semantic dedupe key and
-`deliveryId` identifies one delivery attempt. `gh-delta` does not provide
-reliable delivery, retries, an outbox, acknowledgement, or replay while
-`report.schemaVersion === 1`. The endpoint owns filtering, deduplication by
-`eventId`, and any downstream action. Do not put secrets in the outpost URL. If
-authentication is added later, headers or tokens must not be printed in logs.
+Outpost is best-effort notification. `gh-delta` does not emit an `eventId` —
+dedupe on `deliveryId` for delivery/processing idempotency (it changes every
+tick, even for the same observed change) and on `delta.id` (compare against
+the last id seen per item) to collapse the same observed change reported by
+more than one monitor. `gh-delta` does not provide reliable delivery, retries,
+an outbox, acknowledgement, or replay. The endpoint owns filtering,
+deduplication, and any downstream action. Do not put secrets in the outpost
+URL.
 
-## Semantic Summaries
+Pass `--outpost-secret <ENV_VAR_NAME>` (naming, never containing, the
+environment variable that holds the shared HMAC secret) to sign each POST per
+the [Standard Webhooks](https://www.standardwebhooks.com/) spec: `webhook-id`
+(the payload's `deliveryId`), `webhook-timestamp` (epoch **seconds**), and
+`webhook-signature: v1,<base64 HMAC-SHA256("{id}.{timestamp}.{body}")>`.
+Verify the signature and reject stale timestamps before trusting a payload.
 
-Add `--summaries` to attach a normalized, typed `summary` object to every PR
-delta that has a current object. It is derived from the same single observation
-as the opaque fingerprints — no second GitHub call — and is a sibling of `to`, so
-the content-addressed `delta.id` and every existing field stay byte-identical
-whether or not the flag is set. Fields, enum domains, and honesty semantics
-(`ciRollup: none` for zero checks, `mergeable: unknown` for not-yet-computed) are
-specified in [Delta Summary schema](docs/contract.md#delta-summary-schema).
+## Delta Summaries
+
+Every PR delta that has a current object (`from`/`to` observed) carries a
+normalized, typed `summary` object unconditionally — no flag needed. It is
+derived from the same single observation as the fingerprint — no second
+GitHub call — and is a sibling of `to`, so the content-addressed `delta.id`
+and every existing field are unaffected by its presence. `--summaries` is a
+deprecated no-op kept only so old scripts that still pass it are unaffected.
+Fields, enum domains, and honesty semantics (`ciRollup: none` for zero
+checks, `mergeable: unknown` for not-yet-computed) are specified in
+[Delta Summary schema](docs/contract.md#delta-summary-schema).
 
 Live acceptance check (proves the load-bearing `ciRollup` end to end against real
 GitHub, using a scratch PR you own):
@@ -172,12 +184,12 @@ REPO=you/scratch          # a repo with NO required checks on the PR's base
 PR=1                      # an open PR whose head has no commit status yet
 
 # 1. Seed a baseline while the PR has zero checks.
-gh-delta --repo "$REPO" --monitor-id acc --state-dir "$STATE" --entities pr --summaries
+gh-delta --repo "$REPO" --monitor-id acc --state-dir "$STATE" --entities pr
 
 # 2. Post a successful commit status on the PR head and re-run.
 HEAD=$(gh pr view "$PR" --repo "$REPO" --json headRefOid -q .headRefOid)
 gh api "repos/$REPO/statuses/$HEAD" -f state=success -f context=acceptance >/dev/null
-gh-delta --repo "$REPO" --monitor-id acc --state-dir "$STATE" --entities pr --summaries \
+gh-delta --repo "$REPO" --monitor-id acc --state-dir "$STATE" --entities pr \
   | jq '.deltas[] | select(.classes | index("ci-changed")) | .summary.ciRollup'
 # expect: "green"   (and a fresh baseline against the zero-check PR reports "none")
 ```
@@ -232,33 +244,37 @@ developer polling loops or webhook-driven automation.
 
 ## Delta Classes
 
-| class                         | typical orchestrator action                                                                                                                                       |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `new` (PR)                    | a worker opened a PR; read it and queue review                                                                                                                    |
-| `first-seen`                  | first observed non-open item; inspect it before treating it as newly created                                                                                      |
-| `baseline-state`              | only under `--baseline-emit-state`, on the seeding run: pre-existing open-item state (e.g. already conflicting); inspect, do not treat as newly created           |
-| `ci-changed`                  | CI green: consider merge path; CI red: nudge worker with the failure (with `--format json --detail`, the delta's `ci` detail names the exact checks that changed) |
-| `review-changed`              | approved: merge candidate; changes requested: relay to worker (with `--format json --detail`, the `reviews` detail names the reviewers and state transitions)     |
-| `became-mergeable`            | conflicts resolved; merge candidate                                                                                                                               |
-| `became-conflicting`          | PR now conflicts with its base; rebase or resolve before merge                                                                                                    |
-| `draft-ready`                 | PR left draft and is ready for review; queue it for review or dispatch                                                                                            |
-| `converted-to-draft`          | PR went back to draft; hold review and merge actions until it is ready again                                                                                      |
-| `merged` / `closed`           | slice done; advance build order or sync spawn base                                                                                                                |
-| `reopened`                    | item reopened; re-enter it into the active work queue                                                                                                             |
-| `new-comments`                | read PR threads; fold review comments before merge                                                                                                                |
-| `comments-removed`            | comments were deleted; re-read the thread — prior context may be gone                                                                                             |
-| `unresolved-threads-added`    | unresolved review threads appeared; resolve before merge                                                                                                          |
-| `unresolved-threads-resolved` | review threads resolved; re-check CI and review state                                                                                                             |
-| `review-threads-changed`      | review thread activity changed; inspect before acting                                                                                                             |
-| `relabeled`                   | labels changed (PR or issue — route on `entity`); reassess dispatch                                                                                               |
-| `assignees-changed`           | ownership changed (with `--detail`, the `assignees` detail names added/removed logins); check who owns the item before dispatching                                |
-| `review-requests-changed`     | requested reviewers changed (with `--detail`, added/removed logins; teams as `org/slug`); check who is now expected to review                                     |
-| `base-changed`                | PR base branch changed; prior CI/mergeability context refers to the old base — re-check both                                                                      |
-| `missing`                     | open item disappeared from fetch; check pagination, permissions, or scope                                                                                         |
-| `still-missing`               | open item remains absent (tick 2); unresolved operational issue, not a fresh delta                                                                                |
-| `presumed-deleted`            | absent for 3 consecutive ticks; treat as gone; verify on GitHub if unexpected; no further ticks will mention it unless it reappears                               |
-| `updated`                     | catch-all (`updatedAt` or head-only); inspect GitHub before dismissing                                                                                            |
-| `reappeared`                  | object returned after prior `missing`; check why it vanished before acting                                                                                        |
+| class                         | typical orchestrator action                                                                                                                                                                                                        |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `new` (PR)                    | a worker opened a PR; read it and queue review                                                                                                                                                                                     |
+| `first-seen`                  | first observed non-open item; inspect it before treating it as newly created                                                                                                                                                       |
+| `baseline-state`              | only under `--baseline-emit-state`, on the seeding run: pre-existing open-item state (e.g. already conflicting); inspect, do not treat as newly created                                                                            |
+| `ci-changed`                  | CI green: consider merge path; CI red: nudge worker with the failure (with `--format json --detail`, the delta's `checks` detail names the exact checks that changed)                                                              |
+| `review-changed`              | approved: merge candidate; changes requested: relay to worker (with `--format json --detail`, the `reviews` detail names the reviewers and state transitions)                                                                      |
+| `became-mergeable`            | conflicts resolved; merge candidate                                                                                                                                                                                                |
+| `became-conflicting`          | PR now conflicts with its base; rebase or resolve before merge                                                                                                                                                                     |
+| `draft-ready`                 | PR left draft and is ready for review; queue it for review or dispatch                                                                                                                                                             |
+| `converted-to-draft`          | PR went back to draft; hold review and merge actions until it is ready again                                                                                                                                                       |
+| `merged` / `closed`           | slice done; advance build order or sync spawn base                                                                                                                                                                                 |
+| `reopened`                    | item reopened; re-enter it into the active work queue                                                                                                                                                                              |
+| `new-comments`                | conversation-only (top-level PR/issue comments, not inline review replies); read the thread and fold context before merge                                                                                                          |
+| `comments-removed`            | conversation comments were deleted; re-read the thread — prior context may be gone                                                                                                                                                 |
+| `review-comments-added`       | an inline review thread got a new reply (distinct from `new-comments`); read the thread before merge                                                                                                                               |
+| `review-comments-removed`     | an inline review thread's reply count decreased; re-read the thread — prior context may be gone                                                                                                                                    |
+| `unresolved-threads-added`    | unresolved review threads appeared; resolve before merge                                                                                                                                                                           |
+| `unresolved-threads-resolved` | review threads resolved; re-check CI and review state                                                                                                                                                                              |
+| `review-threads-changed`      | review thread activity changed; inspect before acting                                                                                                                                                                              |
+| `relabeled`                   | labels changed (PR or issue — route on `entity`); reassess dispatch                                                                                                                                                                |
+| `assignees-changed`           | ownership changed (with `--detail`, the `assignees` detail names added/removed logins); check who owns the item before dispatching                                                                                                 |
+| `review-requests-changed`     | requested reviewers changed (with `--detail`, added/removed logins; teams as `org/slug`); check who is now expected to review                                                                                                      |
+| `base-changed`                | PR base branch changed; prior CI/mergeability context refers to the old base — re-check both                                                                                                                                       |
+| `head-changed`                | PR head SHA changed (push, rebase, or force-push cannot be told apart from the SHA alone); independent of `updated` — a bare push fires this alone. Anything computed against the old head (CI, review state) should be re-checked |
+| `missing`                     | open item disappeared from fetch; check pagination, permissions, or scope                                                                                                                                                          |
+| `still-missing`               | open item remains absent (tick 2); unresolved operational issue, not a fresh delta                                                                                                                                                 |
+| `presumed-deleted`            | absent for 3 consecutive ticks; treat as gone; verify on GitHub if unexpected; no further ticks will mention it unless it reappears                                                                                                |
+| `stale`                       | only with `--stale-after`: an open item's fingerprint hasn't changed across the threshold, emitted once per UTC day; treat as an operator-attention nudge, not a content change                                                    |
+| `updated`                     | catch-all for a fingerprint change with no more specific class (e.g. `updatedAt`-only churn); inspect GitHub before dismissing                                                                                                     |
+| `reappeared`                  | object returned after prior `missing`; check why it vanished before acting                                                                                                                                                         |
 
 ## Operating Rules
 
@@ -266,7 +282,8 @@ developer polling loops or webhook-driven automation.
 - Keep scheduler logs for tick output. A delta is acknowledged by snapshot
   advancement before any downstream action completes.
 - If using `--outpost-url`, make the endpoint idempotent and deduplicate by
-  `eventId`; `gh-delta` does not retry or persist failed sends.
+  `delta.id` (or `deliveryId` for delivery-attempt idempotency); `gh-delta`
+  does not retry or persist failed sends.
 - Do not call `ScheduleWakeup` from a cron-owned tick.
 - Do not call `ScheduleWakeup` from a subagent-owned tick; Claude Code does not
   expose it to subagents.
