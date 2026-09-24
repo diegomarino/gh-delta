@@ -61,9 +61,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
+        # Pull requests run ubuntu only; pushes to main also run macOS.
+        #
+        # gh-delta has zero runtime dependencies and no native modules, so
+        # there is no per-platform binary surface to guard. This job installs
+        # the gh extension and asserts the `gh delta --version` channel string,
+        # and the entrypoint (`./gh-delta`) is POSIX `sh`. Ubuntu's /bin/sh is
+        # dash while macOS's is bash in POSIX mode, so ubuntu is the *stricter*
+        # shell check of the two -- a bashism fails there and passes on macOS,
+        # not the reverse. macOS still runs before anything ships, because it
+        # is where most `gh` users are, but it no longer sits on the critical
+        # path of every PR when GitHub's macOS runner queue backs up.
+        os: >-
+          ${{ github.event_name == 'pull_request'
+            && fromJSON('["ubuntu-latest"]')
+            || fromJSON('["ubuntu-latest","macos-latest"]') }}
 
     env:
       GH_CONFIG_DIR: ${{ github.workspace }}/.gh-delta-gh-config
