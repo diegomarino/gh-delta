@@ -1195,7 +1195,7 @@ test('--baseline-emit-state on: baseline exits 10 with baseline:true and non-emp
   const delta = report.deltas[0];
   assert.deepEqual(delta.classes, ['baseline-state']);
   assert.equal(delta.from, null);
-  assert.equal(delta.to.fingerprint.state, 'open');
+  assert.equal(delta.to.state, 'open');
   assert.match(delta.id, /^[0-9a-f]{64}$/);
 });
 

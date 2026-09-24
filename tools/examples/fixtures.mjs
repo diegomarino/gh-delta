@@ -21,6 +21,10 @@ const withId = (delta) => {
   const withRepo = { id: deltaId(deltaIdentity(REPO, delta)), repo: REPO, ...delta };
   withRepo.changed = diffFingerprint(withRepo.from?.fingerprint, withRepo.to?.fingerprint);
   withRepo.summary = deltaSummary(withRepo);
+  // Public contract: from/to are the bare fingerprint, not the full item --
+  // see lib/cli.mjs's matching strip step.
+  withRepo.from = withRepo.from?.fingerprint ?? null;
+  withRepo.to = withRepo.to?.fingerprint ?? null;
   return withRepo;
 };
 // Zero-config default: `--monitor-id` derives to `host-<sha1(hostname)[:12]>`.

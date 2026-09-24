@@ -145,9 +145,10 @@ test('explain requires explicit local input and demo never contacts the public r
           {
             id,
             classes: ['closed'],
-            // Schema v2: `from`/`to` are snapshot items (`{ fingerprint, context, meta }`).
-            from: { fingerprint: { state: 'OPEN' }, context: {}, meta: {} },
-            to: { fingerprint: { state: 'CLOSED' }, context: {}, meta: {} },
+            // Schema v2: a delta's from/to are the bare compared fingerprint,
+            // not the full snapshot item.
+            from: { state: 'OPEN' },
+            to: { state: 'CLOSED' },
           },
         ],
       }),

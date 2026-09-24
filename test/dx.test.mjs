@@ -201,12 +201,13 @@ test('doctor collision scope is the same repo and machine, not merely another mo
 });
 
 test('explain uses the persisted delta fingerprints and never needs GitHub', () => {
-  // Schema v2: `from`/`to` are snapshot items (`{ fingerprint, context, meta }`).
-  const item = (fingerprint) => ({ fingerprint, context: {}, meta: {} });
+  // Schema v2: `from`/`to` on a delta are the bare compared fingerprint, not
+  // the full snapshot item -- context/meta live only inside the snapshot map,
+  // never duplicated under a delta's from/to.
   const delta = {
     id: 'a'.repeat(64),
-    from: item({ state: 'OPEN' }),
-    to: item({ state: 'CLOSED' }),
+    from: { state: 'OPEN' },
+    to: { state: 'CLOSED' },
   };
   const result = explainDelta(delta.id, [delta]);
   assert.equal(result.code, 0);

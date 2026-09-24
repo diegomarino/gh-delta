@@ -154,11 +154,171 @@
           "additionalProperties": true
         },
         "from": {
-          "type": "object",
+          "type": ["object", "null"],
+          "properties": {
+            "state": {
+              "type": "string"
+            },
+            "updatedAt": {
+              "type": "string"
+            },
+            "isDraft": {
+              "type": "boolean"
+            },
+            "headSha": {
+              "type": "string"
+            },
+            "baseRef": {
+              "type": "string"
+            },
+            "mergeable": {
+              "type": "string"
+            },
+            "mergeStateStatus": {
+              "type": "string"
+            },
+            "reviewDecision": {
+              "type": "string"
+            },
+            "checks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "reviews": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "threads": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "conversationComments": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reviewComments": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "recentComments": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "labels": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "assignees": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "reviewRequests": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
           "additionalProperties": true
         },
         "to": {
-          "type": "object",
+          "type": ["object", "null"],
+          "properties": {
+            "state": {
+              "type": "string"
+            },
+            "updatedAt": {
+              "type": "string"
+            },
+            "isDraft": {
+              "type": "boolean"
+            },
+            "headSha": {
+              "type": "string"
+            },
+            "baseRef": {
+              "type": "string"
+            },
+            "mergeable": {
+              "type": "string"
+            },
+            "mergeStateStatus": {
+              "type": "string"
+            },
+            "reviewDecision": {
+              "type": "string"
+            },
+            "checks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "reviews": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "threads": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "conversationComments": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reviewComments": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "recentComments": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "labels": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "assignees": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "reviewRequests": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
           "additionalProperties": true
         },
         "missingTicks": {

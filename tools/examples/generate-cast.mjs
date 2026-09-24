@@ -136,6 +136,10 @@ function loopDelta(classes, from, to) {
   delta.id = deltaId(deltaIdentity('owner/repo', delta));
   delta.changed = diffFingerprint(delta.from?.fingerprint, delta.to?.fingerprint);
   delta.summary = deltaSummary(delta);
+  // Public contract: from/to are the bare fingerprint, not the full item --
+  // see lib/cli.mjs's matching strip step.
+  delta.from = delta.from?.fingerprint ?? null;
+  delta.to = delta.to?.fingerprint ?? null;
   return delta;
 }
 
