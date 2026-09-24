@@ -84,6 +84,8 @@ test('fully enriched deltas jointly cover exactly the frozen DELTA_FIELDS', () =
     number: 7,
     title: 'Add widget',
     headRefName: 'feature/widget',
+    author: 'octocat',
+    url: 'https://github.com/owner/repo/pull/7',
     classes: ['new-comments'],
     from: item({ state: 'OPEN', comments: 1 }),
     to: item({ state: 'OPEN', comments: 3 }),

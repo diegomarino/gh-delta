@@ -4,6 +4,7 @@ import { enrichEmittedDeltas, extractMentions } from '../lib/enrich.mjs';
 
 // Schema v2: `from`/`to` are snapshot items (`{ fingerprint, context, meta }`).
 const item = (fingerprint) => ({ fingerprint, context: {}, meta: {} });
+const itemWithId = (id, fingerprint = {}) => ({ fingerprint, context: { id }, meta: {} });
 
 test('enrichment uses final delta identities, keeps successful siblings, and preserves mention order', () => {
   const delta = {
@@ -168,4 +169,59 @@ test('selected kinds with no final matching class make no calls, while a failed 
 
 test('extractMentions ignores email domains and deduplicates case-insensitively', () => {
   assert.deepEqual(extractMentions('a@b.com @One @one @org/team'), ['One', 'org/team']);
+});
+
+test('body enrichment fetches a new issue by its own node id and attaches mentions', () => {
+  const delta = { entity: 'issue', classes: ['new'], from: null, to: itemWithId('I_1') };
+  const calls = [];
+  const { warnings, rateLimit } = enrichEmittedDeltas([delta], ['body'], {
+    fetch: (kind, ids) => {
+      calls.push({ kind, ids });
+      return {
+        rows: [{ id: 'I_1', body: 'please review @alice' }],
+        rateLimit: { cost: 1, remaining: 99, resetAt: '2026-07-01T13:00:00.000Z' },
+      };
+    },
+  });
+  assert.deepEqual(calls, [{ kind: 'body', ids: ['I_1'] }]);
+  assert.deepEqual(delta.enrichment.body, { body: 'please review @alice', mentions: ['alice'] });
+  assert.equal(warnings.length, 0);
+  assert.deepEqual(rateLimit, { cost: 1, remaining: 99, resetAt: '2026-07-01T13:00:00.000Z' });
+});
+
+test('body enrichment applies to first-seen, reopened, and baseline-state, never to plain updated', () => {
+  for (const classes of [['first-seen'], ['reopened'], ['baseline-state']]) {
+    const delta = { entity: 'pr', classes, from: null, to: itemWithId('PR_1') };
+    let calls = 0;
+    enrichEmittedDeltas([delta], ['body'], {
+      fetch: () => {
+        calls++;
+        return { rows: [{ id: 'PR_1', body: 'x' }], rateLimit: null };
+      },
+    });
+    assert.equal(calls, 1, `expected a body fetch for classes ${classes.join(',')}`);
+  }
+
+  const updated = { entity: 'pr', classes: ['updated'], from: item({}), to: itemWithId('PR_2') };
+  let updatedCalls = 0;
+  const { warnings } = enrichEmittedDeltas([updated], ['body'], {
+    fetch: () => updatedCalls++,
+  });
+  assert.equal(updatedCalls, 0);
+  assert.equal(warnings.length, 0, 'plain updated is out of scope, not an opaque-identity warning');
+  assert.equal(updated.enrichment, undefined);
+});
+
+test('body enrichment makes zero calls for a new-comments-only delta', () => {
+  const delta = {
+    entity: 'pr',
+    classes: ['new-comments'],
+    from: item({ conversationComments: 1 }),
+    to: itemWithId('PR_3', { conversationComments: 2 }),
+  };
+  let calls = 0;
+  const { warnings } = enrichEmittedDeltas([delta], ['body'], { fetch: () => calls++ });
+  assert.equal(calls, 0);
+  assert.equal(warnings.length, 0);
+  assert.equal(delta.enrichment, undefined);
 });

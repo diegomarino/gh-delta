@@ -37,12 +37,19 @@ const item = (fingerprint, context = {}) => ({
 // approving satisfies their pending request, so `review-changed` and
 // `review-requests-changed` co-occur — the exact interplay the contract
 // documents.
-const pr42Context = { title: 'Add billing webhook', headRefName: 'feature/billing-webhook' };
+const pr42Context = {
+  title: 'Add billing webhook',
+  headRefName: 'feature/billing-webhook',
+  author: 'alice',
+  url: 'https://github.com/owner/repo/pull/42',
+};
 const pr42 = withId({
   entity: 'pr',
   number: 42,
   title: 'Add billing webhook',
   headRefName: 'feature/billing-webhook',
+  author: 'alice',
+  url: 'https://github.com/owner/repo/pull/42',
   classes: ['ci-changed', 'review-changed', 'review-requests-changed'],
   from: item(
     {
@@ -82,11 +89,17 @@ const pr42 = withId({
   ),
 });
 
-const issue17Context = { title: 'Backfill customer imports' };
+const issue17Context = {
+  title: 'Backfill customer imports',
+  author: 'carol',
+  url: 'https://github.com/owner/repo/issues/17',
+};
 const issue17 = withId({
   entity: 'issue',
   number: 17,
   title: 'Backfill customer imports',
+  author: 'carol',
+  url: 'https://github.com/owner/repo/issues/17',
   classes: ['relabeled'],
   from: item({ state: 'open', labels: ['worker'] }, issue17Context),
   to: item({ state: 'open', labels: ['backend', 'worker'] }, issue17Context),
@@ -94,12 +107,19 @@ const issue17 = withId({
 
 // An unchanged open PR that has crossed the explicit inactivity threshold. Its
 // UTC period is part of the public, content-addressed stale delta identity.
-const pr88Context = { title: 'Refresh release notes', headRefName: 'docs/release-notes' };
+const pr88Context = {
+  title: 'Refresh release notes',
+  headRefName: 'docs/release-notes',
+  author: 'bob',
+  url: 'https://github.com/owner/repo/pull/88',
+};
 const pr88Stale = withId({
   entity: 'pr',
   number: 88,
   title: 'Refresh release notes',
   headRefName: 'docs/release-notes',
+  author: 'bob',
+  url: 'https://github.com/owner/repo/pull/88',
   classes: ['stale'],
   staleAt: '2026-07-01',
   from: item({ state: 'open', headSha: 'd0c5' }, pr88Context),

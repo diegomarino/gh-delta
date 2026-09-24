@@ -43,7 +43,14 @@ test('a snapshot item carries fingerprint, context, and meta', () => {
   const item = r.snapshot.pr['42'];
   assert.deepEqual(Object.keys(item).sort(), ['context', 'fingerprint', 'meta']);
   assert.equal(item.fingerprint.state, 'open');
-  assert.deepEqual(item.context, { title: 'add widget', headRefName: null });
+  assert.deepEqual(item.context, {
+    id: null,
+    title: 'add widget',
+    url: null,
+    author: null,
+    createdAt: null,
+    headRefName: null,
+  });
   assert.equal(item.meta.missingTicks, 0);
   assert.equal(item.meta.seenAt, AT);
   assert.equal(item.meta.changedAt, AT);

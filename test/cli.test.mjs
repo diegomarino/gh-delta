@@ -2458,6 +2458,61 @@ test('--enrich invalid selection is rejected before repository derivation', () =
   assert.match(result.report.error, /--enrich/);
 });
 
+test('every delta carries author and url from snapshot context without any flags (F2)', () => {
+  const before = { ...basePr, author: 'octocat', url: 'https://github.com/o/r/pull/42' };
+  const after = { ...before, updatedAt: '2026-07-01T11:00:00Z', comments: 1 };
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
+  const result = run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
+  assert.equal(result.code, 10);
+  assert.equal(result.report.deltas[0].author, 'octocat');
+  assert.equal(result.report.deltas[0].url, 'https://github.com/o/r/pull/42');
+});
+
+test('--enrich body fetches the body of a new PR in one nodes() call and attaches mentions', () => {
+  const newPr = { ...basePr, id: 'PR_node42', author: 'octocat' };
+  // A non-baseline tick (existing snapshot present, just missing this number)
+  // so the new PR classifies as `new`, not a silently seeded baseline.
+  const d = deps([[newPr]], { existing: { pr: {}, issue: {} } });
+  const calls = [];
+  d.fetchEnrichment = (kind, ids) => {
+    calls.push({ kind, ids });
+    return {
+      rows: [{ id: ids[0], body: 'please review @alice' }],
+      rateLimit: RATE_LIMIT,
+    };
+  };
+  const result = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--enrich', 'body'],
+    d,
+  );
+  assert.equal(result.code, 10);
+  assert.deepEqual(result.report.deltas[0].classes, ['new']);
+  assert.deepEqual(calls, [{ kind: 'body', ids: ['PR_node42'] }]);
+  assert.deepEqual(result.report.deltas[0].enrichment.body, {
+    body: 'please review @alice',
+    mentions: ['alice'],
+  });
+});
+
+test('--enrich body makes zero calls for a new-comments-only delta', () => {
+  const before = { ...basePr, id: 'PR_node42' };
+  const after = { ...before, updatedAt: '2026-07-01T11:00:00Z', comments: 1 };
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
+  let calls = 0;
+  d.fetchEnrichment = () => {
+    calls++;
+    return { rows: [], rateLimit: RATE_LIMIT };
+  };
+  const result = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--enrich', 'body'],
+    d,
+  );
+  assert.equal(result.code, 10);
+  assert.deepEqual(result.report.deltas[0].classes, ['new-comments']);
+  assert.equal(calls, 0);
+  assert.equal(result.report.deltas[0].enrichment, undefined);
+});
+
 test('--help wins over unknown flags and invalid outpost URLs', () => {
   const d = { now: () => '2026-07-01T12:00:00Z' };
   const helpWithBogus = run(['--help', '--bogus'], d);
