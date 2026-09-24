@@ -1567,7 +1567,7 @@ test('class filters run before ignored authors and filteredDeltas excludes survi
 });
 
 test('--detail explains check, review, and comment identity metadata carried in the fingerprint', () => {
-  // Schema v2: ciDetails/reviewDetails/commentNodes/conversationComments are
+  // Schema v2: checks/reviews/recentComments/conversationComments are
   // ordinary `fingerprint` fields now (no more hideInternalDetails gate), so
   // they are always present in `to`/`from`, with or without --detail. What
   // --detail adds is the structured, named breakdown in `details`.

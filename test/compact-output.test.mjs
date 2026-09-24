@@ -7,7 +7,11 @@ import {
   AGENT_NDJSON_END_FIELDS,
 } from '../lib/contract.mjs';
 
-// Schema v2: `from`/`to` are snapshot items (`{ fingerprint, context, meta }`).
+// compactDelta echoes delta.from/delta.to verbatim under --full (see below);
+// it never inspects their shape. A real delta reaching compactReport has
+// already been stripped to the bare compared fingerprint by runSingle (see
+// lib/cli.mjs) -- not the full snapshot item -- but since this is a pure
+// passthrough, wrapping it here does not affect what these tests verify.
 const item = (fingerprint) => ({ fingerprint, context: {}, meta: {} });
 
 // compactDelta is a pure pick: `context`/`summary`/`changed` must already be

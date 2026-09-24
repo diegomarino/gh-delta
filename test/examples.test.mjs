@@ -50,15 +50,17 @@ test('every example report covers exactly the frozen REPORT_FIELDS', () => {
   }
 });
 
-test('fully enriched deltas jointly cover exactly the frozen DELTA_FIELDS, minus the reserved R4 field', () => {
+test('fully enriched deltas jointly cover exactly the frozen DELTA_FIELDS, minus the log-only seq field', () => {
   // No single delta carries every field: `missingTicks` is missing-lifecycle
   // only (to === null, no current object), while `headRefName` is PR-only and
   // only present when a current object exists (to !== null). They are mutually
   // exclusive, so coverage is asserted over the union of a missing delta and a
   // PR change delta. --detail is the richest mode (summaryLine, details).
-  // `seq` is reserved for R4 and never populated yet, so it is excluded from
-  // this coverage union deliberately, not omitted by oversight. `firstObserved`
-  // (R6) is now populated -- covered below by adding it to the `change` delta.
+  // `seq` is populated only when a run uses --log (see lib/cli.mjs, sourced
+  // from appendDeltaLog's {fromSeq, toSeq}); these synthetic fixtures never go
+  // through that path, so it is excluded from this coverage union
+  // deliberately, not omitted by oversight. `firstObserved` is populated --
+  // covered below by adding it to the `change` delta.
   // Schema v2: `from`/`to` are snapshot items (`{ fingerprint, context, meta }`).
   const item = (fingerprint, meta = {}) => ({ fingerprint, context: {}, meta });
   const missing = {
@@ -67,7 +69,7 @@ test('fully enriched deltas jointly cover exactly the frozen DELTA_FIELDS, minus
     context: { title: null },
     classes: ['still-missing'],
     missingTicks: 2,
-    from: item({ state: 'OPEN' }, { missingTicks: 1 }),
+    from: item({ state: 'open' }, { missingTicks: 1 }),
     to: null,
   };
   const change = {
@@ -85,8 +87,8 @@ test('fully enriched deltas jointly cover exactly the frozen DELTA_FIELDS, minus
     // representative delta -- this synthetic object exists only to exercise
     // field coverage, not to model a realistic classes/firstObserved pairing.
     firstObserved: true,
-    from: item({ state: 'OPEN', comments: 1 }),
-    to: item({ state: 'OPEN', comments: 3 }),
+    from: item({ state: 'open', conversationComments: 1 }),
+    to: item({ state: 'open', conversationComments: 3 }),
     enrichment: {
       comments: [
         {

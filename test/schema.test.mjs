@@ -137,7 +137,7 @@ test('summary schema accepts the full PR shape, the minimal issue shape, and nul
   assert.ok(validates(summarySchema, { state: 'open' }));
 });
 
-test('firstObserved (populated, boolean-true-only) and reserved seq are declared but never required', () => {
+test('firstObserved (populated, boolean-true-only) and log-only seq are declared but never required', () => {
   const deltaDef = schemaFor('json').$defs.delta;
   assert.ok(deltaDef.properties.firstObserved);
   assert.deepEqual(deltaDef.properties.firstObserved, { const: true });
@@ -145,7 +145,8 @@ test('firstObserved (populated, boolean-true-only) and reserved seq are declared
   assert.equal(deltaDef.required.includes('firstObserved'), false);
   assert.equal(deltaDef.required.includes('seq'), false);
   // Also unrequired through every format's actual delta usage (the allOf
-  // wrapper only ever adds from/to/type, never these two reserved fields).
+  // wrapper only ever adds from/to/type, never these two fields -- seq is
+  // populated only when a run uses --log, see lib/cli.mjs).
   for (const format of ['json', 'compact', 'ndjson']) {
     const doc = schemaFor(format);
     const usage =
