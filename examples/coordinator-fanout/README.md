@@ -12,7 +12,7 @@ mkdir -p "$CURSOR_DIR"
 # cron coordinator; capture its published log path after a changed tick
 gh-delta --repo diegomarino/gh-delta-demo --monitor-id coordinator \
   --state-dir "$STATE_DIR" --entities pr --log --format json > coordinator.json
-LOG_FILE=$(jq -r '.logFile' coordinator.json)
+LOG_FILE=$(jq -r '.results[0].logFile' coordinator.json)
 
 # bind each missing cursor to the producer log once, then advance independently
 for worker in reviewer notifier triage; do
