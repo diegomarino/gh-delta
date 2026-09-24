@@ -61,7 +61,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Pull requests run ubuntu only; pushes to main also run macOS.
+        # Ordinary pull requests run ubuntu only. release-please PRs and
+        # pushes to main also run macOS.
         #
         # gh-delta has zero runtime dependencies and no native modules, so
         # there is no per-platform binary surface to guard. This job installs
@@ -69,11 +70,21 @@ jobs:
         # and the entrypoint (`./gh-delta`) is POSIX `sh`. Ubuntu's /bin/sh is
         # dash while macOS's is bash in POSIX mode, so ubuntu is the *stricter*
         # shell check of the two -- a bashism fails there and passes on macOS,
-        # not the reverse. macOS still runs before anything ships, because it
-        # is where most `gh` users are, but it no longer sits on the critical
-        # path of every PR when GitHub's macOS runner queue backs up.
+        # not the reverse. So deferring macOS off the PR critical path costs
+        # little, and GitHub's macOS queue can otherwise stall a PR for an
+        # hour while every other check is green.
+        #
+        # But it must stay PRE-MERGE for release commits. `release-please.yml`
+        # triggers on the same `push` to main as this workflow and runs
+        # CONCURRENTLY with it -- publishing the GitHub Release, which in turn
+        # fires `publish.yml` and ships to npm. Nothing makes either wait for
+        # this job, so a post-merge macOS run is in a race it can lose: the
+        # package can publish before macOS has validated it. Keeping macOS on
+        # release-please PRs restores a real gate, because those must be green
+        # before the merge that starts the release at all.
         os: >-
-          ${{ github.event_name == 'pull_request'
+          ${{ (github.event_name == 'pull_request'
+            && !startsWith(github.head_ref, 'release-please--'))
             && fromJSON('["ubuntu-latest"]')
             || fromJSON('["ubuntu-latest","macos-latest"]') }}
 
