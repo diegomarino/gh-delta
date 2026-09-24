@@ -715,3 +715,110 @@ test('normalizePr passes through a present mergeStateStatus verbatim', () => {
   });
   assert.equal(rows[0].mergeStateStatus, 'behind');
 });
+
+test('the PR query requests id/author/createdAt/url and normalizePr carries them (F2)', () => {
+  let sentQuery = '';
+  const exec = (_cmd, args) => {
+    sentQuery = args.find((a) => a.startsWith('query=')) ?? '';
+    return page([
+      prNode({
+        id: 'PR_node1',
+        author: { login: 'octocat' },
+        createdAt: '2026-06-01T00:00:00Z',
+        url: 'https://github.com/o/r/pull/1',
+      }),
+    ]);
+  };
+  const { rows } = fetchPRs('o/r', { exec, horizonCutoff: null });
+  for (const scalar of ['id', 'author { login }', 'createdAt', 'url']) {
+    assert.ok(sentQuery.includes(scalar), `PR GraphQL selection must request ${scalar}`);
+  }
+  assert.equal(rows[0].id, 'PR_node1');
+  assert.equal(rows[0].author, 'octocat');
+  assert.equal(rows[0].createdAt, '2026-06-01T00:00:00Z');
+  assert.equal(rows[0].url, 'https://github.com/o/r/pull/1');
+
+  // Defensive: a deleted/ghost author normalizes to null rather than throwing.
+  const { rows: ghost } = fetchPRs('o/r', {
+    exec: () => page([prNode({ author: null })]),
+    horizonCutoff: null,
+  });
+  assert.equal(ghost[0].author, null);
+});
+
+test('the issue query requests id/author/createdAt/url and normalizeIssue carries them (F2)', () => {
+  let sentQuery = '';
+  const exec = (_cmd, args) => {
+    sentQuery = args.find((a) => a.startsWith('query=')) ?? '';
+    return page([
+      {
+        number: 9,
+        title: 'bug',
+        state: 'OPEN',
+        updatedAt: '2026-07-01T10:00:00Z',
+        id: 'I_node1',
+        author: { login: 'octocat' },
+        createdAt: '2026-06-01T00:00:00Z',
+        url: 'https://github.com/o/r/issues/9',
+        labels: { nodes: [], pageInfo: { hasNextPage: false } },
+        comments: { totalCount: 0 },
+      },
+    ]);
+  };
+  const { rows } = fetchIssues('o/r', { exec, horizonCutoff: null });
+  for (const scalar of ['id', 'author { login }', 'createdAt', 'url']) {
+    assert.ok(sentQuery.includes(scalar), `issue GraphQL selection must request ${scalar}`);
+  }
+  assert.equal(rows[0].id, 'I_node1');
+  assert.equal(rows[0].author, 'octocat');
+  assert.equal(rows[0].createdAt, '2026-06-01T00:00:00Z');
+  assert.equal(rows[0].url, 'https://github.com/o/r/issues/9');
+});
+
+test('body enrichment fetches an item body via nodes(ids:) accepting either Issue or PullRequest', () => {
+  const calls = [];
+  const { rows, rateLimit } = fetchEnrichment('body', ['I_1'], {
+    exec: (_cmd, args, opts) => {
+      calls.push({ args, opts });
+      return JSON.stringify({
+        data: {
+          rateLimit: DEFAULT_PAGE_RATE_LIMIT,
+          nodes: [{ __typename: 'Issue', id: 'I_1', body: 'please review @alice' }],
+        },
+      });
+    },
+  });
+  assert.deepEqual(
+    calls[0].args.filter((arg) => arg.startsWith('ids[]=')),
+    ['ids[]=I_1'],
+  );
+  assert.deepEqual(rows, [{ id: 'I_1', body: 'please review @alice' }]);
+  assert.deepEqual(rateLimit, DEFAULT_PAGE_RATE_LIMIT);
+
+  const pr = fetchEnrichment('body', ['PR_1'], {
+    exec: () =>
+      JSON.stringify({
+        data: {
+          rateLimit: DEFAULT_PAGE_RATE_LIMIT,
+          nodes: [{ __typename: 'PullRequest', id: 'PR_1', body: 'fixes #1' }],
+        },
+      }),
+  });
+  assert.deepEqual(pr.rows, [{ id: 'PR_1', body: 'fixes #1' }]);
+});
+
+test('body enrichment fails closed on a node type that is neither Issue nor PullRequest', () => {
+  assert.throws(
+    () =>
+      fetchEnrichment('body', ['C_1'], {
+        exec: () =>
+          JSON.stringify({
+            data: {
+              rateLimit: DEFAULT_PAGE_RATE_LIMIT,
+              nodes: [{ __typename: 'IssueComment', id: 'C_1', body: 'x' }],
+            },
+          }),
+      }),
+    /unexpected shape \(node type\)/,
+  );
+});

@@ -7,9 +7,9 @@ import { run, runCommand } from '../lib/cli.mjs';
 import { detectDeltas } from '../lib/detect.mjs';
 
 // Schema v2 item shape: `{ fingerprint, context, meta }`.
-const item = (fingerprint = { state: 'open' }, meta = {}) => ({
+const item = (fingerprint = { state: 'open' }, meta = {}, context = {}) => ({
   fingerprint,
-  context: {},
+  context,
   meta: {
     seenAt: null,
     changedAt: null,
@@ -39,6 +39,8 @@ test('status reads local snapshot summaries without GitHub or writes', () => {
   assert.deepEqual(result.report.items[0], {
     entity: 'pr',
     number: 42,
+    title: null,
+    author: null,
     summary: {
       ciRollup: 'none',
       reviewDecision: 'none',
@@ -52,6 +54,26 @@ test('status reads local snapshot summaries without GitHub or writes', () => {
     lastChangedAt: '2026-09-20T00:00:00.000Z',
     ticksSinceChange: 3,
   });
+});
+
+test('status renders title and author from the snapshot context (F2)', () => {
+  const result = run(['status', '--repo', 'o/r', '--state-file', '/tmp/status-context.json'], {
+    readSnapshot: () => ({
+      pr: {
+        42: item(
+          { state: 'open', checks: [] },
+          {},
+          { title: 'Add widget', author: 'octocat', url: 'https://github.com/o/r/pull/42' },
+        ),
+      },
+      issue: {},
+    }),
+    fetchPRs: () => assert.fail('status must not fetch GitHub'),
+    writeSnapshotAtomic: () => assert.fail('status must not write'),
+  });
+  assert.equal(result.code, 0);
+  assert.equal(result.report.items[0].title, 'Add widget');
+  assert.equal(result.report.items[0].author, 'octocat');
 });
 
 test('status --refresh performs one detector tick before reading the local status', () => {
@@ -173,6 +195,8 @@ test('status includes selected open issues and applies --number to every entity'
     {
       entity: 'issue',
       number: 7,
+      title: null,
+      author: null,
       summary: null,
       lastChangedAt: '2026-09-20T00:00:00.000Z',
       ticksSinceChange: 2,
