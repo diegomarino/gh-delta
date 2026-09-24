@@ -21,6 +21,10 @@ const withId = (delta) => {
   const withRepo = { id: deltaId(deltaIdentity(REPO, delta)), repo: REPO, ...delta };
   withRepo.changed = diffFingerprint(withRepo.from?.fingerprint, withRepo.to?.fingerprint);
   withRepo.summary = deltaSummary(withRepo);
+  // Public contract: from/to are the bare fingerprint, not the full item --
+  // see lib/cli.mjs's matching strip step.
+  withRepo.from = withRepo.from?.fingerprint ?? null;
+  withRepo.to = withRepo.to?.fingerprint ?? null;
   return withRepo;
 };
 // Zero-config default: `--monitor-id` derives to `host-<sha1(hostname)[:12]>`.
@@ -207,7 +211,7 @@ function result(overrides = {}) {
 
 /** Run 1 — zero-config baseline seed. */
 export const baselineReport = Object.freeze({
-  schemaVersion: 1,
+  schemaVersion: 2,
   detectedAt: AT_BASELINE,
   monitorId: MONITOR,
   entities: ['pr', 'issue'],
@@ -221,7 +225,7 @@ export const baselineReport = Object.freeze({
 
 /** Run 2 — second tick, three deltas, text output. */
 export const deltaReport = Object.freeze({
-  schemaVersion: 1,
+  schemaVersion: 2,
   detectedAt: AT,
   monitorId: MONITOR,
   entities: ['pr', 'issue'],
@@ -239,7 +243,7 @@ export const deltaReport = Object.freeze({
 // "impossible --entities echo").
 /** Run 3 — PR #42 plus inactivity, `--format json --detail --stale-after 24h`. */
 export const detailReport = Object.freeze({
-  schemaVersion: 1,
+  schemaVersion: 2,
   detectedAt: AT,
   monitorId: MONITOR,
   entities: ['pr', 'issue'],

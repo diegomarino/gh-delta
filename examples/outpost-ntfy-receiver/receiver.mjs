@@ -238,10 +238,8 @@ function createReceiverHandler({
       } catch {
         return respond(res, 400, { error: 'invalid JSON' });
       }
-      // TODO(E0): OUTPOST_SCHEMA_VERSION bumps to 2 alongside lib/contract.mjs;
-      // this literal 1 must move in lockstep once that lands.
-      if (payload?.type !== 'gh-delta.delta' || payload?.schemaVersion !== 1 || !payload?.delta) {
-        return respond(res, 400, { error: 'expected gh-delta.delta schemaVersion 1' });
+      if (payload?.type !== 'gh-delta.delta' || payload?.schemaVersion !== 2 || !payload?.delta) {
+        return respond(res, 400, { error: 'expected gh-delta.delta schemaVersion 2' });
       }
       const decision = shouldForward(seen, payload, classes);
       if (decision.action === 'filtered') return respond(res, 202, { filtered: true });
