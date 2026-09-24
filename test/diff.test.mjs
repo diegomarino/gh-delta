@@ -123,6 +123,21 @@ test('diffFingerprint marks checks opaque instead of silently dropping a duplica
   assert.deepEqual(result.checks, { opaque: true });
 });
 
+test('diffFingerprint reports no checks entry when duplicate-named checks are byte-identical', () => {
+  // Same duplicate-name shape as above, but nothing about checks changed --
+  // only labels did. Falling back to opaque here would be a false positive:
+  // it would tell a consumer checks changed when they did not.
+  const checks = [
+    { name: 'test', kind: 'check', status: 'completed', conclusion: 'failure' },
+    { name: 'test', kind: 'status', status: 'success', conclusion: 'success' },
+  ];
+  const from = { checks, labels: ['bug'] };
+  const to = { checks, labels: ['enhancement'] };
+  const result = diffFingerprint(from, to);
+  assert.equal(Object.hasOwn(result, 'checks'), false);
+  assert.deepEqual(result.labels, { added: ['enhancement'], removed: ['bug'] });
+});
+
 test('diffFingerprint names added/removed thread ids and recentComment ids', () => {
   const from = {
     threads: [{ id: 'T_A', resolved: false, comments: 0 }],
