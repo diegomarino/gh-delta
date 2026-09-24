@@ -10,8 +10,14 @@
 //   import { DELTA_CLASSES, REPORT_SCHEMA_VERSION } from 'gh-delta/contract';
 import { execFileSync } from 'node:child_process';
 import { detectDeltas } from '../../lib/detect.mjs';
-import { readSnapshot, snapshotPath, writeSnapshotAtomic } from '../../lib/snapshot.mjs';
+import {
+  readSnapshot,
+  snapshotPath,
+  writeSnapshotAtomic,
+  SNAPSHOT_SCHEMA_VERSION,
+} from '../../lib/snapshot.mjs';
 import { DELTA_CLASSES, REPORT_SCHEMA_VERSION } from '../../lib/contract.mjs';
+import { getPackageMetadata } from '../../lib/version.mjs';
 
 const repo = (process.argv[2] ?? '').toLowerCase();
 const label = process.argv[3] ?? 'incident';
@@ -26,10 +32,10 @@ function toDetectorRow(rest) {
   return {
     number: rest.number,
     title: rest.title,
-    state: rest.state.toUpperCase(), // 'open' -> 'OPEN', 'closed' -> 'CLOSED'
+    state: rest.state, // REST already uses v2's lowercase 'open'/'closed'
     updatedAt: rest.updated_at, // snake_case -> camelCase
     labels: rest.labels.map((restLabel) => ({ name: restLabel.name })),
-    comments: rest.comments, // REST exposes the exact count directly
+    conversationComments: rest.comments, // REST exposes the exact count directly
   };
 }
 
@@ -45,10 +51,25 @@ const rows = JSON.parse(raw)
   .filter((rest) => !rest.pull_request)
   .map(toDetectorRow);
 
-const stateFile = snapshotPath(repo, `incident-${label}`, 'issue', './state');
+const monitorId = `incident-${label}`;
+const stateFile = snapshotPath(repo, monitorId, 'issue', './state');
 const old = readSnapshot(stateFile);
-const { baseline, deltas, snapshot } = detectDeltas(old, { issue: rows });
-writeSnapshotAtomic(stateFile, snapshot);
+const at = new Date().toISOString();
+const { baseline, deltas, snapshot } = detectDeltas(old, { issue: rows }, { at });
+writeSnapshotAtomic(stateFile, {
+  ...snapshot,
+  meta: {
+    schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+    ghDeltaVersion: getPackageMetadata().version,
+    repo,
+    monitorId,
+    entities: ['issue'],
+    scope: 'poll',
+    horizon: at,
+    createdAt: old?.meta?.createdAt ?? at,
+    updatedAt: at,
+  },
+});
 
 for (const delta of deltas) {
   const unknown = delta.classes.filter((cls) => !DELTA_CLASSES.includes(cls));
@@ -58,7 +79,7 @@ for (const delta of deltas) {
       `note: classes not in schema v${REPORT_SCHEMA_VERSION} set: ${unknown.join(',')}`,
     );
   }
-  console.log(`ISSUE #${delta.number} "${delta.title}": ${delta.classes.join(', ')}`);
+  console.log(`ISSUE #${delta.number} "${delta.context.title}": ${delta.classes.join(', ')}`);
 }
 if (baseline) console.log(`baseline seeded: ${rows.length} '${label}' issue(s) tracked`);
 process.exitCode = baseline || deltas.length === 0 ? 0 : 10;
