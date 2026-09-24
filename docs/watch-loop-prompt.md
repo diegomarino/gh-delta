@@ -9,8 +9,8 @@ The command in step 1 uses `--format text` for readable scheduler logs. If the
 acting agent should see exactly which checks or reviews changed without a
 second GitHub query, schedule step 1 with `--format compact` instead: compact
 includes the semantic summary and a bounded changed diff. Use `--detail` only
-when structured diagnostic rows are needed; the legacy `--format json --detail`
-`ci`/`reviews` details then name the added/removed/changed entries (see
+when structured diagnostic rows are needed; `--format json --detail`'s
+`checks`/`reviews` details then name the added/removed/changed entries (see
 [the contract](contract.md#report-shape)). A detail marked `opaque: true`
 cannot name the change — inspect GitHub in that case. Pick the format up front:
 a tick advances the snapshot, so a re-run cannot recover the details.
@@ -53,8 +53,8 @@ Run the GitHub delta detector for `<owner/name>` and act on what it reports.
      treat as newly created.
    - ci-changed: CI green -> move toward merge. CI red -> nudge the worker with
      the failure.
-   - review-changed: APPROVED -> merge candidate. CHANGES_REQUESTED -> relay the
-     changes to the worker.
+   - review-changed: approved -> merge candidate. changes_requested -> relay the
+     changes to the worker. (Enum values are lowercase.)
    - became-mergeable: conflicts resolved -> merge candidate.
    - became-conflicting: PR now conflicts with its base. Rebase or resolve
      before merge.
@@ -65,12 +65,17 @@ Run the GitHub delta detector for `<owner/name>` and act on what it reports.
    - merged / closed: a slice is done. Advance the build order or sync the spawn
      base.
    - reopened: item reopened. Re-enter it into the active work queue.
-   - new-comments: read the PR/issue threads; fold in any review comments before
-     merging. For the full audit trail outside gh-delta's bounded detail, run
-     `gh pr view <number> --repo <owner/name> --comments` (or
+   - new-comments: conversation-only (top-level PR/issue comments, not inline
+     review replies -- see review-comments-added below). Read the thread
+     before merging. For the full audit trail outside gh-delta's bounded
+     detail, run `gh pr view <number> --repo <owner/name> --comments` (or
      `gh issue view <number> --repo <owner/name> --comments`).
-   - comments-removed: comments were deleted. Re-read the thread; prior context
-     may be gone.
+   - comments-removed: conversation comments were deleted. Re-read the thread;
+     prior context may be gone.
+   - review-comments-added: an inline review thread got a new reply (PR only,
+     distinct from new-comments). Read the thread before merging.
+   - review-comments-removed: an inline review thread's reply count decreased.
+     Re-read the thread; prior context may be gone.
    - unresolved-threads-added: unresolved PR review threads appeared (this
      also fires when one thread resolves and a different one reopens in the
      same tick, even if the total count is unchanged). Read and resolve them
@@ -100,6 +105,9 @@ Run the GitHub delta detector for `<owner/name>` and act on what it reports.
      GitHub if unexpected. No further ticks will mention it unless it reappears.
    - reappeared: a previously missing object returned. Check why it vanished
      before acting on the return.
+   - stale: only with --stale-after, once per UTC day an open item's fingerprint
+     has not changed past the threshold. Treat as an operator-attention nudge,
+     not a content change.
    - updated: catch-all for a change with no other specific class -- a plain
      push now fires head-changed alone, not updated too. Inspect GitHub
      before dismissing it, including comments and review threads.

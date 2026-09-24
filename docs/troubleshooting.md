@@ -23,17 +23,18 @@ Every structured error includes `hint`; use it as the first recovery action.
 **My monitor re-baselined after a reboot.**
 The temp-dir default (`<system temp dir>/gh-delta-<user>/...`) is ephemeral by
 design — the OS may clear `/tmp` on reboot or on schedule. When the snapshot
-file is gone, the next run seeds a fresh baseline: `baseline: true` in the JSON
-report (or the baseline line in text mode) is the signal. If you need durable
-state that survives reboots, pass `--state-dir` pointing at a persistent
-directory. Agent loops and casual CLI runs that can tolerate post-reboot
-re-baselines are fine with the default.
+file is gone, the next run seeds a fresh baseline: `results[].baseline: true`
+in the JSON report (or the baseline line in text mode) is the signal. If you
+need durable state that survives reboots, pass `--state-dir` pointing at a
+persistent directory. Agent loops and casual CLI runs that can tolerate
+post-reboot re-baselines are fine with the default.
 
 **Where is my snapshot file?**
-The report's `stateFile` field always echoes the resolved path — check that
-field first. `<system temp dir>` is `/tmp` on Linux, `/var/folders/…/T` on
-macOS, and `%TEMP%` on Windows; `os.tmpdir()` resolves differently per
-platform, so the `stateFile` echo is the authoritative answer. Windows-specific
+The report's `results[].stateFile` field always echoes the resolved path —
+check that field first. `<system temp dir>` is `/tmp` on Linux,
+`/var/folders/…/T` on macOS, and `%TEMP%` on Windows; `os.tmpdir()` resolves
+differently per platform, so the `stateFile` echo is the authoritative
+answer. Windows-specific
 behavior (permissions, atomicity, path casing, registry location) is specified
 in [Platform Notes](contract.md#platform-notes).
 
@@ -84,16 +85,24 @@ memory intact. If the item reappears, `reappeared` fires. If it is truly gone,
 silence is correct. You can verify on GitHub; no further action is required from
 the monitor.
 
-**Corrupt snapshot / invalid JSON — exit `2`, snapshot not updated.**
-If the snapshot file is invalid JSON or has an unrecognized shape, `gh-delta`
-exits `2` (permanent error) and leaves the file untouched to preserve monitor
-memory. Do not hand-edit snapshot files. If recovery is needed, delete the
-snapshot and re-seed the baseline with a fresh first run.
+**Corrupt snapshot / invalid JSON, or a pre-schema-v2 snapshot — exit `2`, snapshot not updated.**
+If the snapshot file is invalid JSON, has an unrecognized shape, or predates
+schema v2 (there is no v1 → v2 migration), `gh-delta` exits `2` (permanent
+error) and leaves the file untouched to preserve monitor memory. Do not
+hand-edit snapshot files. Run `gh-delta reset --repo <owner/name>
+--monitor-id <id> (--state-file <path>|--state-dir <dir>) --yes` — the
+documented recovery: it takes the monitor's state-file lock for the whole
+operation and deletes the snapshot file, the log's published manifest, and
+the log's data file in one lock-scoped step, so a concurrent tick sees either
+the fully intact pre-reset state or the fully clean post-reset state, never a
+half-deleted monitor. The next run then seeds a fresh baseline. This is also
+the upgrade path for every pre-schema-v2 (v1) monitor — there is nothing to
+migrate in place.
 
 **Snapshot file grows over time on a long-lived monitor.**
 Snapshot files retain dormant closed items and archived `presumed-deleted`
 fingerprints indefinitely by design — this is what preserves monitor memory
 and prevents reappearing items from being treated as new. On very long-lived
-active monitors the file grows slowly as new items accumulate. Deleting the
-snapshot and re-seeding the baseline is the reset; the next run will treat all
-current open items as new.
+active monitors the file grows slowly as new items accumulate. `gh-delta reset`
+(see above) is the supported reset; the next run will treat all current open
+items as new.
