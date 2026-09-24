@@ -11,22 +11,25 @@ import {
 
 const AT = '2026-07-01T10:00:00Z';
 
+// These objects are the normalized shape lib/gh.mjs's normalizePr/normalizeIssue
+// produce -- lowercase enums, checks/reviews/threads rows -- not raw GraphQL.
 const pr = (over = {}) => ({
   number: 42,
   title: 'add widget',
-  state: 'OPEN',
+  state: 'open',
   updatedAt: '2026-07-01T10:00:00Z',
   isDraft: false,
-  statusCheckRollup: [{ name: 'build', status: 'COMPLETED', conclusion: 'FAILURE' }],
-  reviewDecision: 'REVIEW_REQUIRED',
-  latestReviews: [],
-  mergeable: 'UNKNOWN',
-  totalCommentsCount: 0,
-  reviewThreads: 0,
-  unresolvedReviewThreads: 0,
-  headRefOid: 'sha1',
+  checks: [{ name: 'build', kind: 'check', status: 'completed', conclusion: 'failure' }],
+  reviewDecision: 'review_required',
+  reviews: [],
+  mergeable: 'unknown',
+  comments: 0,
+  threads: [],
+  headSha: 'sha1',
   ...over,
 });
+
+const thread = (id, resolved) => ({ id, resolved });
 
 test('first run establishes a baseline with no deltas', () => {
   const r = detectDeltas(null, { pr: [pr()], issue: [] }, { at: AT });
@@ -39,7 +42,7 @@ test('a snapshot item carries fingerprint, context, and meta', () => {
   const r = detectDeltas(null, { pr: [pr()], issue: [] }, { at: AT });
   const item = r.snapshot.pr['42'];
   assert.deepEqual(Object.keys(item).sort(), ['context', 'fingerprint', 'meta']);
-  assert.equal(item.fingerprint.state, 'OPEN');
+  assert.equal(item.fingerprint.state, 'open');
   assert.deepEqual(item.context, { title: 'add widget', headRefName: null });
   assert.equal(item.meta.missingTicks, 0);
   assert.equal(item.meta.seenAt, AT);
@@ -59,34 +62,34 @@ test('a delta`s from/to are full snapshot items, not bare fingerprints', () => {
   assert.deepEqual(Object.keys(delta.to).sort(), ['context', 'fingerprint', 'meta']);
 });
 
-test('a mergeStateStatus-only transition (CLEAN->BEHIND) emits an updated delta', () => {
-  // The P1 scenario: base branch advances, PR goes CLEAN->BEHIND with no other
-  // change (still OPEN, still MERGEABLE, same head/updatedAt). It must surface, or
+test('a mergeStateStatus-only transition (clean->behind) emits an updated delta', () => {
+  // The P1 scenario: base branch advances, PR goes clean->behind with no other
+  // change (still open, still mergeable, same head/updatedAt). It must surface, or
   // a consumer stays at a stale "ready to merge".
   const base = detectDeltas(
     null,
-    { pr: [pr({ mergeStateStatus: 'CLEAN' })], issue: [] },
+    { pr: [pr({ mergeStateStatus: 'clean' })], issue: [] },
     { at: AT },
   );
   const r = detectDeltas(
     base.snapshot,
-    { pr: [pr({ mergeStateStatus: 'BEHIND' })], issue: [] },
+    { pr: [pr({ mergeStateStatus: 'behind' })], issue: [] },
     { at: AT },
   );
   assert.equal(r.deltas.length, 1);
   assert.deepEqual(r.deltas[0].classes, ['updated']);
-  assert.equal(r.deltas[0].to.fingerprint.mergeStateStatus, 'BEHIND');
+  assert.equal(r.deltas[0].to.fingerprint.mergeStateStatus, 'behind');
 });
 
 test('an unchanged mergeStateStatus does not emit a delta', () => {
   const base = detectDeltas(
     null,
-    { pr: [pr({ mergeStateStatus: 'CLEAN' })], issue: [] },
+    { pr: [pr({ mergeStateStatus: 'clean' })], issue: [] },
     { at: AT },
   );
   const r = detectDeltas(
     base.snapshot,
-    { pr: [pr({ mergeStateStatus: 'CLEAN' })], issue: [] },
+    { pr: [pr({ mergeStateStatus: 'clean' })], issue: [] },
     { at: AT },
   );
   assert.deepEqual(r.deltas, []);
@@ -110,7 +113,7 @@ test('baseline with emitBaselineState on emits one baseline-state delta per open
   const d = r.deltas[0];
   assert.deepEqual(d.classes, ['baseline-state']);
   assert.equal(d.from, null);
-  assert.equal(d.to.fingerprint.state, 'OPEN');
+  assert.equal(d.to.fingerprint.state, 'open');
   assert.equal(d.entity, 'pr');
   assert.equal(d.number, 42);
 });
@@ -119,7 +122,7 @@ test('baseline-state covers both PR and issue open items within entities', () =>
   const issue = {
     number: 7,
     title: 'bug',
-    state: 'OPEN',
+    state: 'open',
     updatedAt: '2026-07-01T10:00:00Z',
     labels: [],
     comments: 0,
@@ -152,25 +155,25 @@ test('a first-observed closed PR emits first-seen instead of new', () => {
   const base = detectDeltas(null, { pr: [], issue: [] }, { at: AT });
   const r = detectDeltas(
     base.snapshot,
-    { pr: [pr({ state: 'MERGED', updatedAt: '2026-07-01T09:00:00Z' })], issue: [] },
+    { pr: [pr({ state: 'merged', updatedAt: '2026-07-01T09:00:00Z' })], issue: [] },
     { at: AT },
   );
   assert.equal(r.deltas.length, 1);
   assert.deepEqual(r.deltas[0].classes, ['first-seen']);
 });
 
-test('OPEN → MERGED emits `merged`, not `closed`', () => {
+test('open → merged emits `merged`, not `closed`', () => {
   const base = detectDeltas(null, { pr: [pr()], issue: [] }, { at: AT });
   const r = detectDeltas(
     base.snapshot,
-    { pr: [pr({ state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
+    { pr: [pr({ state: 'merged', updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
     { at: '2026-07-01T11:00:00Z' },
   );
   assert.ok(r.deltas[0].classes.includes('merged'));
   assert.ok(!r.deltas[0].classes.includes('closed'));
 });
 
-test('CI FAILURE → SUCCESS + review APPROVED emits ci-changed + review-changed', () => {
+test('CI failure → success + review approved emits ci-changed + review-changed', () => {
   const base = detectDeltas(null, { pr: [pr()], issue: [] }, { at: AT });
   const r = detectDeltas(
     base.snapshot,
@@ -178,9 +181,11 @@ test('CI FAILURE → SUCCESS + review APPROVED emits ci-changed + review-changed
       pr: [
         pr({
           updatedAt: '2026-07-01T11:00:00Z',
-          statusCheckRollup: [{ name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' }],
-          reviewDecision: 'APPROVED',
-          latestReviews: [{ author: { login: 'alice' }, state: 'APPROVED' }],
+          checks: [{ name: 'build', kind: 'check', status: 'completed', conclusion: 'success' }],
+          reviewDecision: 'approved',
+          reviews: [
+            { id: 'PRR_1', author: 'alice', state: 'approved', submittedAt: '', commit: '' },
+          ],
         }),
       ],
       issue: [],
@@ -191,25 +196,25 @@ test('CI FAILURE → SUCCESS + review APPROVED emits ci-changed + review-changed
   assert.ok(r.deltas[0].classes.includes('review-changed'));
 });
 
-test('mergeable UNKNOWN → MERGEABLE does NOT emit became-mergeable', () => {
-  const base = detectDeltas(null, { pr: [pr({ mergeable: 'UNKNOWN' })], issue: [] }, { at: AT });
+test('mergeable unknown → mergeable does NOT emit became-mergeable', () => {
+  const base = detectDeltas(null, { pr: [pr({ mergeable: 'unknown' })], issue: [] }, { at: AT });
   const r = detectDeltas(
     base.snapshot,
-    { pr: [pr({ mergeable: 'MERGEABLE', updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
+    { pr: [pr({ mergeable: 'mergeable', updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
     { at: '2026-07-01T11:00:00Z' },
   );
   assert.ok(!r.deltas[0]?.classes.includes('became-mergeable'));
 });
 
-test('mergeable CONFLICTING → MERGEABLE emits became-mergeable', () => {
+test('mergeable conflicting → mergeable emits became-mergeable', () => {
   const base = detectDeltas(
     null,
-    { pr: [pr({ mergeable: 'CONFLICTING' })], issue: [] },
+    { pr: [pr({ mergeable: 'conflicting' })], issue: [] },
     { at: AT },
   );
   const r = detectDeltas(
     base.snapshot,
-    { pr: [pr({ mergeable: 'MERGEABLE', updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
+    { pr: [pr({ mergeable: 'mergeable', updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
     { at: '2026-07-01T11:00:00Z' },
   );
   assert.ok(r.deltas[0].classes.includes('became-mergeable'));
@@ -221,9 +226,9 @@ test('an identical PR (only array reorder) emits NO delta', () => {
     {
       pr: [
         pr({
-          statusCheckRollup: [
-            { name: 'build', status: 'COMPLETED', conclusion: 'FAILURE' },
-            { name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS' },
+          checks: [
+            { name: 'build', kind: 'check', status: 'completed', conclusion: 'failure' },
+            { name: 'lint', kind: 'check', status: 'completed', conclusion: 'success' },
           ],
         }),
       ],
@@ -236,9 +241,9 @@ test('an identical PR (only array reorder) emits NO delta', () => {
     {
       pr: [
         pr({
-          statusCheckRollup: [
-            { name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS' },
-            { name: 'build', status: 'COMPLETED', conclusion: 'FAILURE' },
+          checks: [
+            { name: 'lint', kind: 'check', status: 'completed', conclusion: 'success' },
+            { name: 'build', kind: 'check', status: 'completed', conclusion: 'failure' },
           ],
         }),
       ],
@@ -259,31 +264,31 @@ test('ready → draft emits converted-to-draft', () => {
   assert.ok(r.deltas[0].classes.includes('converted-to-draft'));
 });
 
-test('mergeable MERGEABLE → CONFLICTING emits became-conflicting', () => {
-  const base = detectDeltas(null, { pr: [pr({ mergeable: 'MERGEABLE' })], issue: [] }, { at: AT });
+test('mergeable mergeable → conflicting emits became-conflicting', () => {
+  const base = detectDeltas(null, { pr: [pr({ mergeable: 'mergeable' })], issue: [] }, { at: AT });
   const r = detectDeltas(
     base.snapshot,
-    { pr: [pr({ mergeable: 'CONFLICTING', updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
+    { pr: [pr({ mergeable: 'conflicting', updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
     { at: '2026-07-01T11:00:00Z' },
   );
   assert.ok(r.deltas[0].classes.includes('became-conflicting'));
 });
 
-test('mergeable UNKNOWN → CONFLICTING does NOT emit became-conflicting', () => {
-  const base = detectDeltas(null, { pr: [pr({ mergeable: 'UNKNOWN' })], issue: [] }, { at: AT });
+test('mergeable unknown → conflicting does NOT emit became-conflicting', () => {
+  const base = detectDeltas(null, { pr: [pr({ mergeable: 'unknown' })], issue: [] }, { at: AT });
   const r = detectDeltas(
     base.snapshot,
-    { pr: [pr({ mergeable: 'CONFLICTING', updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
+    { pr: [pr({ mergeable: 'conflicting', updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
     { at: '2026-07-01T11:00:00Z' },
   );
   assert.ok(!r.deltas[0]?.classes.includes('became-conflicting'));
 });
 
 test('a base branch change emits base-changed', () => {
-  const base = detectDeltas(null, { pr: [pr({ baseRefName: 'main' })], issue: [] }, { at: AT });
+  const base = detectDeltas(null, { pr: [pr({ baseRef: 'main' })], issue: [] }, { at: AT });
   const r = detectDeltas(
     base.snapshot,
-    { pr: [pr({ baseRefName: 'release/2.0', updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
+    { pr: [pr({ baseRef: 'release/2.0', updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
     { at: '2026-07-01T11:00:00Z' },
   );
   assert.ok(r.deltas[0].classes.includes('base-changed'));
@@ -322,7 +327,7 @@ test('an issue assignee change emits assignees-changed', () => {
   const issue = {
     number: 7,
     title: 'bug',
-    state: 'OPEN',
+    state: 'open',
     updatedAt: '2026-07-01T10:00:00Z',
     labels: [],
     assignees: ['alice'],
@@ -348,10 +353,10 @@ test('a review request emits review-requests-changed', () => {
 });
 
 test('a comment total decrease emits comments-removed', () => {
-  const base = detectDeltas(null, { pr: [pr({ totalCommentsCount: 3 })], issue: [] }, { at: AT });
+  const base = detectDeltas(null, { pr: [pr({ comments: 3 })], issue: [] }, { at: AT });
   const r = detectDeltas(
     base.snapshot,
-    { pr: [pr({ totalCommentsCount: 2, updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
+    { pr: [pr({ comments: 2, updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
     { at: '2026-07-01T11:00:00Z' },
   );
   assert.deepEqual(r.deltas[0].classes, ['comments-removed']);
@@ -370,13 +375,18 @@ test('draft → ready emits draft-ready', () => {
 test('new unresolved review threads emit unresolved-threads-added', () => {
   const base = detectDeltas(
     null,
-    { pr: [pr({ reviewThreads: 1, unresolvedReviewThreads: 0 })], issue: [] },
+    { pr: [pr({ threads: [thread('T0', true)] })], issue: [] },
     { at: AT },
   );
   const r = detectDeltas(
     base.snapshot,
     {
-      pr: [pr({ reviewThreads: 2, unresolvedReviewThreads: 1, updatedAt: '2026-07-01T11:00:00Z' })],
+      pr: [
+        pr({
+          threads: [thread('T0', true), thread('T1', false)],
+          updatedAt: '2026-07-01T11:00:00Z',
+        }),
+      ],
       issue: [],
     },
     { at: '2026-07-01T11:00:00Z' },
@@ -387,13 +397,18 @@ test('new unresolved review threads emit unresolved-threads-added', () => {
 test('resolved review threads emit unresolved-threads-resolved', () => {
   const base = detectDeltas(
     null,
-    { pr: [pr({ reviewThreads: 2, unresolvedReviewThreads: 2 })], issue: [] },
+    { pr: [pr({ threads: [thread('T0', false), thread('T1', false)] })], issue: [] },
     { at: AT },
   );
   const r = detectDeltas(
     base.snapshot,
     {
-      pr: [pr({ reviewThreads: 2, unresolvedReviewThreads: 0, updatedAt: '2026-07-01T11:00:00Z' })],
+      pr: [
+        pr({
+          threads: [thread('T0', true), thread('T1', true)],
+          updatedAt: '2026-07-01T11:00:00Z',
+        }),
+      ],
       issue: [],
     },
     { at: '2026-07-01T11:00:00Z' },
@@ -404,13 +419,18 @@ test('resolved review threads emit unresolved-threads-resolved', () => {
 test('review thread total changes emit review-threads-changed when unresolved count is stable', () => {
   const base = detectDeltas(
     null,
-    { pr: [pr({ reviewThreads: 1, unresolvedReviewThreads: 1 })], issue: [] },
+    { pr: [pr({ threads: [thread('T0', false)] })], issue: [] },
     { at: AT },
   );
   const r = detectDeltas(
     base.snapshot,
     {
-      pr: [pr({ reviewThreads: 2, unresolvedReviewThreads: 1, updatedAt: '2026-07-01T11:00:00Z' })],
+      pr: [
+        pr({
+          threads: [thread('T0', false), thread('T1', true)],
+          updatedAt: '2026-07-01T11:00:00Z',
+        }),
+      ],
       issue: [],
     },
     { at: '2026-07-01T11:00:00Z' },
@@ -419,28 +439,28 @@ test('review thread total changes emit review-threads-changed when unresolved co
 });
 
 test('a push changes the head SHA, emitting head-changed alongside updated', () => {
-  const base = detectDeltas(null, { pr: [pr({ headRefOid: 'sha1' })], issue: [] }, { at: AT });
+  const base = detectDeltas(null, { pr: [pr({ headSha: 'sha1' })], issue: [] }, { at: AT });
   const r = detectDeltas(
     base.snapshot,
-    { pr: [pr({ headRefOid: 'sha2', updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
+    { pr: [pr({ headSha: 'sha2', updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
     { at: '2026-07-01T11:00:00Z' },
   );
   const delta = r.deltas[0];
   assert.deepEqual(delta.classes.sort(), ['head-changed', 'updated']);
-  assert.equal(delta.from.fingerprint.head, 'sha1');
-  assert.equal(delta.to.fingerprint.head, 'sha2');
+  assert.equal(delta.from.fingerprint.headSha, 'sha1');
+  assert.equal(delta.to.fingerprint.headSha, 'sha2');
 });
 
 test('a head SHA change alongside another specific class still carries head-changed', () => {
   const base = detectDeltas(
     null,
-    { pr: [pr({ headRefOid: 'sha1', mergeable: 'CONFLICTING' })], issue: [] },
+    { pr: [pr({ headSha: 'sha1', mergeable: 'conflicting' })], issue: [] },
     { at: AT },
   );
   const r = detectDeltas(
     base.snapshot,
     {
-      pr: [pr({ headRefOid: 'sha2', mergeable: 'MERGEABLE', updatedAt: '2026-07-01T11:00:00Z' })],
+      pr: [pr({ headSha: 'sha2', mergeable: 'mergeable', updatedAt: '2026-07-01T11:00:00Z' })],
       issue: [],
     },
     { at: '2026-07-01T11:00:00Z' },
@@ -452,45 +472,27 @@ test('a head SHA change alongside another specific class still carries head-chan
 
 // --- Review-thread IDENTITY, not just counters (headline regression) -------
 //
-// reviewThreads/unresolvedReviewThreads are integer counters. If one thread is
-// resolved and a different one reopens in the same tick, the totals are
-// unchanged and the counter-only comparison emits nothing. threadStates (a
-// sorted `{id, isResolved}` list, part of `fingerprint` like every other
-// compared field in schema v2) is what catches this.
-
-const thread = (id, isResolved) => ({ id, isResolved });
+// R2 dropped the reviewThreads/unresolvedReviewThreads integer counters:
+// `threads` (a sorted `{id, resolved}` list, part of `fingerprint` like every
+// other compared field) is the sole source of truth, and both the totals and
+// the identity swap below are derived from it. If one thread is resolved and
+// a different one reopens in the same tick, the totals are unchanged and a
+// counter-only comparison would emit nothing; thread-identity comparison is
+// what catches this.
 
 test('one thread resolved and another reopened with totals unchanged still emits a delta naming both threads', () => {
   const base = detectDeltas(
     null,
-    {
-      pr: [
-        pr({
-          reviewThreads: 2,
-          unresolvedReviewThreads: 1,
-          reviewThreadNodes: [thread('T_A', false), thread('T_B', true)],
-        }),
-      ],
-      issue: [],
-    },
+    { pr: [pr({ threads: [thread('T_A', false), thread('T_B', true)] })], issue: [] },
     { at: AT },
   );
-  // Swap: A resolves, B reopens. Same reviewThreads (2), same
-  // unresolvedReviewThreads (1), and even the same updatedAt -- every field the
-  // counter-only comparison looks at is identical. Only the thread-identity
-  // digest moved, and that alone must still be enough to trigger the delta.
+  // Swap: A resolves, B reopens. Same total (2), same unresolved count (1), and
+  // even the same updatedAt -- every field a counter-only comparison looks at
+  // is identical. Only thread identity moved, and that alone must still be
+  // enough to trigger the delta.
   const r = detectDeltas(
     base.snapshot,
-    {
-      pr: [
-        pr({
-          reviewThreads: 2,
-          unresolvedReviewThreads: 1,
-          reviewThreadNodes: [thread('T_A', true), thread('T_B', false)],
-        }),
-      ],
-      issue: [],
-    },
+    { pr: [pr({ threads: [thread('T_A', true), thread('T_B', false)] })], issue: [] },
     { at: AT },
   );
   assert.equal(r.deltas.length, 1, 'the swap must still be observed as a delta');
@@ -498,12 +500,12 @@ test('one thread resolved and another reopened with totals unchanged still emits
   assert.ok(delta.classes.includes('unresolved-threads-added'), 'T_B newly unresolved');
   assert.ok(delta.classes.includes('unresolved-threads-resolved'), 'T_A newly resolved');
   // Both thread ids are recoverable from the delta's from/to thread states.
-  const oldStates = new Map(delta.from.fingerprint.threadStates.map((t) => [t.id, t.isResolved]));
-  const newlyUnresolved = delta.to.fingerprint.threadStates
-    .filter((t) => !t.isResolved && oldStates.get(t.id) !== false)
+  const oldStates = new Map(delta.from.fingerprint.threads.map((t) => [t.id, t.resolved]));
+  const newlyUnresolved = delta.to.fingerprint.threads
+    .filter((t) => !t.resolved && oldStates.get(t.id) !== false)
     .map((t) => t.id);
-  const newlyResolved = delta.to.fingerprint.threadStates
-    .filter((t) => t.isResolved && oldStates.get(t.id) === false)
+  const newlyResolved = delta.to.fingerprint.threads
+    .filter((t) => t.resolved && oldStates.get(t.id) === false)
     .map((t) => t.id);
   assert.deepEqual(newlyUnresolved, ['T_B']);
   assert.deepEqual(newlyResolved, ['T_A']);
@@ -512,16 +514,7 @@ test('one thread resolved and another reopened with totals unchanged still emits
 test('a genuinely new unresolved thread (identity-based) still emits unresolved-threads-added', () => {
   const base = detectDeltas(
     null,
-    {
-      pr: [
-        pr({
-          reviewThreads: 1,
-          unresolvedReviewThreads: 0,
-          reviewThreadNodes: [thread('T_A', true)],
-        }),
-      ],
-      issue: [],
-    },
+    { pr: [pr({ threads: [thread('T_A', true)] })], issue: [] },
     { at: AT },
   );
   const r = detectDeltas(
@@ -529,10 +522,8 @@ test('a genuinely new unresolved thread (identity-based) still emits unresolved-
     {
       pr: [
         pr({
-          reviewThreads: 2,
-          unresolvedReviewThreads: 1,
+          threads: [thread('T_A', true), thread('T_B', false)],
           updatedAt: '2026-07-01T11:00:00Z',
-          reviewThreadNodes: [thread('T_A', true), thread('T_B', false)],
         }),
       ],
       issue: [],
@@ -547,7 +538,7 @@ test('issue label removal emits relabeled', () => {
   const issue = {
     number: 7,
     title: 'bug',
-    state: 'OPEN',
+    state: 'open',
     updatedAt: '2026-07-01T10:00:00Z',
     labels: [{ name: 'worker' }, { name: 'backend' }],
     comments: 0,
@@ -578,7 +569,7 @@ test('omitted entity collection preserves that side of the snapshot', () => {
   const issue = {
     number: 7,
     title: 'bug',
-    state: 'OPEN',
+    state: 'open',
     updatedAt: '2026-07-01T10:00:00Z',
     labels: [],
     comments: 0,
@@ -630,7 +621,7 @@ test('a missing object that reappears changed emits reappeared plus specific cla
   const missing = detectDeltas(base.snapshot, { pr: [], issue: [] }, { at: AT });
   const back = detectDeltas(
     missing.snapshot,
-    { pr: [pr({ updatedAt: '2026-07-01T11:00:00Z', totalCommentsCount: 1 })], issue: [] },
+    { pr: [pr({ updatedAt: '2026-07-01T11:00:00Z', comments: 1 })], issue: [] },
     { at: '2026-07-01T11:00:00Z' },
   );
 
@@ -641,32 +632,14 @@ test('a missing object that reappears changed emits reappeared plus specific cla
 test('a PR that goes missing and reappears after a same-count thread swap emits unresolved-threads-added/-resolved, not just updated', () => {
   const base = detectDeltas(
     null,
-    {
-      pr: [
-        pr({
-          reviewThreads: 2,
-          unresolvedReviewThreads: 1,
-          reviewThreadNodes: [thread('T_A', false), thread('T_B', true)],
-        }),
-      ],
-      issue: [],
-    },
+    { pr: [pr({ threads: [thread('T_A', false), thread('T_B', true)] })], issue: [] },
     { at: AT },
   );
   const missing = detectDeltas(base.snapshot, { pr: [], issue: [] }, { at: AT });
   assert.deepEqual(missing.deltas[0].classes, ['missing']);
   const back = detectDeltas(
     missing.snapshot,
-    {
-      pr: [
-        pr({
-          reviewThreads: 2,
-          unresolvedReviewThreads: 1,
-          reviewThreadNodes: [thread('T_A', true), thread('T_B', false)],
-        }),
-      ],
-      issue: [],
-    },
+    { pr: [pr({ threads: [thread('T_A', true), thread('T_B', false)] })], issue: [] },
     { at: AT },
   );
   const delta = back.deltas[0];
@@ -683,7 +656,7 @@ test('an exact comment total increase emits new-comments', () => {
   const issue = {
     number: 7,
     title: 'bug',
-    state: 'OPEN',
+    state: 'open',
     updatedAt: '2026-07-01T10:00:00Z',
     labels: [],
     comments: 130,
@@ -723,7 +696,7 @@ test('an archived (presumed-deleted) object that reappears emits reappeared', ()
 });
 
 test('absent closed items are dormant memory, not missing (incremental scope)', () => {
-  const base = detectDeltas(null, { pr: [pr({ state: 'MERGED' })], issue: [] }, { at: AT });
+  const base = detectDeltas(null, { pr: [pr({ state: 'merged' })], issue: [] }, { at: AT });
   const r = detectDeltas(base.snapshot, { pr: [], issue: [] }, { at: AT });
   assert.deepEqual(r.deltas, []);
   assert.ok(r.snapshot.pr['42']);
@@ -734,8 +707,7 @@ test('absent closed items are dormant memory, not missing (incremental scope)', 
 //
 // Every `details` row's `field` must be declared in DELTA_DETAIL_FIELDS_BY_CLASS
 // for its `class`, and every key on the row must be within DELTA_DETAIL_FIELDS.
-// This is the general version of the threadDigest/threadStates leak (P2-2):
-// it exercises every class in DELTA_CLASSES so the next field added to a
+// This exercises every class in DELTA_CLASSES so the next field added to a
 // fingerprint without a matching contract entry fails here instead of leaking
 // into a consumer that validates against the exported contract.
 
@@ -754,13 +726,13 @@ test('every emitted detail key is declared in the exported contract, across ever
   const seed = detectDeltas(null, { pr: [pr({ number: 1 })], issue: [] }, { at: AT });
   const withNew = detectDeltas(
     seed.snapshot,
-    { pr: [pr({ number: 1 }), pr({ number: 2, state: 'OPEN' })], issue: [] },
+    { pr: [pr({ number: 1 }), pr({ number: 2, state: 'open' })], issue: [] },
     { at: AT },
   );
   deltas.push(...withNew.deltas.filter((d) => d.number === 2));
   const withFirstSeen = detectDeltas(
     seed.snapshot,
-    { pr: [pr({ number: 1 }), pr({ number: 3, state: 'MERGED' })], issue: [] },
+    { pr: [pr({ number: 1 }), pr({ number: 3, state: 'merged' })], issue: [] },
     { at: AT },
   );
   deltas.push(...withFirstSeen.deltas.filter((d) => d.number === 3));
@@ -769,19 +741,19 @@ test('every emitted detail key is declared in the exported contract, across ever
   const sOpen = detectDeltas(null, { pr: [pr({ number: 10 })], issue: [] }, { at: AT });
   const tClosed = detectDeltas(
     sOpen.snapshot,
-    { pr: [pr({ number: 10, state: 'CLOSED', updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
+    { pr: [pr({ number: 10, state: 'closed', updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
     { at: '2026-07-01T11:00:00Z' },
   );
   deltas.push(...tClosed.deltas);
   const tReopened = detectDeltas(
     tClosed.snapshot,
-    { pr: [pr({ number: 10, state: 'OPEN', updatedAt: '2026-07-01T12:00:00Z' })], issue: [] },
+    { pr: [pr({ number: 10, state: 'open', updatedAt: '2026-07-01T12:00:00Z' })], issue: [] },
     { at: '2026-07-01T12:00:00Z' },
   );
   deltas.push(...tReopened.deltas);
   const tMerged = detectDeltas(
     tReopened.snapshot,
-    { pr: [pr({ number: 10, state: 'MERGED', updatedAt: '2026-07-01T13:00:00Z' })], issue: [] },
+    { pr: [pr({ number: 10, state: 'merged', updatedAt: '2026-07-01T13:00:00Z' })], issue: [] },
     { at: '2026-07-01T13:00:00Z' },
   );
   deltas.push(...tMerged.deltas);
@@ -798,26 +770,16 @@ test('every emitted detail key is declared in the exported contract, across ever
   deltas.push(...back.deltas);
 
   // new-comments / comments-removed
-  const sC = detectDeltas(
-    null,
-    { pr: [pr({ number: 30, totalCommentsCount: 3 })], issue: [] },
-    { at: AT },
-  );
+  const sC = detectDeltas(null, { pr: [pr({ number: 30, comments: 3 })], issue: [] }, { at: AT });
   const tMore = detectDeltas(
     sC.snapshot,
-    {
-      pr: [pr({ number: 30, totalCommentsCount: 5, updatedAt: '2026-07-01T11:00:00Z' })],
-      issue: [],
-    },
+    { pr: [pr({ number: 30, comments: 5, updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
     { at: '2026-07-01T11:00:00Z' },
   );
   deltas.push(...tMore.deltas);
   const tLess = detectDeltas(
     tMore.snapshot,
-    {
-      pr: [pr({ number: 30, totalCommentsCount: 2, updatedAt: '2026-07-01T12:00:00Z' })],
-      issue: [],
-    },
+    { pr: [pr({ number: 30, comments: 2, updatedAt: '2026-07-01T12:00:00Z' })], issue: [] },
     { at: '2026-07-01T12:00:00Z' },
   );
   deltas.push(...tLess.deltas);
@@ -853,7 +815,7 @@ test('every emitted detail key is declared in the exported contract, across ever
       pr: [
         pr({
           number: 60,
-          statusCheckRollup: [{ name: 'build', status: 'COMPLETED', conclusion: 'FAILURE' }],
+          checks: [{ name: 'build', kind: 'check', status: 'completed', conclusion: 'failure' }],
         }),
       ],
       issue: [],
@@ -866,7 +828,7 @@ test('every emitted detail key is declared in the exported contract, across ever
       pr: [
         pr({
           number: 60,
-          statusCheckRollup: [{ name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+          checks: [{ name: 'build', kind: 'check', status: 'completed', conclusion: 'success' }],
           updatedAt: '2026-07-01T11:00:00Z',
         }),
       ],
@@ -879,7 +841,7 @@ test('every emitted detail key is declared in the exported contract, across ever
   // review-changed
   const sR = detectDeltas(
     null,
-    { pr: [pr({ number: 70, reviewDecision: 'REVIEW_REQUIRED', latestReviews: [] })], issue: [] },
+    { pr: [pr({ number: 70, reviewDecision: 'review_required', reviews: [] })], issue: [] },
     { at: AT },
   );
   const tR = detectDeltas(
@@ -888,14 +850,14 @@ test('every emitted detail key is declared in the exported contract, across ever
       pr: [
         pr({
           number: 70,
-          reviewDecision: 'APPROVED',
-          latestReviews: [
+          reviewDecision: 'approved',
+          reviews: [
             {
-              id: 'r1',
-              author: { login: 'alice' },
-              state: 'APPROVED',
+              id: 'PRR_1',
+              author: 'alice',
+              state: 'approved',
               submittedAt: '2026-07-01T10:30:00Z',
-              commit: { oid: 'c1' },
+              commit: 'c1',
             },
           ],
           updatedAt: '2026-07-01T11:00:00Z',
@@ -910,13 +872,13 @@ test('every emitted detail key is declared in the exported contract, across ever
   // became-mergeable / became-conflicting
   const sMg = detectDeltas(
     null,
-    { pr: [pr({ number: 80, mergeable: 'CONFLICTING' })], issue: [] },
+    { pr: [pr({ number: 80, mergeable: 'conflicting' })], issue: [] },
     { at: AT },
   );
   const tMg = detectDeltas(
     sMg.snapshot,
     {
-      pr: [pr({ number: 80, mergeable: 'MERGEABLE', updatedAt: '2026-07-01T11:00:00Z' })],
+      pr: [pr({ number: 80, mergeable: 'mergeable', updatedAt: '2026-07-01T11:00:00Z' })],
       issue: [],
     },
     { at: '2026-07-01T11:00:00Z' },
@@ -925,7 +887,7 @@ test('every emitted detail key is declared in the exported contract, across ever
   const tCf = detectDeltas(
     tMg.snapshot,
     {
-      pr: [pr({ number: 80, mergeable: 'CONFLICTING', updatedAt: '2026-07-01T12:00:00Z' })],
+      pr: [pr({ number: 80, mergeable: 'conflicting', updatedAt: '2026-07-01T12:00:00Z' })],
       issue: [],
     },
     { at: '2026-07-01T12:00:00Z' },
@@ -935,12 +897,12 @@ test('every emitted detail key is declared in the exported contract, across ever
   // head-changed (coexists with updated)
   const sH = detectDeltas(
     null,
-    { pr: [pr({ number: 90, headRefOid: 'sha1' })], issue: [] },
+    { pr: [pr({ number: 90, headSha: 'sha1' })], issue: [] },
     { at: AT },
   );
   const tH = detectDeltas(
     sH.snapshot,
-    { pr: [pr({ number: 90, headRefOid: 'sha2', updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
+    { pr: [pr({ number: 90, headSha: 'sha2', updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
     { at: '2026-07-01T11:00:00Z' },
   );
   deltas.push(...tH.deltas);
@@ -961,32 +923,12 @@ test('every emitted detail key is declared in the exported contract, across ever
   // unresolved-threads-added / unresolved-threads-resolved (same-count swap)
   const sT = detectDeltas(
     null,
-    {
-      pr: [
-        pr({
-          number: 100,
-          reviewThreads: 2,
-          unresolvedReviewThreads: 1,
-          reviewThreadNodes: [thread('A', false), thread('B', true)],
-        }),
-      ],
-      issue: [],
-    },
+    { pr: [pr({ number: 100, threads: [thread('A', false), thread('B', true)] })], issue: [] },
     { at: AT },
   );
   const tT = detectDeltas(
     sT.snapshot,
-    {
-      pr: [
-        pr({
-          number: 100,
-          reviewThreads: 2,
-          unresolvedReviewThreads: 1,
-          reviewThreadNodes: [thread('A', true), thread('B', false)],
-        }),
-      ],
-      issue: [],
-    },
+    { pr: [pr({ number: 100, threads: [thread('A', true), thread('B', false)] })], issue: [] },
     { at: AT },
   );
   deltas.push(...tT.deltas);
@@ -994,17 +936,7 @@ test('every emitted detail key is declared in the exported contract, across ever
   // review-threads-changed (total moves, no identity added/resolved)
   const sRT = detectDeltas(
     null,
-    {
-      pr: [
-        pr({
-          number: 101,
-          reviewThreads: 1,
-          unresolvedReviewThreads: 0,
-          reviewThreadNodes: [thread('X', true)],
-        }),
-      ],
-      issue: [],
-    },
+    { pr: [pr({ number: 101, threads: [thread('X', true)] })], issue: [] },
     { at: AT },
   );
   const tRT = detectDeltas(
@@ -1013,10 +945,8 @@ test('every emitted detail key is declared in the exported contract, across ever
       pr: [
         pr({
           number: 101,
-          reviewThreads: 2,
-          unresolvedReviewThreads: 0,
           updatedAt: '2026-07-01T11:00:00Z',
-          reviewThreadNodes: [thread('X', true), thread('Y', true)],
+          threads: [thread('X', true), thread('Y', true)],
         }),
       ],
       issue: [],
@@ -1032,7 +962,7 @@ test('every emitted detail key is declared in the exported contract, across ever
       pr: [
         pr({
           number: 110,
-          baseRefName: 'main',
+          baseRef: 'main',
           labels: [{ name: 'a' }],
           assignees: ['alice'],
           reviewRequests: [],
@@ -1048,7 +978,7 @@ test('every emitted detail key is declared in the exported contract, across ever
       pr: [
         pr({
           number: 110,
-          baseRefName: 'dev',
+          baseRef: 'dev',
           labels: [{ name: 'b' }],
           assignees: ['bob'],
           reviewRequests: ['carol'],

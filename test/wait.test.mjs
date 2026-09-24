@@ -7,15 +7,15 @@ import { WAIT_REPORT_FIELDS } from '../lib/contract.mjs';
 const prWithGreenCi = {
   number: 42,
   title: 'ready',
-  state: 'OPEN',
+  state: 'open',
   updatedAt: '2026-09-21T08:00:00.000Z',
   isDraft: false,
-  statusCheckRollup: [{ name: 'CI', status: 'COMPLETED', conclusion: 'SUCCESS' }],
-  reviewDecision: 'REVIEW_REQUIRED',
-  latestReviews: [],
-  mergeable: 'MERGEABLE',
-  comments: [],
-  headRefOid: 'abc123',
+  checks: [{ name: 'CI', kind: 'check', status: 'completed', conclusion: 'success' }],
+  reviewDecision: 'review_required',
+  reviews: [],
+  mergeable: 'mergeable',
+  comments: 0,
+  headSha: 'abc123',
 };
 
 // Schema v2: a delta's `to` is a snapshot item (`{ fingerprint, context, meta }`),
@@ -135,7 +135,7 @@ test('wait releases each detector tick into one accumulated report and heartbeat
   const changed = {
     ...prWithGreenCi,
     updatedAt: '2026-09-21T08:01:00.000Z',
-    statusCheckRollup: [{ name: 'CI', status: 'COMPLETED', conclusion: 'FAILURE' }],
+    checks: [{ name: 'CI', kind: 'check', status: 'completed', conclusion: 'failure' }],
   };
   const observations = [[prWithGreenCi], [changed]];
   const result = await runCommand(
@@ -298,8 +298,8 @@ test('wait from-log derives --until-summary from delta.to rather than a rendered
               classes: ['updated'],
               summary: { ciRollup: 'failed' },
               to: item({
-                state: 'OPEN',
-                ciChecks: [{ name: 'CI', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+                state: 'open',
+                checks: [{ name: 'CI', kind: 'check', status: 'completed', conclusion: 'success' }],
               }),
             },
           },
@@ -467,7 +467,7 @@ test('wait keeps log records for --until-summary when --until names a different 
               entity: 'pr',
               number: 42,
               classes: ['updated'],
-              to: item({ state: 'OPEN', isDraft: true, ciChecks: [] }),
+              to: item({ state: 'open', isDraft: true, checks: [] }),
             },
           },
         ],

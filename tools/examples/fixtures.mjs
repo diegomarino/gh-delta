@@ -32,13 +32,11 @@ const item = (fingerprint, context = {}) => ({
 });
 
 // The PR #42 delta: a single item that exercises three distinct detail field
-// groups (`ci`, `review`, and the reviewRequests add/remove set diff) so
-// `--detail` is shown off in one place. The reviewer approving satisfies their
-// pending request, so `review-changed` and `review-requests-changed` co-occur —
-// the exact interplay the contract documents. The fingerprints deliberately
-// omit the ciChecks/reviewSummary summaries, so the ci/reviews details render
-// the `opaque: true` fallback (the output of a first tick over a pre-summary
-// snapshot).
+// groups (`checks`, `reviewDecision`/`reviews`, and the reviewRequests
+// add/remove set diff) so `--detail` is shown off in one place. The reviewer
+// approving satisfies their pending request, so `review-changed` and
+// `review-requests-changed` co-occur — the exact interplay the contract
+// documents.
 const pr42Context = { title: 'Add billing webhook', headRefName: 'feature/billing-webhook' };
 const pr42 = withId({
   entity: 'pr',
@@ -48,20 +46,36 @@ const pr42 = withId({
   classes: ['ci-changed', 'review-changed', 'review-requests-changed'],
   from: item(
     {
-      state: 'OPEN',
-      ci: 'a1b2c3',
-      review: 'CHANGES_REQUESTED',
-      reviews: 'r-9f8e',
+      state: 'open',
+      checks: [{ name: 'build', kind: 'check', status: 'completed', conclusion: 'failure' }],
+      reviewDecision: 'changes_requested',
+      reviews: [
+        {
+          id: 'PRR_9f8e',
+          author: 'bob',
+          state: 'changes_requested',
+          submittedAt: '2026-06-30T09:00:00Z',
+          commit: 'a1b2c3',
+        },
+      ],
       reviewRequests: ['alice'],
     },
     pr42Context,
   ),
   to: item(
     {
-      state: 'OPEN',
-      ci: 'd4e5f6',
-      review: 'APPROVED',
-      reviews: 'r-2c1d',
+      state: 'open',
+      checks: [{ name: 'build', kind: 'check', status: 'completed', conclusion: 'success' }],
+      reviewDecision: 'approved',
+      reviews: [
+        {
+          id: 'PRR_2c1d',
+          author: 'bob',
+          state: 'approved',
+          submittedAt: '2026-07-01T12:00:00Z',
+          commit: 'd4e5f6',
+        },
+      ],
       reviewRequests: [],
     },
     pr42Context,
@@ -74,8 +88,8 @@ const issue17 = withId({
   number: 17,
   title: 'Backfill customer imports',
   classes: ['relabeled'],
-  from: item({ state: 'OPEN', labels: ['worker'] }, issue17Context),
-  to: item({ state: 'OPEN', labels: ['backend', 'worker'] }, issue17Context),
+  from: item({ state: 'open', labels: ['worker'] }, issue17Context),
+  to: item({ state: 'open', labels: ['backend', 'worker'] }, issue17Context),
 });
 
 // An unchanged open PR that has crossed the explicit inactivity threshold. Its
@@ -88,8 +102,8 @@ const pr88Stale = withId({
   headRefName: 'docs/release-notes',
   classes: ['stale'],
   staleAt: '2026-07-01',
-  from: item({ state: 'OPEN', head: 'd0c5' }, pr88Context),
-  to: item({ state: 'OPEN', head: 'd0c5' }, pr88Context),
+  from: item({ state: 'open', headSha: 'd0c5' }, pr88Context),
+  to: item({ state: 'open', headSha: 'd0c5' }, pr88Context),
 });
 
 // lib/cli.mjs never puts a `warnings` key on the base report object (see

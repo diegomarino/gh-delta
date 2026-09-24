@@ -7,15 +7,15 @@ import { run } from '../lib/cli.mjs';
 const pr = {
   number: 42,
   title: 'quiet',
-  state: 'OPEN',
+  state: 'open',
   updatedAt: '2026-09-18T00:00:00.000Z',
   isDraft: false,
-  statusCheckRollup: [],
-  reviewDecision: null,
-  latestReviews: [],
-  mergeable: 'UNKNOWN',
-  comments: [],
-  headRefOid: 'abc',
+  checks: [],
+  reviewDecision: 'none',
+  reviews: [],
+  mergeable: 'unknown',
+  comments: 0,
+  headSha: 'abc',
 };
 
 const DAY = 24 * 60 * 60 * 1000;

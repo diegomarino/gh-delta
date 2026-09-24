@@ -35,15 +35,15 @@ const item = (fingerprint, meta = {}) => ({
 const basePr = {
   number: 42,
   title: 'add widget',
-  state: 'OPEN',
+  state: 'open',
   updatedAt: '2026-07-01T10:00:00Z',
   isDraft: false,
-  statusCheckRollup: [],
-  reviewDecision: 'REVIEW_REQUIRED',
-  latestReviews: [],
-  mergeable: 'UNKNOWN',
-  comments: [],
-  headRefOid: 'sha1',
+  checks: [],
+  reviewDecision: 'review_required',
+  reviews: [],
+  mergeable: 'unknown',
+  comments: 0,
+  headSha: 'sha1',
 };
 
 // The prior-snapshot fingerprint the detector already holds for PR 42 (OPEN).
@@ -100,8 +100,8 @@ test('deltaId is a 64-char lowercase hex string', () => {
 });
 
 test('deltaId is canonicalization order-independent (spec 5)', () => {
-  const ordered = { state: 'OPEN', updatedAt: 't', comments: 3, head: 'sha' };
-  const shuffled = { head: 'sha', comments: 3, updatedAt: 't', state: 'OPEN' };
+  const ordered = { state: 'open', updatedAt: 't', comments: 3, head: 'sha' };
+  const shuffled = { head: 'sha', comments: 3, updatedAt: 't', state: 'open' };
   const a = deltaId(
     deltaIdentity('o/r', {
       entity: 'pr',
@@ -128,12 +128,12 @@ test('deltaIdentity keys on `to.fingerprint` when the entity was observed, verba
     entity: 'pr',
     number: 42,
     classes: ['ci-changed'],
-    from: item({ state: 'OPEN' }),
+    from: item({ state: 'open' }),
     to: item(
       {
-        state: 'OPEN',
-        ciChecks: [{ name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' }],
-        reviewSummary: [],
+        state: 'open',
+        checks: [{ name: 'build', kind: 'check', status: 'completed', conclusion: 'success' }],
+        reviews: [],
       },
       { missingTicks: 0 },
     ),
@@ -143,9 +143,9 @@ test('deltaIdentity keys on `to.fingerprint` when the entity was observed, verba
     entity: 'pr',
     number: 42,
     to: {
-      state: 'OPEN',
-      ciChecks: [{ name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' }],
-      reviewSummary: [],
+      state: 'open',
+      checks: [{ name: 'build', kind: 'check', status: 'completed', conclusion: 'success' }],
+      reviews: [],
     },
   });
 });
@@ -156,14 +156,14 @@ test('deltaIdentity keys on `from.fingerprint`+classes+missingTicks when `to` is
     number: 42,
     classes: ['still-missing'],
     missingTicks: 2,
-    from: item({ state: 'OPEN' }, { missingTicks: 1 }),
+    from: item({ state: 'open' }, { missingTicks: 1 }),
     to: null,
   });
   assert.deepEqual(identity, {
     repo: 'o/r',
     entity: 'pr',
     number: 42,
-    from: { state: 'OPEN' },
+    from: { state: 'open' },
     classes: ['still-missing'],
     missingTicks: 2,
   });
@@ -176,7 +176,7 @@ test('different `to` states yield different ids (spec 3)', () => {
       number: 42,
       classes: ['merged'],
       from: item(openFp),
-      to: item({ ...openFp, state: 'MERGED' }),
+      to: item({ ...openFp, state: 'merged' }),
     }),
   );
   const closed = deltaId(
@@ -185,7 +185,7 @@ test('different `to` states yield different ids (spec 3)', () => {
       number: 42,
       classes: ['closed'],
       from: item(openFp),
-      to: item({ ...openFp, state: 'CLOSED' }),
+      to: item({ ...openFp, state: 'closed' }),
     }),
   );
   assert.notEqual(merged, closed);
@@ -212,15 +212,12 @@ test('the three missing stages get distinct ids via classes+missingTicks (spec 4
   assert.equal(new Set([missing, still, gone]).size, 3);
 });
 
-test('deltaId over a fingerprint with an injected threadStates entry differs from the id without it', () => {
-  // Schema v2: there is no drop-list. threadDigest/threadStates are ordinary
-  // fingerprint fields like any other, so they DO enter the delta id now --
-  // the opposite of the v1 guarantee (see docs/contract.md's v1->v2 migration
-  // note for this field).
+test('deltaId over a fingerprint with an injected threads entry differs from the id without it', () => {
+  // Schema v2: there is no drop-list. `threads` is an ordinary fingerprint
+  // field like any other, so it enters the delta id like everything else here.
   const withThreads = {
     ...openFp,
-    threadDigest: 'deadbeefcafe',
-    threadStates: [{ id: 'T_A', isResolved: false }],
+    threads: [{ id: 'T_A', resolved: false }],
   };
   const without = { ...openFp };
   const a = deltaId(
@@ -249,21 +246,21 @@ test('deltaId over a fingerprint with an injected threadStates entry differs fro
 // ---------------------------------------------------------------------------
 
 test('every emitted delta carries a 64-char hex id', () => {
-  const merged = { ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' };
+  const merged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
   const { report } = run(ARGV, deps([[merged]], { existing: seedPr() }));
   assert.ok(report.deltas.length > 0);
   for (const delta of report.deltas) assert.match(delta.id, HEX64);
 });
 
 test('the same change in two separate runs yields identical ids (spec 1)', () => {
-  const merged = { ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' };
+  const merged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
   const r1 = run(ARGV, deps([[merged]], { existing: clone(seedPr()) }));
   const r2 = run(ARGV, deps([[merged]], { existing: clone(seedPr()) }));
   assert.equal(r1.report.deltas[0].id, r2.report.deltas[0].id);
 });
 
 test('the same change under two different monitor ids yields identical ids (spec 2)', () => {
-  const merged = { ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' };
+  const merged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
   const argv = (id) => ['--repo', 'o/r', '--monitor-id', id, '--state-file', '/tmp/x.json'];
   const r1 = run(argv('m1'), deps([[merged]], { existing: clone(seedPr()) }));
   const r2 = run(argv('m2'), deps([[merged]], { existing: clone(seedPr()) }));
@@ -285,7 +282,7 @@ test('id is present and stable for each delta family (spec 4)', () => {
       existing: seedPr(),
       fetch: {
         ...basePr,
-        statusCheckRollup: [{ name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+        checks: [{ name: 'build', kind: 'check', status: 'completed', conclusion: 'success' }],
       },
     },
   };
@@ -307,20 +304,21 @@ test('id is present and stable for each delta family (spec 4)', () => {
   assert.equal(new Set(Object.values(ids)).size, Object.keys(ids).length);
 });
 
-test('id for a plain OPEN->MERGED transition matches the schema-v2 golden value', () => {
+test('id for a plain open->merged transition matches the schema-v2 golden value', () => {
   // Regression pin (hard constraint 1): once set, this id must not drift.
-  // Schema v2 (R1) intentionally changed this from the v1 golden value, since
-  // deltaIdentity now hashes `to.fingerprint` directly with no drop-list.
+  // Schema v2 R2 intentionally changed this again from R1's golden value:
+  // R2 renamed/lowercased fingerprint fields and dropped the ci/reviews/
+  // threadDigest digests, which changes every hash `to.fingerprint` feeds.
   const merged = deltaId(
     deltaIdentity('o/r', {
       entity: 'pr',
       number: 42,
       classes: ['merged'],
       from: item(openFp),
-      to: item({ ...openFp, state: 'MERGED' }),
+      to: item({ ...openFp, state: 'merged' }),
     }),
   );
-  assert.equal(merged, 'd5eb3a5778698ead4ce1354333271a135657a4bae92609b93291e316942bf4a2');
+  assert.equal(merged, '7ac3dab9e26ed7d5b9612ca81dcb0c3bfb5da5d805655f941cc19e73c971641d');
 });
 
 test('missing -> still-missing -> presumed-deleted produce three distinct stable ids (spec 4)', () => {
@@ -343,7 +341,7 @@ test('missing -> still-missing -> presumed-deleted produce three distinct stable
 // compute the id itself rather than emit id: null.
 test('buildOutpostPayload stamps id for a delta taken straight from detectDeltas', () => {
   const old = seedPr();
-  const merged = { ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' };
+  const merged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
   const { deltas } = detectDeltas(old, { pr: [merged], issue: [] }, { at: '2026-07-01T11:00:00Z' });
   const delta = deltas[0];
   assert.equal(delta.id, undefined); // repo-agnostic detector never assigns id

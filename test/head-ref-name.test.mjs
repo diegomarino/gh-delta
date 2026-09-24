@@ -10,17 +10,16 @@ import { buildOutpostPayload } from '../lib/outpost.mjs';
 const pr = (over = {}) => ({
   number: 42,
   title: 'add widget',
-  state: 'OPEN',
+  state: 'open',
   updatedAt: '2026-07-01T10:00:00Z',
   isDraft: false,
-  statusCheckRollup: [{ name: 'build', status: 'COMPLETED', conclusion: 'FAILURE' }],
-  reviewDecision: 'REVIEW_REQUIRED',
-  latestReviews: [],
-  mergeable: 'UNKNOWN',
-  totalCommentsCount: 0,
-  reviewThreads: 0,
-  unresolvedReviewThreads: 0,
-  headRefOid: 'sha1',
+  checks: [{ name: 'build', kind: 'check', status: 'completed', conclusion: 'failure' }],
+  reviewDecision: 'review_required',
+  reviews: [],
+  mergeable: 'unknown',
+  comments: 0,
+  threads: [],
+  headSha: 'sha1',
   headRefName: 'feature/widget',
   ...over,
 });
@@ -28,7 +27,7 @@ const pr = (over = {}) => ({
 const issue = (over = {}) => ({
   number: 7,
   title: 'bug',
-  state: 'OPEN',
+  state: 'open',
   updatedAt: '2026-07-01T10:00:00Z',
   labels: [],
   comments: 0,
@@ -63,7 +62,7 @@ test('a merged PR keeps its head branch name (GitHub retains headRefName after d
   // merge, so a `merged` delta still carries the (now-deleted) branch for routing.
   const base = detectDeltas(null, { pr: [pr({ headRefName: 'feature/x' })], issue: [] });
   const r = detectDeltas(base.snapshot, {
-    pr: [pr({ headRefName: 'feature/x', state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' })],
+    pr: [pr({ headRefName: 'feature/x', state: 'merged', updatedAt: '2026-07-01T11:00:00Z' })],
     issue: [],
   });
   assert.ok(r.deltas[0].classes.includes('merged'));
@@ -101,7 +100,7 @@ test('headRefName is present across families with a current object, absent on mi
       pr({
         headRefName: 'b/u',
         updatedAt: '2026-07-01T11:00:00Z',
-        statusCheckRollup: [{ name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+        checks: [{ name: 'build', kind: 'check', status: 'completed', conclusion: 'success' }],
       }),
     ],
     issue: [],
@@ -127,8 +126,8 @@ test('the outpost payload mirrors the report delta for headRefName', () => {
     title: 'x',
     headRefName: 'feature/z',
     classes: ['merged'],
-    from: { state: 'OPEN' },
-    to: { state: 'MERGED' },
+    from: { state: 'open' },
+    to: { state: 'merged' },
   };
   // Missing-family PR has NO current object; the report delta omits headRefName,
   // so the payload must omit it too (never fabricate a null).
@@ -138,7 +137,7 @@ test('the outpost payload mirrors the report delta for headRefName', () => {
     title: '(missing from current fetch)',
     classes: ['missing'],
     missingTicks: 1,
-    from: { state: 'OPEN' },
+    from: { state: 'open' },
     to: null,
   };
   const issueDelta = {

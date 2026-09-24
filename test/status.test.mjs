@@ -7,7 +7,7 @@ import { run, runCommand } from '../lib/cli.mjs';
 import { detectDeltas } from '../lib/detect.mjs';
 
 // Schema v2 item shape: `{ fingerprint, context, meta }`.
-const item = (fingerprint = { state: 'OPEN' }, meta = {}) => ({
+const item = (fingerprint = { state: 'open' }, meta = {}) => ({
   fingerprint,
   context: {},
   meta: {
@@ -25,7 +25,7 @@ test('status reads local snapshot summaries without GitHub or writes', () => {
     readSnapshot: () => ({
       pr: {
         42: item(
-          { state: 'OPEN', ciChecks: [] },
+          { state: 'open', checks: [] },
           { changedAt: '2026-09-20T00:00:00.000Z', ticksSinceChange: 3 },
         ),
       },
@@ -71,15 +71,15 @@ test('status --refresh performs one detector tick before reading the local statu
         {
           number: 42,
           title: 'x',
-          state: 'OPEN',
+          state: 'open',
           updatedAt: '2026-09-21T00:00:00.000Z',
           isDraft: false,
-          statusCheckRollup: [],
-          reviewDecision: null,
-          latestReviews: [],
-          mergeable: 'UNKNOWN',
-          comments: [],
-          headRefOid: 'a',
+          checks: [],
+          reviewDecision: 'none',
+          reviews: [],
+          mergeable: 'unknown',
+          comments: 0,
+          headSha: 'a',
         },
       ];
     },
@@ -121,7 +121,7 @@ test('status --watch-dir reads the economical PR snapshot without GitHub', () =>
     readSnapshot: (path) => {
       stateFile = path;
       return {
-        pr: { 42: item({ state: 'OPEN', ciChecks: [] }) },
+        pr: { 42: item({ state: 'open', checks: [] }) },
         issue: {},
       };
     },
@@ -151,13 +151,13 @@ test('status includes selected open issues and applies --number to every entity'
     ],
     {
       readSnapshot: () => ({
-        pr: { 42: item({ state: 'OPEN', ciChecks: [] }) },
+        pr: { 42: item({ state: 'open', checks: [] }) },
         issue: {
           7: item(
-            { state: 'OPEN' },
+            { state: 'open' },
             { changedAt: '2026-09-20T00:00:00.000Z', ticksSinceChange: 2 },
           ),
-          8: item({ state: 'OPEN' }),
+          8: item({ state: 'open' }),
         },
       }),
     },
@@ -182,7 +182,7 @@ test('status text output renders each returned item truthfully', async () => {
         pr: {},
         issue: {
           7: item(
-            { state: 'OPEN' },
+            { state: 'open' },
             { changedAt: '2026-09-20T00:00:00.000Z', ticksSinceChange: 2 },
           ),
         },
@@ -203,15 +203,15 @@ test('status --refresh keeps tracking meta bookkeeping for an unchanged item, wi
   const current = {
     number: 42,
     title: 'quiet',
-    state: 'OPEN',
+    state: 'open',
     updatedAt: '2026-09-18T00:00:00.000Z',
     isDraft: false,
-    statusCheckRollup: [],
-    reviewDecision: null,
-    latestReviews: [],
-    mergeable: 'UNKNOWN',
-    comments: [],
-    headRefOid: 'abc',
+    checks: [],
+    reviewDecision: 'none',
+    reviews: [],
+    mergeable: 'unknown',
+    comments: 0,
+    headSha: 'abc',
   };
   const snapshot = detectDeltas(
     null,

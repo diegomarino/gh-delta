@@ -11,20 +11,20 @@ const stateDir = mkdtempSync(join(tmpdir(), 'gh-delta-example-'));
 const base = {
   number: 42,
   title: 'Demo pull request',
-  state: 'OPEN',
+  state: 'open',
   updatedAt: '2026-09-21T08:00:00.000Z',
   isDraft: false,
-  statusCheckRollup: [{ name: 'CI', status: 'COMPLETED', conclusion: 'SUCCESS' }],
-  reviewDecision: 'REVIEW_REQUIRED',
-  latestReviews: [],
-  mergeable: 'MERGEABLE',
-  comments: [],
-  headRefOid: 'demo-sha',
+  checks: [{ name: 'CI', kind: 'check', status: 'completed', conclusion: 'success' }],
+  reviewDecision: 'review_required',
+  reviews: [],
+  mergeable: 'mergeable',
+  comments: 0,
+  headSha: 'demo-sha',
 };
 const changed = {
   ...base,
   updatedAt: '2026-09-21T08:01:00.000Z',
-  statusCheckRollup: [{ name: 'CI', status: 'COMPLETED', conclusion: 'FAILURE' }],
+  checks: [{ name: 'CI', kind: 'check', status: 'completed', conclusion: 'failure' }],
 };
 const detector = (observation) =>
   run(
