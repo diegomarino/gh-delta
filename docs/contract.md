@@ -725,16 +725,8 @@ per-repo failure lives only inside its own `results[].error`.
         "headSha": "9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c",
         "failedChecks": []
       },
-      "from": {
-        "fingerprint": { "...": "..." },
-        "context": { "...": "..." },
-        "meta": { "...": "..." }
-      },
-      "to": {
-        "fingerprint": { "...": "..." },
-        "context": { "...": "..." },
-        "meta": { "...": "..." }
-      }
+      "from": { "conversationComments": 1, "...": "..." },
+      "to": { "conversationComments": 3, "...": "..." }
     }
   ],
   "filteredDeltas": 0,
@@ -844,9 +836,9 @@ Each delta — see `DELTA_FIELDS` in `gh-delta/contract`:
 
 - `classes` (string[]): non-empty set of [classes](#delta-classes).
 - `changed` (object): always present. A bounded, pure diff of the fingerprint
-  fields that moved between `from.fingerprint` and `to.fingerprint` — see
-  `diffFingerprint` in [Programmatic API Surface](#programmatic-api-surface)
-  for the exact per-field-kind shape (scalar `{from,to}`, set `{added,removed}`,
+  fields that moved between `from` and `to` — see `diffFingerprint` in
+  [Programmatic API Surface](#programmatic-api-surface) for the exact
+  per-field-kind shape (scalar `{from,to}`, set `{added,removed}`,
   identity-keyed `{added,removed,changed}` by row id, `checks`'
   `{failed,fixed,changed}` by check name). Every array result caps at 20
   entries (`truncated: true` past that).
@@ -856,13 +848,16 @@ Each delta — see `DELTA_FIELDS` in `gh-delta/contract`:
   `to` state, only `{state}`. For the missing lifecycle (`to === null`), `null`.
   It is a **sibling** of `to`, not nested inside it, so it never affects `id`.
   `--summaries` is a deprecated no-op now that this is unconditional.
-- `from`, `to` (object|null): the compared **items** — each the full
-  three-section snapshot shape `{fingerprint, context, meta}` (see
-  [Snapshot Semantics](#snapshot-semantics)), not just the bare fingerprint.
-  Always present in `--format json`; present in compact/ndjson only under
-  `--full`. `from` is `null` when `classes` includes `new` or `first-seen`;
-  `to` is `null` when `classes` includes `missing`, `still-missing`, or
-  `presumed-deleted`.
+- `from`, `to` (object|null): the compared **bare fingerprint** (see
+  [Fingerprint fields](#fingerprint-fields-from--to)) — never the full
+  `{fingerprint, context, meta}` snapshot item. `context` is never duplicated
+  here: it already lives at the delta's own top level (see the `context`
+  bullet above), and `delta.id` hashes exactly `to` (see `deltaIdentity` in
+  [Programmatic API Surface](#programmatic-api-surface)), so `to` here is
+  precisely what the id is a hash of. Always present in `--format json`;
+  present in compact/ndjson only under `--full`. `from` is `null` when
+  `classes` includes `new` or `first-seen`; `to` is `null` when `classes`
+  includes `missing`, `still-missing`, or `presumed-deleted`.
 - `missingTicks` (number): present on `missing`, `still-missing`, and
   `presumed-deleted` deltas. It is the current consecutive absent tick.
 - `firstObserved` (boolean, optional): present and `true` **only** on `new`,
@@ -1042,16 +1037,22 @@ does not replay it. Outpost payloads mirror it when present.
 
 ### Fingerprint fields (`from` / `to`)
 
-`from`/`to` on a delta are the full three-section snapshot item —
-`{fingerprint, context, meta}` — not a bare fingerprint object (see
-[Snapshot Semantics](#snapshot-semantics)). `fingerprint` is the detector's
-stable-shaped, **fully legible** change-detection subset: every key is a
-directly readable, already-normalized value (lowercase enums, flat arrays) —
-schema v2 has no opaque digests. Prefer `classes` as the semantic diff — the
-fingerprint exists mainly to read concrete current values and for context. The
-field **set is additive**; consumers must tolerate new keys and must not
-assume a closed shape. There is no drop-list: every key on the fingerprint
-object is compared and participates in the delta id.
+`from`/`to` on a delta are the **bare compared fingerprint** — not the full
+`{fingerprint, context, meta}` snapshot item that the _snapshot_ stores each
+item as internally (see [Snapshot Semantics](#snapshot-semantics)). `context`
+is never duplicated under `from`/`to`: it already lives at the delta's own
+top level (see the `context` bullet in [Report Shape](#report-shape)), and
+`meta` is detector bookkeeping (`seenAt`, `ticksSinceChange`, …) that is
+never part of the public delta contract at all. The fingerprint itself is
+**fully legible**: every key is a directly readable, already-normalized value
+(lowercase enums, flat arrays) — schema v2 has no opaque digests. Prefer
+`classes` as the semantic diff — the fingerprint exists mainly to read
+concrete current values and for context. The field **set is additive**;
+consumers must tolerate new keys and must not assume a closed shape. There is
+no drop-list: every key on the fingerprint object is compared and
+participates in the delta id — `delta.id` hashes exactly `to` (or `from` on
+the missing lifecycle), so `to`/`from` here are precisely what the id is a
+hash of.
 
 PR fingerprint (built by `prFingerprint` from the already-normalized PR row —
 see `gh-delta/fingerprint`):
@@ -1541,7 +1542,7 @@ One JSON `POST` per delta when the detector exits `10` and `--outpost-url` is se
 The payload is an envelope around the delta **verbatim from the report** — no
 root-level field duplication of `context`/`classes`/`summary`/etc. `delta.from`
 and `delta.to` follow the same rules as the report (see
-[Report Shape](#report-shape)): the full three-section item or `null`.
+[Report Shape](#report-shape)): the bare compared fingerprint, or `null`.
 
 The delivery sequence makes the at-most-once guarantee explicit: the snapshot is written before any POST, and a delivery failure leaves the exit code and report unchanged.
 
@@ -1595,7 +1596,7 @@ sequenceDiagram
     "changed": {},
     "summary": { "state": "open", "...": "..." },
     "from": null,
-    "to": { "fingerprint": { "...": "..." }, "context": { "...": "..." }, "meta": { "...": "..." } }
+    "to": { "state": "open", "...": "..." }
   }
 }
 ```
