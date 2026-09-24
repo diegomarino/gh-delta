@@ -2588,6 +2588,10 @@ test('two monitors observing the same change produce the same delta.id but a dif
 
 test('outpost payload has exactly the documented top-level key set, and embeds the report delta verbatim (no root-level field duplication)', async () => {
   const { buildOutpostPayload } = await import('../lib/outpost.mjs');
+  // Already CLI-shaped (repo/summary/changed stamped, `to` stripped to the
+  // bare fingerprint) -- the normal case, matching what a real report.deltas
+  // entry looks like. See the un-normalized detectDeltas() case below for the
+  // documented direct-embedding path.
   const delta = {
     id: 'a'.repeat(64),
     repo: 'o/r',
@@ -2596,7 +2600,10 @@ test('outpost payload has exactly the documented top-level key set, and embeds t
     context: { title: 'x', headRefName: 'feature' },
     classes: ['merged'],
     seq: 7,
-    to: item({ state: 'merged', labels: [] }),
+    summary: { state: 'merged' },
+    changed: {},
+    from: null,
+    to: { state: 'merged', labels: [] },
   };
   const payload = buildOutpostPayload({
     report: { repo: 'o/r', monitorId: 'main', detectedAt: '2026-07-01T12:00:00Z' },

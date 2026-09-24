@@ -369,3 +369,30 @@ test('buildOutpostPayload stamps id for a delta taken straight from detectDeltas
   assert.match(payload.delta.id, HEX64);
   assert.equal(payload.delta.id, deltaId(deltaIdentity('o/r', delta)));
 });
+
+// buildOutpostPayload on this same programmatic path used to emit a delta
+// missing repo/summary/changed and still carrying
+// detectDeltas' internal {fingerprint, context, meta} wrapper under
+// from/to -- 3 of the 8 DELTA_CORE_REQUIRED fields absent, and a shape the
+// bundled ntfy receiver could not render. Assert the embedded delta now
+// satisfies the same public contract as a CLI-produced one.
+test('buildOutpostPayload normalizes a raw detectDeltas delta to the public DELTA_CORE_REQUIRED shape', async () => {
+  const { DELTA_CORE_REQUIRED } = await import('../lib/schema.mjs');
+  const old = seedPr();
+  const merged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
+  const { deltas } = detectDeltas(old, { pr: [merged], issue: [] }, { at: '2026-07-01T11:00:00Z' });
+  const delta = deltas[0];
+  const payload = buildOutpostPayload({
+    report: { repo: 'o/r', monitorId: 'm', detectedAt: '2026-07-01T12:00:00Z' },
+    delta,
+  });
+  for (const field of DELTA_CORE_REQUIRED)
+    assert.ok(Object.hasOwn(payload.delta, field), `payload.delta missing required field ${field}`);
+  assert.equal(payload.delta.repo, 'o/r');
+  // `to` must be the bare fingerprint (what delta.id actually hashes), not
+  // detectDeltas' internal {fingerprint, context, meta} snapshot item.
+  assert.equal(Object.hasOwn(payload.delta.to, 'fingerprint'), false);
+  assert.equal(payload.delta.to.state, 'merged');
+  assert.ok(payload.delta.summary);
+  assert.equal(typeof payload.delta.changed, 'object');
+});
