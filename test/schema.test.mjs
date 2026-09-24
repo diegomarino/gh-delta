@@ -192,7 +192,7 @@ test('schemas accept representative json, compact and NDJSON records', () => {
     validates(schemaFor('compact'), {
       schemaVersion: 2,
       repos: ['o/r'],
-      at: 'now',
+      detectedAt: 'now',
       baseline: false,
       counts: { deltas: 1, byClass: { 'ci-changed': 1 }, filteredDeltas: 0 },
       deltas: [delta],
@@ -204,7 +204,7 @@ test('schemas accept representative json, compact and NDJSON records', () => {
     validates(schemaFor('ndjson'), {
       type: 'end',
       schemaVersion: 2,
-      at: 'now',
+      detectedAt: 'now',
       repos: ['o/r'],
       baseline: false,
       counts: { deltas: 1, byClass: { 'ci-changed': 1 }, filteredDeltas: 0 },
@@ -218,7 +218,7 @@ test('schemas reject incomplete, unknown, invalid, and forbidden fixtures', () =
   const base = {
     schemaVersion: 2,
     repos: ['o/r'],
-    at: 'now',
+    detectedAt: 'now',
     baseline: false,
     counts: { deltas: 1, byClass: { 'ci-changed': 1 }, filteredDeltas: 0 },
     deltas: [delta],
@@ -242,7 +242,7 @@ test('schemas reject incomplete, unknown, invalid, and forbidden fixtures', () =
     validates(schemaFor('ndjson'), {
       type: 'end',
       schemaVersion: 2,
-      at: 'now',
+      detectedAt: 'now',
       repos: ['o/r'],
       counts: { deltas: 0, byClass: {}, filteredDeltas: 0 },
       warnings: [],

@@ -64,7 +64,7 @@ test('compactReport emits self-contained agent deltas only', () => {
   assert.deepEqual(value, {
     schemaVersion: 2,
     repos: ['o/r'],
-    at: 'now',
+    detectedAt: 'now',
     baseline: false,
     counts: { deltas: 1, byClass: { 'ci-changed': 1 }, filteredDeltas: 0 },
     deltas: [
@@ -101,7 +101,7 @@ test('ndjsonReport ends with an end record and newline', () => {
   assert.deepEqual(lines[1], {
     type: 'end',
     schemaVersion: 2,
-    at: 'now',
+    detectedAt: 'now',
     repos: ['o/r'],
     baseline: false,
     counts: { deltas: 1, byClass: { 'ci-changed': 1 }, filteredDeltas: 0 },
@@ -165,4 +165,9 @@ test('a bare pre-flight error renders without a repos key', () => {
   assert.equal(Object.hasOwn(report, 'repos'), false);
   assert.deepEqual(report.errors, [{ kind: 'config', message: 'bad flag', hint: 'fix it' }]);
   assert.deepEqual(report.deltas, []);
+  // The bare pre-flight error shape only carries `at` (deliberately
+  // unrenamed -- see lib/schema.mjs's bareError); compactReport's own
+  // `detectedAt` field falls back to it so agent consumers always see a
+  // timestamp under one name.
+  assert.equal(report.detectedAt, 'now');
 });
