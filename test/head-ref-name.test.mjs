@@ -37,7 +37,7 @@ const issue = (over = {}) => ({
 test('a PR delta carries headRefName equal to the PR head branch', () => {
   const base = detectDeltas(null, { pr: [], issue: [] });
   const r = detectDeltas(base.snapshot, { pr: [pr({ headRefName: 'feature/login' })], issue: [] });
-  assert.equal(r.deltas[0].headRefName, 'feature/login');
+  assert.equal(r.deltas[0].context.headRefName, 'feature/login');
 });
 
 test('renaming ONLY the head branch does not, by itself, produce a delta', () => {
@@ -54,7 +54,7 @@ test('an issue delta never carries headRefName', () => {
   const base = detectDeltas(null, { pr: [], issue: [] });
   const r = detectDeltas(base.snapshot, { pr: [], issue: [issue()] });
   assert.equal(r.deltas[0].entity, 'issue');
-  assert.equal('headRefName' in r.deltas[0], false);
+  assert.equal('headRefName' in r.deltas[0].context, false);
 });
 
 test('a merged PR keeps its head branch name (GitHub retains headRefName after deletion)', () => {
@@ -66,7 +66,7 @@ test('a merged PR keeps its head branch name (GitHub retains headRefName after d
     issue: [],
   });
   assert.ok(r.deltas[0].classes.includes('merged'));
-  assert.equal(r.deltas[0].headRefName, 'feature/x');
+  assert.equal(r.deltas[0].context.headRefName, 'feature/x');
 });
 
 test('a PR object missing headRefName normalizes to null without throwing (defensive)', () => {
@@ -74,8 +74,8 @@ test('a PR object missing headRefName normalizes to null without throwing (defen
   // defensive guard, not a "branch deleted" signal.
   const base = detectDeltas(null, { pr: [], issue: [] });
   const r = detectDeltas(base.snapshot, { pr: [pr({ headRefName: null })], issue: [] });
-  assert.equal(r.deltas[0].headRefName, null);
-  assert.equal('headRefName' in r.deltas[0], true);
+  assert.equal(r.deltas[0].context.headRefName, null);
+  assert.equal('headRefName' in r.deltas[0].context, true);
 });
 
 test('headRefName is present across families with a current object, absent on missing', () => {
@@ -83,7 +83,7 @@ test('headRefName is present across families with a current object, absent on mi
   const seed = detectDeltas(null, { pr: [], issue: [] });
   const created = detectDeltas(seed.snapshot, { pr: [pr({ headRefName: 'b/new' })], issue: [] });
   assert.deepEqual(created.deltas[0].classes, ['new']);
-  assert.equal(created.deltas[0].headRefName, 'b/new');
+  assert.equal(created.deltas[0].context.headRefName, 'b/new');
 
   // updated (bare updatedAt bump)
   const base = detectDeltas(null, { pr: [pr({ headRefName: 'b/u' })], issue: [] });
@@ -92,7 +92,7 @@ test('headRefName is present across families with a current object, absent on mi
     issue: [],
   });
   assert.deepEqual(updated.deltas[0].classes, ['updated']);
-  assert.equal(updated.deltas[0].headRefName, 'b/u');
+  assert.equal(updated.deltas[0].context.headRefName, 'b/u');
 
   // ci-changed
   const ciChanged = detectDeltas(base.snapshot, {
@@ -106,25 +106,26 @@ test('headRefName is present across families with a current object, absent on mi
     issue: [],
   });
   assert.ok(ciChanged.deltas[0].classes.includes('ci-changed'));
-  assert.equal(ciChanged.deltas[0].headRefName, 'b/u');
+  assert.equal(ciChanged.deltas[0].context.headRefName, 'b/u');
 
   // reappeared
   const missing = detectDeltas(base.snapshot, { pr: [], issue: [] });
   assert.deepEqual(missing.deltas[0].classes, ['missing']);
-  assert.equal('headRefName' in missing.deltas[0], false); // no current object → absent
+  // headRefName carries over from the last known context even with no current
+  // object; only `title` is nulled on the missing lifecycle.
+  assert.equal(missing.deltas[0].context.headRefName, 'b/u');
   const back = detectDeltas(missing.snapshot, { pr: [pr({ headRefName: 'b/u' })], issue: [] });
   assert.deepEqual(back.deltas[0].classes, ['reappeared']);
-  assert.equal(back.deltas[0].headRefName, 'b/u');
+  assert.equal(back.deltas[0].context.headRefName, 'b/u');
 });
 
 test('the outpost payload mirrors the report delta for headRefName', () => {
-  const report = { repo: 'o/r', monitorId: 'm', at: '2026-07-01T12:00:00Z' };
+  const report = { repo: 'o/r', monitorId: 'm', detectedAt: '2026-07-01T12:00:00Z' };
   // PR with a current object → carries the branch (or null if deleted post-merge).
   const change = {
     entity: 'pr',
     number: 42,
-    title: 'x',
-    headRefName: 'feature/z',
+    context: { title: 'x', headRefName: 'feature/z' },
     classes: ['merged'],
     from: { state: 'open' },
     to: { state: 'merged' },
@@ -134,7 +135,7 @@ test('the outpost payload mirrors the report delta for headRefName', () => {
   const missing = {
     entity: 'pr',
     number: 42,
-    title: '(missing from current fetch)',
+    context: { title: null, headRefName: 'feature/z' },
     classes: ['missing'],
     missingTicks: 1,
     from: { state: 'open' },
@@ -143,7 +144,7 @@ test('the outpost payload mirrors the report delta for headRefName', () => {
   const issueDelta = {
     entity: 'issue',
     number: 7,
-    title: 'bug',
+    context: { title: 'bug' },
     classes: ['relabeled'],
     from: {},
     to: { labels: ['x'] },
@@ -153,11 +154,12 @@ test('the outpost payload mirrors the report delta for headRefName', () => {
   assert.equal('headRefName' in buildOutpostPayload({ report, delta: issueDelta }), false);
 });
 
-test('headRefName is absent on presumed-deleted (no current object)', () => {
+test('headRefName carries over from the last known context on presumed-deleted', () => {
   let s = detectDeltas(null, { pr: [pr()], issue: [] }).snapshot;
   const t1 = detectDeltas(s, { pr: [], issue: [] });
   const t2 = detectDeltas(t1.snapshot, { pr: [], issue: [] });
   const t3 = detectDeltas(t2.snapshot, { pr: [], issue: [] });
   assert.deepEqual(t3.deltas[0].classes, ['presumed-deleted']);
-  assert.equal('headRefName' in t3.deltas[0], false);
+  assert.equal(t3.deltas[0].context.headRefName, 'feature/widget');
+  assert.equal(t3.deltas[0].context.title, null);
 });

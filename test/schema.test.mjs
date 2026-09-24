@@ -47,16 +47,26 @@ const summary = {
   unresolvedReviewThreads: 0,
   headSha: 'a'.repeat(40),
 };
+const context = { id: 'gid', title: 'title', url: 'https://github.com/o/r/pull/1', author: 'a' };
 const delta = {
   id: 'x',
   repo: 'o/r',
   entity: 'pr',
   number: 1,
-  title: 'title',
-  url: 'https://github.com/o/r/pull/1',
+  context,
   classes: ['ci-changed'],
   summary,
   changed: {},
+  from: {},
+  to: {},
+};
+
+const result = {
+  repo: 'o/r',
+  baseline: false,
+  repoSource: 'flag',
+  stateFile: '/tmp/state.json',
+  rateLimit: null,
 };
 
 test('runtime schemas equal published artifacts', () => {
@@ -66,8 +76,61 @@ test('runtime schemas equal published artifacts', () => {
       schemaFor(format),
     );
 });
-test('schemas accept representative legacy, compact and NDJSON records', () => {
-  assert.ok(validates(schemaFor('json'), { schemaVersion: 1, at: 'now', deltas: [] }));
+
+// Structural guardrail: the three formats' delta schemas share one property
+// set for every field except the one deliberate per-format rename
+// (`details` in json, `detail` in compact/ndjson) and json/compact's own
+// `type` discriminator on the ndjson delta variant.
+test('json/compact/ndjson delta schemas share one common property set', () => {
+  const jsonDelta = schemaFor('json').oneOf[0].properties.deltas.items;
+  const compactDelta = schemaFor('compact').properties.deltas.items;
+  const ndjsonDelta = schemaFor('ndjson').oneOf.find((v) => v.properties.type?.const === 'delta');
+
+  const shared = (obj) => {
+    const { details: _details, detail: _detail, type: _type, ...rest } = obj.properties;
+    return rest;
+  };
+  assert.deepEqual(shared(jsonDelta), shared(compactDelta));
+  assert.deepEqual(shared(jsonDelta), shared(ndjsonDelta));
+
+  // json requires from/to; compact/ndjson make them optional (present only
+  // under --full).
+  assert.ok(jsonDelta.required.includes('from'));
+  assert.ok(jsonDelta.required.includes('to'));
+  assert.equal(compactDelta.required.includes('from'), false);
+  assert.equal(ndjsonDelta.required.includes('from'), false);
+});
+
+test('summary schema accepts the full PR shape, the minimal issue shape, and null', () => {
+  const summarySchema = schemaFor('json').oneOf[0].properties.deltas.items.properties.summary;
+  assert.ok(validates(summarySchema, null));
+  assert.ok(validates(summarySchema, summary));
+  assert.ok(validates(summarySchema, { state: 'open' }));
+});
+
+test('reserved firstObserved/seq fields are declared but never required', () => {
+  const jsonDelta = schemaFor('json').oneOf[0].properties.deltas.items;
+  assert.ok(jsonDelta.properties.firstObserved);
+  assert.ok(jsonDelta.properties.seq);
+  assert.equal(jsonDelta.required.includes('firstObserved'), false);
+  assert.equal(jsonDelta.required.includes('seq'), false);
+});
+
+test('schemas accept representative json, compact and NDJSON records', () => {
+  assert.ok(
+    validates(schemaFor('json'), {
+      schemaVersion: 1,
+      detectedAt: 'now',
+      monitorId: 'm',
+      entities: ['pr'],
+      repos: ['o/r'],
+      results: [result],
+      deltas: [delta],
+      filteredDeltas: 0,
+      warnings: [],
+      summary: '1 delta(s)',
+    }),
+  );
   assert.ok(
     validates(schemaFor('json'), {
       schemaVersion: 1,
@@ -79,16 +142,17 @@ test('schemas accept representative legacy, compact and NDJSON records', () => {
   );
   assert.ok(
     validates(schemaFor('json'), { schemaVersion: 1, at: 'now', error: 'bad', kind: 'config' }),
-    'schema v1 accepts legacy errors without the additive hint',
+    'schema accepts a bare error without the additive hint',
   );
   assert.ok(
     validates(schemaFor('compact'), {
       schemaVersion: 1,
-      repo: 'o/r',
+      repos: ['o/r'],
       at: 'now',
       baseline: false,
-      counts: { deltas: 1, byClass: { 'ci-changed': 1 } },
+      counts: { deltas: 1, byClass: { 'ci-changed': 1 }, filteredDeltas: 0 },
       deltas: [delta],
+      warnings: [],
     }),
   );
   assert.ok(validates(schemaFor('ndjson'), { type: 'delta', ...delta }));
@@ -97,9 +161,10 @@ test('schemas accept representative legacy, compact and NDJSON records', () => {
       type: 'end',
       schemaVersion: 1,
       at: 'now',
-      repo: 'o/r',
+      repos: ['o/r'],
       baseline: false,
-      counts: { deltas: 1, byClass: { 'ci-changed': 1 } },
+      counts: { deltas: 1, byClass: { 'ci-changed': 1 }, filteredDeltas: 0 },
+      warnings: [],
       exitCode: 10,
     }),
   );
@@ -108,14 +173,18 @@ test('schemas reject incomplete, unknown, invalid, and forbidden fixtures', () =
   assert.equal(validates(schemaFor('json'), { schemaVersion: 1, at: 'now' }), false);
   const base = {
     schemaVersion: 1,
-    repo: 'o/r',
+    repos: ['o/r'],
     at: 'now',
     baseline: false,
-    counts: { deltas: 1, byClass: { 'ci-changed': 1 } },
+    counts: { deltas: 1, byClass: { 'ci-changed': 1 }, filteredDeltas: 0 },
     deltas: [delta],
+    warnings: [],
   };
   assert.equal(
-    validates(schemaFor('compact'), { ...base, counts: { deltas: 1, byClass: { unknown: 1 } } }),
+    validates(schemaFor('compact'), {
+      ...base,
+      counts: { deltas: 1, byClass: { unknown: 1 }, filteredDeltas: 0 },
+    }),
     false,
   );
   assert.equal(
@@ -126,16 +195,13 @@ test('schemas reject incomplete, unknown, invalid, and forbidden fixtures', () =
     false,
   );
   assert.equal(
-    validates(schemaFor('compact'), { ...base, deltas: [{ ...delta, from: {} }] }),
-    false,
-  );
-  assert.equal(
     validates(schemaFor('ndjson'), {
       type: 'end',
       schemaVersion: 1,
       at: 'now',
-      repo: 'o/r',
-      counts: { deltas: 0, byClass: {} },
+      repos: ['o/r'],
+      counts: { deltas: 0, byClass: {}, filteredDeltas: 0 },
+      warnings: [],
     }),
     false,
   );

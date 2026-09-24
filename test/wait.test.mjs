@@ -85,7 +85,7 @@ test('wait evaluates an already-satisfied summary from the first snapshot and to
   assert.equal(result.code, 10);
   assert.equal(result.report.reason, 'already-satisfied');
   assert.equal(result.report.iterations, 1);
-  assert.equal(result.report.repo, 'o/r');
+  assert.deepEqual(result.report.repos, ['o/r']);
   assert.ok(result.report.monitorId);
   assert.deepEqual(heartbeats, ['/tmp/wait-summary.json.hb', '/tmp/wait-summary.json.hb']);
 });

@@ -4,18 +4,21 @@ import { run } from '../lib/cli.mjs';
 import { compactReport } from '../lib/compact-output.mjs';
 
 test('structured errors always carry a useful recovery hint', () => {
-  const cases = [
-    run(['--repo', 'not-a-repo']),
-    run(['--repo', 'o/r'], {
-      fetchPRs: () => {
-        throw new Error('network down');
-      },
-    }),
-  ];
-  for (const result of cases) {
-    assert.equal(typeof result.report.hint, 'string');
-    assert.ok(result.report.hint.length > 12);
-  }
+  // `not-a-repo` is a pre-flight config error (bare shape, hint at the top);
+  // the fetch failure is discovered after the repo is known, so its hint
+  // lives inside its own results[] entry.
+  const bare = run(['--repo', 'not-a-repo']);
+  assert.equal(typeof bare.report.hint, 'string');
+  assert.ok(bare.report.hint.length > 12);
+
+  const enveloped = run(['--repo', 'o/r'], {
+    fetchPRs: () => {
+      throw new Error('network down');
+    },
+  });
+  const hint = enveloped.report.results[0].error.hint;
+  assert.equal(typeof hint, 'string');
+  assert.ok(hint.length > 12);
 });
 
 test('agent error envelopes retain the recovery hint', () => {
