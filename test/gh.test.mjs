@@ -6,6 +6,7 @@ import {
   fetchPRsByNumber,
   fetchIssues,
   fetchEnrichment,
+  fetchThreadReplies,
   fetchRateLimit,
   DEFAULT_GH_TIMEOUT_MS,
 } from '../lib/gh.mjs';
@@ -318,12 +319,35 @@ test('baseline (null horizon) fetches only open PRs and normalizes rows', () => 
   assert.deepEqual(rows[0].checks, [
     { name: 'build', kind: 'check', status: 'completed', conclusion: 'success', detailsUrl: null },
   ]);
-  assert.equal(rows[0].comments, 2);
+  assert.equal(rows[0].conversationComments, 0);
+  assert.equal(rows[0].reviewComments, 2);
+  assert.equal(rows[0].comments, undefined);
   assert.deepEqual(rows[0].threads, [
     { id: 'T_A', resolved: false, comments: 0 },
     { id: 'T_B', resolved: true, comments: 0 },
   ]);
   assert.deepEqual(rateLimit, DEFAULT_PAGE_RATE_LIMIT);
+});
+
+test('normalizePr splits conversation and review comment counts', () => {
+  const node = prNode({
+    totalCommentsCount: 7,
+    comments: { totalCount: 3, nodes: [] },
+  });
+  const { rows } = fetchPRs('o/r', { exec: () => page([node]) });
+  assert.equal(rows[0].conversationComments, 3);
+  assert.equal(rows[0].reviewComments, 4);
+  assert.equal(rows[0].comments, undefined);
+});
+
+test('normalizePr clamps a negative reviewComments to zero instead of emitting one', () => {
+  const node = prNode({
+    totalCommentsCount: 2, // fewer than the conversation count: read-replica skew
+    comments: { totalCount: 5, nodes: [] },
+  });
+  const { rows } = fetchPRs('o/r', { exec: () => page([node]) });
+  assert.equal(rows[0].conversationComments, 5);
+  assert.equal(rows[0].reviewComments, 0);
 });
 
 test('queries and normalizes bounded comment identities plus failed check URLs', () => {
@@ -525,7 +549,8 @@ test('fetchIssues normalizes labels and exact comment totals', () => {
   };
   const { rows } = fetchIssues('o/r', { exec, horizonCutoff: null });
   assert.deepEqual(rows[0].labels, [{ name: 'worker' }]);
-  assert.equal(rows[0].comments, 130);
+  assert.equal(rows[0].conversationComments, 130);
+  assert.equal(rows[0].comments, undefined);
 });
 
 test('normalizeIssue filters null elements from labels nodes', () => {
@@ -820,5 +845,98 @@ test('body enrichment fails closed on a node type that is neither Issue nor Pull
           }),
       }),
     /unexpected shape \(node type\)/,
+  );
+});
+
+test('fetchThreadReplies requests one aliased node(id:) per thread with its own last:N and returns replies', () => {
+  const calls = [];
+  const exec = (cmd, args) => {
+    calls.push(args);
+    return JSON.stringify({
+      data: {
+        rateLimit: { cost: 1, remaining: 100, resetAt: '2026-07-01T12:00:00Z' },
+        t0: {
+          __typename: 'PullRequestReviewThread',
+          id: 'T1',
+          comments: {
+            nodes: [
+              {
+                id: 'C10',
+                author: { login: 'bob' },
+                createdAt: '2026-07-01T11:00:00Z',
+                body: 'reply',
+              },
+            ],
+          },
+        },
+        t1: {
+          __typename: 'PullRequestReviewThread',
+          id: 'T2',
+          comments: {
+            nodes: [
+              {
+                id: 'C20',
+                author: { login: 'carol' },
+                createdAt: '2026-07-01T11:01:00Z',
+                body: 'r1',
+              },
+              { id: 'C21', author: null, createdAt: '2026-07-01T11:02:00Z', body: 'r2' },
+            ],
+          },
+        },
+      },
+    });
+  };
+  const { rows, rateLimit } = fetchThreadReplies(
+    [
+      { id: 'T1', increment: 1 },
+      { id: 'T2', increment: 2 },
+    ],
+    { exec },
+  );
+  const query = calls[0].find((a) => a.startsWith('query='));
+  assert.match(query, /t0: node\(id: \$id0\)/);
+  assert.match(query, /comments\(last: 1\)/);
+  assert.match(query, /t1: node\(id: \$id1\)/);
+  assert.match(query, /comments\(last: 2\)/);
+  assert.deepEqual(rows, [
+    {
+      id: 'T1',
+      replies: [{ id: 'C10', author: 'bob', createdAt: '2026-07-01T11:00:00Z', body: 'reply' }],
+    },
+    {
+      id: 'T2',
+      replies: [
+        { id: 'C20', author: 'carol', createdAt: '2026-07-01T11:01:00Z', body: 'r1' },
+        { id: 'C21', author: null, createdAt: '2026-07-01T11:02:00Z', body: 'r2' },
+      ],
+    },
+  ]);
+  assert.deepEqual(rateLimit, { cost: 1, remaining: 100, resetAt: '2026-07-01T12:00:00Z' });
+});
+
+test('fetchThreadReplies with an empty entries array makes no call', () => {
+  const { rows, rateLimit } = fetchThreadReplies([], {
+    exec: () => {
+      throw new Error('must not call');
+    },
+  });
+  assert.deepEqual(rows, []);
+  assert.equal(rateLimit, null);
+});
+
+test('fetchThreadReplies rejects a non-positive increment', () => {
+  assert.throws(() => fetchThreadReplies([{ id: 'T1', increment: 0 }], { exec: () => '' }));
+});
+
+test("fetchThreadReplies rejects an increment above GitHub's connection-argument cap", () => {
+  assert.throws(
+    () =>
+      fetchThreadReplies([{ id: 'T1', increment: 101 }], {
+        exec: () => {
+          throw new Error('must not call');
+        },
+      }),
+    /last/i,
   );
 });

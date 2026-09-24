@@ -42,7 +42,8 @@ const basePr = {
   reviewDecision: 'review_required',
   reviews: [],
   mergeable: 'unknown',
-  comments: 0,
+  conversationComments: 0,
+  reviewComments: 0,
   headSha: 'sha1',
 };
 
@@ -322,9 +323,9 @@ test('id is present and stable for each delta family (spec 4)', () => {
 
 test('id for a plain open->merged transition matches the schema-v2 golden value', () => {
   // Regression pin (hard constraint 1): once set, this id must not drift.
-  // Schema v2 R2 intentionally changed this again from R1's golden value:
-  // R2 renamed/lowercased fingerprint fields and dropped the ci/reviews/
-  // threadDigest digests, which changes every hash `to.fingerprint` feeds.
+  // Schema v2 F1 intentionally changed this again from R2's golden value:
+  // F1 split the aggregate `comments` field into `conversationComments` and
+  // `reviewComments`, which changes every hash `to.fingerprint` feeds.
   const merged = deltaId(
     deltaIdentity('o/r', {
       entity: 'pr',
@@ -334,7 +335,7 @@ test('id for a plain open->merged transition matches the schema-v2 golden value'
       to: item({ ...openFp, state: 'merged' }),
     }),
   );
-  assert.equal(merged, '7ac3dab9e26ed7d5b9612ca81dcb0c3bfb5da5d805655f941cc19e73c971641d');
+  assert.equal(merged, '5ef58d4dbcd64d6ecc88f8890053ea7e712718f5fe55c9366c7f9c13b7252d50');
 });
 
 test('missing -> still-missing -> presumed-deleted produce three distinct stable ids (spec 4)', () => {

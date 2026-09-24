@@ -1,7 +1,7 @@
 // Pure detector tests: each case protects one semantic delta class.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { detectDeltas } from '../lib/detect.mjs';
+import { detectDeltas, threadReplyIncrements } from '../lib/detect.mjs';
 import { enrichDelta } from '../lib/cli.mjs';
 import {
   DELTA_CLASSES,
@@ -23,7 +23,8 @@ const pr = (over = {}) => ({
   reviewDecision: 'review_required',
   reviews: [],
   mergeable: 'unknown',
-  comments: 0,
+  conversationComments: 0,
+  reviewComments: 0,
   threads: [],
   headSha: 'sha1',
   ...over,
@@ -132,7 +133,7 @@ test('baseline-state covers both PR and issue open items within entities', () =>
     state: 'open',
     updatedAt: '2026-07-01T10:00:00Z',
     labels: [],
-    comments: 0,
+    conversationComments: 0,
   };
   const r = detectDeltas(null, { pr: [pr()], issue: [issue] }, { emitBaselineState: true, at: AT });
   const entities = r.deltas.map((d) => d.entity).sort();
@@ -338,7 +339,7 @@ test('an issue assignee change emits assignees-changed', () => {
     updatedAt: '2026-07-01T10:00:00Z',
     labels: [],
     assignees: ['alice'],
-    comments: 0,
+    conversationComments: 0,
   };
   const base = detectDeltas(null, { pr: [], issue: [issue] }, { at: AT });
   const r = detectDeltas(
@@ -360,13 +361,103 @@ test('a review request emits review-requests-changed', () => {
 });
 
 test('a comment total decrease emits comments-removed', () => {
-  const base = detectDeltas(null, { pr: [pr({ comments: 3 })], issue: [] }, { at: AT });
+  const base = detectDeltas(null, { pr: [pr({ conversationComments: 3 })], issue: [] }, { at: AT });
   const r = detectDeltas(
     base.snapshot,
-    { pr: [pr({ comments: 2, updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
+    { pr: [pr({ conversationComments: 2, updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
     { at: '2026-07-01T11:00:00Z' },
   );
   assert.deepEqual(r.deltas[0].classes, ['comments-removed']);
+});
+
+test('a reply in an existing thread is review-comments-added, not new-comments', () => {
+  const base = detectDeltas(
+    null,
+    { pr: [pr({ reviewComments: 0, conversationComments: 0 })], issue: [] },
+    { at: AT },
+  );
+  const r = detectDeltas(
+    base.snapshot,
+    {
+      pr: [pr({ reviewComments: 1, conversationComments: 0, updatedAt: '2026-07-01T11:00:00Z' })],
+      issue: [],
+    },
+    { at: '2026-07-01T11:00:00Z' },
+  );
+  assert.deepEqual(r.deltas[0].classes, ['review-comments-added']);
+});
+
+test('a conversation comment is new-comments only, no review-comments-*', () => {
+  const base = detectDeltas(
+    null,
+    { pr: [pr({ reviewComments: 0, conversationComments: 0 })], issue: [] },
+    { at: AT },
+  );
+  const r = detectDeltas(
+    base.snapshot,
+    {
+      pr: [pr({ reviewComments: 0, conversationComments: 1, updatedAt: '2026-07-01T11:00:00Z' })],
+      issue: [],
+    },
+    { at: '2026-07-01T11:00:00Z' },
+  );
+  assert.deepEqual(r.deltas[0].classes, ['new-comments']);
+});
+
+test('a thread-comment count drop is review-comments-removed', () => {
+  const base = detectDeltas(
+    null,
+    { pr: [pr({ reviewComments: 2, conversationComments: 0 })], issue: [] },
+    { at: AT },
+  );
+  const r = detectDeltas(
+    base.snapshot,
+    {
+      pr: [pr({ reviewComments: 1, conversationComments: 0, updatedAt: '2026-07-01T11:00:00Z' })],
+      issue: [],
+    },
+    { at: '2026-07-01T11:00:00Z' },
+  );
+  assert.deepEqual(r.deltas[0].classes, ['review-comments-removed']);
+});
+
+test('issue comment-count changes still classify off conversationComments alone', () => {
+  const issue = {
+    number: 1,
+    title: 't',
+    state: 'open',
+    updatedAt: '2026-07-01T10:00:00Z',
+    conversationComments: 0,
+  };
+  const base = detectDeltas(null, { pr: [], issue: [issue] }, { at: AT });
+  const r = detectDeltas(
+    base.snapshot,
+    { pr: [], issue: [{ ...issue, updatedAt: '2026-07-01T11:00:00Z', conversationComments: 1 }] },
+    { at: '2026-07-01T11:00:00Z' },
+  );
+  assert.deepEqual(r.deltas[0].classes, ['new-comments']);
+});
+
+test('threadReplyIncrements only reports threads present in both sides, with a positive delta', () => {
+  const oldThreads = [
+    { id: 'T1', resolved: false, comments: 1 },
+    { id: 'T2', resolved: false, comments: 3 },
+  ];
+  const newThreads = [
+    { id: 'T1', resolved: false, comments: 3 }, // +2
+    { id: 'T2', resolved: false, comments: 3 }, // unchanged
+    { id: 'T3', resolved: false, comments: 5 }, // brand new thread, no prior baseline: excluded
+  ];
+  assert.deepEqual(threadReplyIncrements(oldThreads, newThreads), [{ id: 'T1', increment: 2 }]);
+});
+
+test('threadReplyIncrements returns [] for no threads or no increments', () => {
+  assert.deepEqual(threadReplyIncrements([], []), []);
+  assert.deepEqual(threadReplyIncrements(undefined, undefined), []);
+  assert.deepEqual(
+    threadReplyIncrements([{ id: 'T1', comments: 2 }], [{ id: 'T1', comments: 2 }]),
+    [],
+  );
 });
 
 test('draft → ready emits draft-ready', () => {
@@ -548,7 +639,7 @@ test('issue label removal emits relabeled', () => {
     state: 'open',
     updatedAt: '2026-07-01T10:00:00Z',
     labels: [{ name: 'worker' }, { name: 'backend' }],
-    comments: 0,
+    conversationComments: 0,
   };
   const base = detectDeltas(null, { pr: [], issue: [issue] }, { at: AT });
   const r = detectDeltas(
@@ -579,7 +670,7 @@ test('omitted entity collection preserves that side of the snapshot', () => {
     state: 'open',
     updatedAt: '2026-07-01T10:00:00Z',
     labels: [],
-    comments: 0,
+    conversationComments: 0,
   };
   const base = detectDeltas(null, { pr: [pr()], issue: [issue] }, { at: AT });
   const r = detectDeltas(
@@ -628,7 +719,7 @@ test('a missing object that reappears changed emits reappeared plus specific cla
   const missing = detectDeltas(base.snapshot, { pr: [], issue: [] }, { at: AT });
   const back = detectDeltas(
     missing.snapshot,
-    { pr: [pr({ updatedAt: '2026-07-01T11:00:00Z', comments: 1 })], issue: [] },
+    { pr: [pr({ updatedAt: '2026-07-01T11:00:00Z', conversationComments: 1 })], issue: [] },
     { at: '2026-07-01T11:00:00Z' },
   );
 
@@ -666,12 +757,12 @@ test('an exact comment total increase emits new-comments', () => {
     state: 'open',
     updatedAt: '2026-07-01T10:00:00Z',
     labels: [],
-    comments: 130,
+    conversationComments: 130,
   };
   const base = detectDeltas(null, { pr: [], issue: [issue] }, { at: AT });
   const r = detectDeltas(
     base.snapshot,
-    { pr: [], issue: [{ ...issue, updatedAt: '2026-07-01T11:00:00Z', comments: 131 }] },
+    { pr: [], issue: [{ ...issue, updatedAt: '2026-07-01T11:00:00Z', conversationComments: 131 }] },
     { at: '2026-07-01T11:00:00Z' },
   );
   assert.deepEqual(r.deltas[0].classes, ['new-comments']);
@@ -777,19 +868,48 @@ test('every emitted detail key is declared in the exported contract, across ever
   deltas.push(...back.deltas);
 
   // new-comments / comments-removed
-  const sC = detectDeltas(null, { pr: [pr({ number: 30, comments: 3 })], issue: [] }, { at: AT });
+  const sC = detectDeltas(
+    null,
+    { pr: [pr({ number: 30, conversationComments: 3 })], issue: [] },
+    { at: AT },
+  );
   const tMore = detectDeltas(
     sC.snapshot,
-    { pr: [pr({ number: 30, comments: 5, updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
+    {
+      pr: [pr({ number: 30, conversationComments: 5, updatedAt: '2026-07-01T11:00:00Z' })],
+      issue: [],
+    },
     { at: '2026-07-01T11:00:00Z' },
   );
   deltas.push(...tMore.deltas);
   const tLess = detectDeltas(
     tMore.snapshot,
-    { pr: [pr({ number: 30, comments: 2, updatedAt: '2026-07-01T12:00:00Z' })], issue: [] },
+    {
+      pr: [pr({ number: 30, conversationComments: 2, updatedAt: '2026-07-01T12:00:00Z' })],
+      issue: [],
+    },
     { at: '2026-07-01T12:00:00Z' },
   );
   deltas.push(...tLess.deltas);
+
+  // review-comments-added / review-comments-removed
+  const sRc = detectDeltas(
+    null,
+    { pr: [pr({ number: 31, reviewComments: 3 })], issue: [] },
+    { at: AT },
+  );
+  const tRcMore = detectDeltas(
+    sRc.snapshot,
+    { pr: [pr({ number: 31, reviewComments: 5, updatedAt: '2026-07-01T11:00:00Z' })], issue: [] },
+    { at: '2026-07-01T11:00:00Z' },
+  );
+  deltas.push(...tRcMore.deltas);
+  const tRcLess = detectDeltas(
+    tRcMore.snapshot,
+    { pr: [pr({ number: 31, reviewComments: 2, updatedAt: '2026-07-01T12:00:00Z' })], issue: [] },
+    { at: '2026-07-01T12:00:00Z' },
+  );
+  deltas.push(...tRcLess.deltas);
 
   // updated (bare)
   const sU = detectDeltas(null, { pr: [pr({ number: 40 })], issue: [] }, { at: AT });

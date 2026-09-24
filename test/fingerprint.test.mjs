@@ -312,7 +312,8 @@ test('prFingerprint extracts the tracked fields', () => {
     reviewDecision: 'approved',
     reviews: [{ id: 'PRR_1', author: 'alice', state: 'approved', submittedAt: '', commit: '' }],
     mergeable: 'mergeable',
-    comments: 3,
+    conversationComments: 1,
+    reviewComments: 2,
     headSha: 'abc123',
   };
   const fp = prFingerprint(pr);
@@ -320,7 +321,9 @@ test('prFingerprint extracts the tracked fields', () => {
   assert.equal(fp.isDraft, false);
   assert.equal(fp.reviewDecision, 'approved');
   assert.equal(fp.mergeable, 'mergeable');
-  assert.equal(fp.comments, 3);
+  assert.equal(fp.conversationComments, 1);
+  assert.equal(fp.reviewComments, 2);
+  assert.equal(fp.comments, undefined);
   assert.equal(fp.headSha, 'abc123');
   assert.deepEqual(fp.checks, [
     { name: 'build', kind: 'check', status: 'completed', conclusion: 'success' },
@@ -375,9 +378,9 @@ test('prFingerprint reads exact totals beyond the old 100 cap', () => {
   const fp = prFingerprint({
     state: 'open',
     updatedAt: '2026-07-01T10:00:00Z',
-    comments: 347,
+    conversationComments: 347,
   });
-  assert.equal(fp.comments, 347);
+  assert.equal(fp.conversationComments, 347);
 });
 
 test('issueFingerprint sorts labels and counts comments', () => {
@@ -386,11 +389,24 @@ test('issueFingerprint sorts labels and counts comments', () => {
     state: 'open',
     updatedAt: '2026-07-01T10:00:00Z',
     labels: [{ name: 'worker' }, { name: 'backend' }],
-    comments: 2,
+    conversationComments: 2,
   };
   const fp = issueFingerprint(issue);
   assert.deepEqual(fp.labels, ['backend', 'worker']);
-  assert.equal(fp.comments, 2);
+  assert.equal(fp.conversationComments, 2);
+});
+
+test('prFingerprint carries conversationComments and reviewComments independently, no aggregate comments', () => {
+  const fp = prFingerprint({ state: 'open', conversationComments: 3, reviewComments: 4 });
+  assert.equal(fp.conversationComments, 3);
+  assert.equal(fp.reviewComments, 4);
+  assert.equal(fp.comments, undefined);
+});
+
+test('issueFingerprint carries conversationComments only, no aggregate comments', () => {
+  const fp = issueFingerprint({ state: 'open', conversationComments: 2 });
+  assert.equal(fp.conversationComments, 2);
+  assert.equal(fp.comments, undefined);
 });
 
 // deltaId / no-drop-list guarantee ------------------------------------------

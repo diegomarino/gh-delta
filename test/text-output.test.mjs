@@ -156,6 +156,23 @@ test('every contract delta class has a specific suggested action', () => {
   }
 });
 
+test('review-comments-added and review-comments-removed have operator suggestions', () => {
+  const render = (classes) =>
+    formatTextOutput({
+      code: 10,
+      report: {
+        baseline: false,
+        repo: 'owner/repo',
+        monitorId: 'watch',
+        at: '2026-07-01T10:05:00.000Z',
+        deltas: [{ entity: 'pr', number: 1, title: 't', classes }],
+      },
+      now: () => '2026-07-01T10:05:00.000Z',
+    });
+  assert.match(render(['review-comments-added']), /review thread repl/i);
+  assert.match(render(['review-comments-removed']), /review thread repl/i);
+});
+
 test('error text output reports snapshot-preserving failure', () => {
   const output = formatTextOutput({
     code: 1,

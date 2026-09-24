@@ -25,7 +25,8 @@ const basePr = {
   reviewDecision: 'review_required',
   reviews: [],
   mergeable: 'unknown',
-  comments: 0,
+  conversationComments: 0,
+  reviewComments: 0,
   headSha: 'sha1',
 };
 
@@ -108,7 +109,6 @@ test('--outpost-secret reads the injected environment and does not leak its valu
           review: 'review_required',
           reviews: 'x',
           mergeable: 'unknown',
-          comments: 0,
           head: 'sha1',
         }),
       },
@@ -682,7 +682,7 @@ function opaqueCiFixture() {
 }
 
 test('--summary-line attaches only the human summary line to each delta', () => {
-  const d = deps([[{ ...basePr, comments: 2, updatedAt: '2026-07-01T11:00:00Z' }]], {
+  const d = deps([[{ ...basePr, conversationComments: 2, updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: {
       pr: { 42: item(opaqueCiFixture()) },
       issue: {},
@@ -698,7 +698,7 @@ test('--summary-line attaches only the human summary line to each delta', () => 
 });
 
 test('--detail keeps line compatibility and adds structured class details', () => {
-  const d = deps([[{ ...basePr, comments: 2, updatedAt: '2026-07-01T11:00:00Z' }]], {
+  const d = deps([[{ ...basePr, conversationComments: 2, updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: {
       pr: { 42: item(opaqueCiFixture()) },
       issue: {},
@@ -721,7 +721,7 @@ test('--detail keeps line compatibility and adds structured class details', () =
     },
     {
       class: 'new-comments',
-      field: 'comments',
+      field: 'conversationComments',
       from: 0,
       to: 2,
       delta: 2,
@@ -733,7 +733,7 @@ test('--detail keeps line compatibility and adds structured class details', () =
 test('--detail explains the audit-driven classes: set diffs, base transition, comment removal', () => {
   const before = {
     ...basePr,
-    comments: 3,
+    conversationComments: 3,
     baseRef: 'main',
     assignees: ['alice'],
     reviewRequests: [],
@@ -741,7 +741,7 @@ test('--detail explains the audit-driven classes: set diffs, base transition, co
   const after = {
     ...basePr,
     updatedAt: '2026-07-01T11:00:00Z',
-    comments: 2,
+    conversationComments: 2,
     baseRef: 'release/2.0',
     assignees: ['bob'],
     reviewRequests: ['carol', 'org/platform-team'],
@@ -767,7 +767,7 @@ test('--detail explains the audit-driven classes: set diffs, base transition, co
     details.find((row) => row.class === 'comments-removed'),
     {
       class: 'comments-removed',
-      field: 'comments',
+      field: 'conversationComments',
       from: 3,
       to: 2,
       delta: -1,
@@ -1247,14 +1247,12 @@ const FILTER_ARGS = ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/
 test('--ignore-authors suppresses fully covered bot comments but advances the snapshot', () => {
   const before = {
     ...basePr,
-    comments: 1,
     conversationComments: 1,
     recentComments: [{ id: 'C0', author: 'human' }],
   };
   const after = {
     ...before,
     updatedAt: '2026-07-01T11:00:00Z',
-    comments: 2,
     conversationComments: 2,
     recentComments: [
       { id: 'C0', author: 'human' },
@@ -1266,20 +1264,18 @@ test('--ignore-authors suppresses fully covered bot comments but advances the sn
   assert.equal(result.code, 0);
   assert.deepEqual(result.report.deltas, []);
   assert.equal(result.report.filteredDeltas, 1);
-  assert.equal(d.stored.pr['42'].fingerprint.comments, 2);
+  assert.equal(d.stored.pr['42'].fingerprint.conversationComments, 2);
 });
 
 test('--ignore-authors fails open and --detail is opaque for an unusable new comment row', () => {
   const before = {
     ...basePr,
-    comments: 1,
     conversationComments: 1,
     recentComments: [{ id: 'C0', author: 'human' }],
   };
   const after = {
     ...before,
     updatedAt: '2026-07-01T11:00:00Z',
-    comments: 2,
     conversationComments: 2,
     recentComments: [
       { id: 'C0', author: 'human' },
@@ -1301,38 +1297,219 @@ test('--ignore-authors fails open and --detail is opaque for an unusable new com
   assert.equal(comments.added, undefined);
 });
 
-test('--ignore-authors and --detail fail open when PR aggregate comments include non-conversation rows', () => {
+// F1 note: this used to guard against the aggregate `comments` counter
+// (conversation + review combined) tripping `new-comments` on a
+// non-conversation (review thread reply) rise, which made the old
+// commentAuthorsIgnored's cross-check opaque. The comment-model split makes
+// that scenario structurally impossible now: a review-only rise moves only
+// reviewComments and fires review-comments-added, never new-comments.
+test('a review-only comment rise (conversationComments unchanged) never fires new-comments', () => {
   const before = {
     ...basePr,
-    comments: 4,
     conversationComments: 1,
+    reviewComments: 0,
     recentComments: [{ id: 'C0', author: 'human' }],
   };
   const after = {
     ...before,
     updatedAt: '2026-07-01T11:00:00Z',
-    comments: 5,
     conversationComments: 1,
-    recentComments: [{ id: 'C0', author: 'github-actions[bot]' }],
+    reviewComments: 1,
+    recentComments: [{ id: 'C0', author: 'human' }],
   };
   const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
-  const filtered = run(
-    [...FILTER_ARGS, '--ignore-authors', 'github-actions[bot]'],
-    deps([[after]], { existing }),
+  const result = run(FILTER_ARGS, deps([[after]], { existing }));
+  assert.equal(result.code, 10);
+  assert.ok(result.report.deltas[0].classes.includes('review-comments-added'));
+  assert.ok(!result.report.deltas[0].classes.includes('new-comments'));
+});
+
+// --ignore-authors + --enrich thread-replies: the double opt-in pre-publish exception ---
+
+function threadReplyFixture(threadCommentsBefore, threadCommentsAfter) {
+  const before = {
+    ...basePr,
+    reviewComments: threadCommentsBefore,
+    threads: [{ id: 'T1', resolved: false, comments: threadCommentsBefore }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    reviewComments: threadCommentsAfter,
+    threads: [{ id: 'T1', resolved: false, comments: threadCommentsAfter }],
+  };
+  return { before, after };
+}
+
+test('--ignore-authors suppresses review-comments-added when --enrich thread-replies supplies the reply authors', () => {
+  const { before, after } = threadReplyFixture(1, 3);
+  const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
+  const d = deps([[after]], { existing });
+  const calls = [];
+  const logged = [];
+  d.appendDeltaLog = (_file, record) => logged.push(record);
+  d.fetchThreadReplies = (entries) => {
+    calls.push(entries);
+    return {
+      rows: [
+        {
+          id: 'T1',
+          replies: [
+            { id: 'C1', author: 'bot', createdAt: 'now', body: 'x' },
+            { id: 'C2', author: 'bot', createdAt: 'now', body: 'y' },
+          ],
+        },
+      ],
+      rateLimit: RATE_LIMIT,
+    };
+  };
+  const result = run(
+    [...FILTER_ARGS, '--ignore-authors', 'bot', '--enrich', 'thread-replies', '--log'],
+    d,
   );
-  assert.equal(filtered.code, 10);
-  assert.ok(filtered.report.deltas[0].classes.includes('new-comments'));
-  const detailed = run([...FILTER_ARGS, '--detail'], deps([[after]], { existing })).report
-    .deltas[0];
-  const comments = detailed.details.find((row) => row.class === 'new-comments');
-  assert.equal(comments.opaque, true);
-  assert.equal(comments.added, undefined);
+  assert.equal(result.code, 0);
+  assert.deepEqual(result.report.deltas, []);
+  assert.deepEqual(calls, [[{ id: 'T1', increment: 2 }]]);
+  // The suppressed delta never reaches the durable log: filtering happens
+  // before appendDeltaLog is called.
+  assert.deepEqual(
+    logged.flatMap((r) => r.deltas),
+    [],
+  );
+});
+
+test('--ignore-authors warns explicitly (fail open) for review-comments-added without --enrich thread-replies', () => {
+  const { before, after } = threadReplyFixture(1, 3);
+  const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
+  const result = run([...FILTER_ARGS, '--ignore-authors', 'bot'], deps([[after]], { existing }));
+  assert.equal(result.code, 10);
+  assert.ok(result.report.deltas[0].classes.includes('review-comments-added'));
+  assert.ok(
+    result.warnings.some((w) => /thread-repl/i.test(w.label) || /thread-repl/i.test(w.reason)),
+  );
+});
+
+test('--ignore-authors + --enrich thread-replies warns (does not silently suppress) when review-comments-added comes entirely from a brand-new thread', () => {
+  const before = { ...basePr, reviewComments: 0, threads: [] };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    reviewComments: 3,
+    threads: [{ id: 'T-new', resolved: false, comments: 3 }],
+  };
+  const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
+  const d = deps([[after]], { existing });
+  d.fetchThreadReplies = () => {
+    throw new Error('must not be called: no threads have a prior baseline to diff');
+  };
+  const result = run([...FILTER_ARGS, '--ignore-authors', 'bot', '--enrich', 'thread-replies'], d);
+  assert.equal(result.code, 10);
+  assert.ok(result.report.deltas[0].classes.includes('review-comments-added'));
+  assert.ok(result.warnings.some((w) => /attributable/i.test(w.reason)));
+});
+
+test('--ignore-authors + --enrich thread-replies warns and does not suppress review-comments-added when a brand-new thread only partly explains the rise', () => {
+  // T1 is established and rose by 1 (attributable, all-bot). T2 is brand new
+  // this tick with 2 comments from a human -- threadReplyIncrements excludes
+  // it (no prior baseline), so the fetched rows only ever cover T1's +1 out
+  // of the observed +3 reviewComments rise. Suppressing on T1 alone would
+  // silently drop a delta a human review reply is hiding inside.
+  const before = {
+    ...basePr,
+    reviewComments: 1,
+    threads: [{ id: 'T1', resolved: false, comments: 1 }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    reviewComments: 4,
+    threads: [
+      { id: 'T1', resolved: false, comments: 2 },
+      { id: 'T2', resolved: false, comments: 2 },
+    ],
+  };
+  const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
+  const d = deps([[after]], { existing });
+  d.fetchThreadReplies = (entries) => {
+    assert.deepEqual(entries, [{ id: 'T1', increment: 1 }]);
+    return {
+      rows: [{ id: 'T1', replies: [{ id: 'C1', author: 'bot', createdAt: 'now', body: 'x' }] }],
+      rateLimit: RATE_LIMIT,
+    };
+  };
+  const result = run([...FILTER_ARGS, '--ignore-authors', 'bot', '--enrich', 'thread-replies'], d);
+  assert.equal(result.code, 10);
+  assert.ok(result.report.deltas[0].classes.includes('review-comments-added'));
+  assert.ok(result.warnings.some((w) => /attributable/i.test(w.reason)));
+});
+
+test('--ignore-authors fails open on review-changed when reviewDecision itself moved, even if a changed review row is ignored', () => {
+  const before = {
+    ...basePr,
+    reviewDecision: 'review_required',
+    reviews: [],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    reviewDecision: 'approved',
+    reviews: [{ id: 'R1', author: 'bot', state: 'approved', submittedAt: 'now', commit: 'a' }],
+  };
+  const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
+  const result = run([...FILTER_ARGS, '--ignore-authors', 'bot'], deps([[after]], { existing }));
+  assert.equal(result.code, 10);
+  assert.ok(result.report.deltas[0].classes.includes('review-changed'));
+});
+
+test('--ignore-authors fails open on review-changed with no attributable review row', () => {
+  // reviewDecision moves while the reviews[] array is byte-identical (e.g. a
+  // branch-protection recompute) -- changedOrNewReviews finds nothing to
+  // attribute, so review-changed must survive regardless of --ignore-authors.
+  const reviews = [
+    { id: 'R1', author: 'alice', state: 'approved', submittedAt: 'now', commit: 'a' },
+  ];
+  const before = { ...basePr, reviewDecision: 'review_required', reviews };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    reviewDecision: 'approved',
+    reviews,
+  };
+  const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
+  const result = run([...FILTER_ARGS, '--ignore-authors', 'alice'], deps([[after]], { existing }));
+  assert.equal(result.code, 10);
+  assert.ok(result.report.deltas[0].classes.includes('review-changed'));
+});
+
+test('quota-safety regression: a failing publish with the double opt-in spends only the pre-publish thread-replies call', () => {
+  const { before, after } = threadReplyFixture(1, 3);
+  const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
+  const d = deps([[after]], { existing });
+  let preFetchCalls = 0;
+  let postFetchCalls = 0;
+  d.fetchThreadReplies = () => {
+    preFetchCalls++;
+    return {
+      rows: [{ id: 'T1', replies: [{ id: 'C1', author: 'human', createdAt: 'now', body: 'x' }] }],
+      rateLimit: RATE_LIMIT,
+    };
+  };
+  d.fetchEnrichment = () => {
+    postFetchCalls++;
+    return { rows: [], rateLimit: RATE_LIMIT };
+  };
+  d.writeSnapshotAtomic = () => {
+    throw new Error('disk full');
+  };
+  const result = run([...FILTER_ARGS, '--ignore-authors', 'bot', '--enrich', 'thread-replies'], d);
+  assert.equal(result.code, 1);
+  assert.equal(preFetchCalls, 1);
+  assert.equal(postFetchCalls, 0);
 });
 
 test('class filters run before ignored authors and filteredDeltas excludes surviving class removal', () => {
   const before = {
     ...basePr,
-    comments: 1,
     conversationComments: 1,
     recentComments: [{ id: 'C0', author: 'human' }],
   };
@@ -1340,7 +1517,6 @@ test('class filters run before ignored authors and filteredDeltas excludes survi
     ...before,
     updatedAt: '2026-07-01T11:00:00Z',
     headSha: 'sha2',
-    comments: 2,
     conversationComments: 2,
     recentComments: [
       { id: 'C0', author: 'human' },
@@ -1389,7 +1565,6 @@ test('--detail explains check, review, and comment identity metadata carried in 
         commit: 'a',
       },
     ],
-    comments: 1,
     conversationComments: 1,
     recentComments: [{ id: 'C0', author: 'human' }],
   };
@@ -1414,7 +1589,6 @@ test('--detail explains check, review, and comment identity metadata carried in 
         commit: 'b',
       },
     ],
-    comments: 2,
     conversationComments: 2,
     recentComments: [
       { id: 'C0', author: 'human' },
@@ -1439,7 +1613,7 @@ test('--detail explains check, review, and comment identity metadata carried in 
     detailed.details.find((row) => row.class === 'new-comments'),
     {
       class: 'new-comments',
-      field: 'comments',
+      field: 'conversationComments',
       from: 1,
       to: 2,
       delta: 1,
@@ -2157,7 +2331,7 @@ test('--help-json usage includes detail flags and documents entities grammar', (
   assert.ok(help.output.deltaFields.includes('line'));
   assert.ok(help.output.deltaFields.includes('details'));
   assert.ok(help.output.deltaDetailFields.includes('opaque'));
-  assert.deepEqual(help.output.deltaDetailFieldsByClass['new-comments'], ['comments']);
+  assert.deepEqual(help.output.deltaDetailFieldsByClass['new-comments'], ['conversationComments']);
   assert.deepEqual(help.output.deltaDetailFieldsByClass.relabeled, ['labels']);
   const entities = help.options.find((option) => option.name === '--entities');
   assert.equal(
@@ -2377,7 +2551,6 @@ test('--enrich decorates surviving deltas only after snapshot publication and le
   const before = {
     ...basePr,
     reviews: [],
-    comments: 1,
     conversationComments: 1,
     recentComments: [{ id: 'C1', author: 'old' }],
     threads: [{ id: 'T1', resolved: true }],
@@ -2395,7 +2568,6 @@ test('--enrich decorates surviving deltas only after snapshot publication and le
         commit: 'b',
       },
     ],
-    comments: 2,
     conversationComments: 2,
     recentComments: [
       { id: 'C1', author: 'old' },
@@ -2496,7 +2668,7 @@ test('--enrich invalid selection is rejected before repository derivation', () =
 
 test('every delta carries author and url from snapshot context without any flags (F2)', () => {
   const before = { ...basePr, author: 'octocat', url: 'https://github.com/o/r/pull/42' };
-  const after = { ...before, updatedAt: '2026-07-01T11:00:00Z', comments: 1 };
+  const after = { ...before, updatedAt: '2026-07-01T11:00:00Z', conversationComments: 1 };
   const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const result = run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
   assert.equal(result.code, 10);
@@ -2532,7 +2704,7 @@ test('--enrich body fetches the body of a new PR in one nodes() call and attache
 
 test('--enrich body makes zero calls for a new-comments-only delta', () => {
   const before = { ...basePr, id: 'PR_node42' };
-  const after = { ...before, updatedAt: '2026-07-01T11:00:00Z', comments: 1 };
+  const after = { ...before, updatedAt: '2026-07-01T11:00:00Z', conversationComments: 1 };
   const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   let calls = 0;
   d.fetchEnrichment = () => {
@@ -2569,7 +2741,7 @@ test('duplicate --outpost-url uses last-wins like every other flag', async () =>
     },
     issue: {},
   };
-  const d = deps([[{ ...basePr, comments: 2, updatedAt: '2026-07-01T11:00:00Z' }]], {
+  const d = deps([[{ ...basePr, conversationComments: 2, updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing,
   });
   const posts = [];
@@ -2904,14 +3076,12 @@ test('a tick spanning two entity families accumulates cost and keeps the last re
 test('enrichment cost accumulates into the same tick-level rateLimit as the observation fetches', () => {
   const before = {
     ...basePr,
-    comments: 1,
     conversationComments: 1,
     recentComments: [{ id: 'C1', author: 'old' }],
   };
   const after = {
     ...before,
     updatedAt: '2026-07-01T11:00:00Z',
-    comments: 2,
     conversationComments: 2,
     recentComments: [
       { id: 'C1', author: 'old' },

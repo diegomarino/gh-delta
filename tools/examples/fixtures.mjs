@@ -146,6 +146,44 @@ const pr88Stale = withId({
   to: item({ state: 'open', headSha: 'd0c5' }, pr88Context),
 });
 
+// PR #51: one tick moved both conversationComments and reviewComments --
+// exactly the distinction F1 exists to make legible (a conversation reply
+// vs. a reply inside an existing review thread, split into their own
+// classes instead of one ambiguous aggregate).
+const pr51Context = {
+  title: 'Paginate the audit log endpoint',
+  headRefName: 'feature/audit-log-pagination',
+  author: 'dave',
+  url: 'https://github.com/owner/repo/pull/51',
+};
+const pr51Comments = withId({
+  entity: 'pr',
+  number: 51,
+  title: 'Paginate the audit log endpoint',
+  headRefName: 'feature/audit-log-pagination',
+  author: 'dave',
+  url: 'https://github.com/owner/repo/pull/51',
+  classes: ['new-comments', 'review-comments-added'],
+  from: item(
+    {
+      state: 'open',
+      conversationComments: 1,
+      reviewComments: 2,
+      threads: [{ id: 'PRRT_1', resolved: false, comments: 2 }],
+    },
+    pr51Context,
+  ),
+  to: item(
+    {
+      state: 'open',
+      conversationComments: 2,
+      reviewComments: 3,
+      threads: [{ id: 'PRRT_1', resolved: false, comments: 3 }],
+    },
+    pr51Context,
+  ),
+});
+
 // lib/cli.mjs never puts a `warnings` key on the base report object (see
 // run()); it is only spliced in by runCommand() when outpost delivery
 // returned at least one non-empty warning. A live run therefore *omits*
@@ -167,7 +205,7 @@ export const baselineReport = Object.freeze({
   summary: 'baseline established: 1 PRs, 1 issues',
 });
 
-/** Run 2 — second tick, two deltas, text output. */
+/** Run 2 — second tick, three deltas, text output. */
 export const deltaReport = Object.freeze({
   schemaVersion: 1,
   baseline: false,
@@ -177,8 +215,8 @@ export const deltaReport = Object.freeze({
   entities: ['pr', 'issue'],
   stateFile: STATE_FILE,
   at: AT,
-  deltas: [pr42, issue17],
-  summary: '2 delta(s)',
+  deltas: [pr42, issue17, pr51Comments],
+  summary: '3 delta(s)',
 });
 
 // `entities` matches the flag-free `gh-delta --repo owner/repo --format json

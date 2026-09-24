@@ -121,3 +121,13 @@ test('parseEnrichmentSelection canonicalizes allowed kinds and rejects empty or 
   assert.equal(parseEnrichmentSelection('review,').ok, false);
   assert.equal(parseEnrichmentSelection('reviews').ok, false);
 });
+
+test('parseEnrichmentSelection accepts thread-replies', () => {
+  const r = parseEnrichmentSelection('thread-replies');
+  assert.deepEqual(r, { ok: true, kinds: ['thread-replies'] });
+});
+
+test('parseEnrichmentSelection canonicalizes thread-replies alongside the existing kinds', () => {
+  const r = parseEnrichmentSelection('thread-replies,review');
+  assert.deepEqual(r, { ok: true, kinds: ['review', 'thread-replies'] });
+});
