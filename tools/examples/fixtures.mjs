@@ -54,7 +54,17 @@ const pr42 = withId({
   from: item(
     {
       state: 'open',
-      checks: [{ name: 'build', kind: 'check', status: 'completed', conclusion: 'failure' }],
+      checks: [
+        {
+          name: 'build',
+          kind: 'check',
+          status: 'completed',
+          conclusion: 'failure',
+          detailsUrl: 'https://github.com/owner/repo/actions/runs/1234567890/job/2345678901',
+          runId: '1234567890',
+          jobId: '2345678901',
+        },
+      ],
       reviewDecision: 'changes_requested',
       reviews: [
         {
@@ -72,7 +82,17 @@ const pr42 = withId({
   to: item(
     {
       state: 'open',
-      checks: [{ name: 'build', kind: 'check', status: 'completed', conclusion: 'success' }],
+      checks: [
+        {
+          name: 'build',
+          kind: 'check',
+          status: 'completed',
+          conclusion: 'success',
+          detailsUrl: 'https://github.com/owner/repo/actions/runs/1234567891/job/2345678902',
+          runId: '1234567891',
+          jobId: '2345678902',
+        },
+      ],
       reviewDecision: 'approved',
       reviews: [
         {

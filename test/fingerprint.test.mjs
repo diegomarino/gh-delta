@@ -9,6 +9,7 @@ import {
   buildReviews,
   buildThreads,
   deltaId,
+  parseActionsRunJob,
   prFingerprint,
   issueFingerprint,
 } from '../lib/fingerprint.mjs';
@@ -30,6 +31,82 @@ test('buildChecks changes when a conclusion changes', () => {
 test('buildChecks defaults an absent list to []', () => {
   assert.deepEqual(buildChecks(), []);
   assert.deepEqual(buildChecks([]), []);
+});
+
+// --- F4: runId/jobId URL parsing ---------------------------------------------
+
+test('parseActionsRunJob extracts runId/jobId from a github.com Actions run/job URL', () => {
+  assert.deepEqual(
+    parseActionsRunJob('https://github.com/owner/repo/actions/runs/123456789/job/987654321'),
+    { runId: '123456789', jobId: '987654321' },
+  );
+});
+
+test('parseActionsRunJob returns null for a GitHub Enterprise host URL', () => {
+  // Documented limitation: gh-delta's repo identity is `owner/name` only, with
+  // no host threaded through fetch/fingerprint routing, so the pattern cannot
+  // be anchored to an arbitrary GHE host. See the doc comment on
+  // parseActionsRunJob in lib/fingerprint.mjs.
+  assert.equal(parseActionsRunJob('https://ghe.example.com/owner/repo/actions/runs/1/job/2'), null);
+});
+
+test('parseActionsRunJob returns null for a non-Actions check app URL', () => {
+  assert.equal(parseActionsRunJob('https://circleci.com/gh/owner/repo/123'), null);
+  assert.equal(parseActionsRunJob('https://github.com/owner/repo/pull/1'), null);
+});
+
+test('parseActionsRunJob returns null for a malformed or absent URL', () => {
+  assert.equal(parseActionsRunJob('not a url'), null);
+  assert.equal(parseActionsRunJob(''), null);
+  assert.equal(parseActionsRunJob(null), null);
+  assert.equal(parseActionsRunJob(undefined), null);
+});
+
+test('buildChecks adds runId/jobId only for a parseable github.com Actions URL', () => {
+  const rows = [
+    {
+      name: 'build',
+      kind: 'check',
+      status: 'completed',
+      conclusion: 'failure',
+      detailsUrl: 'https://github.com/owner/repo/actions/runs/111/job/222',
+    },
+    {
+      name: 'lint',
+      kind: 'check',
+      status: 'completed',
+      conclusion: 'success',
+      detailsUrl: 'https://circleci.com/gh/owner/repo/9',
+    },
+    { name: 'ci/legacy', kind: 'status', status: 'success', conclusion: 'success' },
+  ];
+  const built = buildChecks(rows);
+  const build = built.find((row) => row.name === 'build');
+  const lint = built.find((row) => row.name === 'lint');
+  const legacy = built.find((row) => row.name === 'ci/legacy');
+  assert.deepEqual({ runId: build.runId, jobId: build.jobId }, { runId: '111', jobId: '222' });
+  assert.equal('runId' in lint, false, 'a non-Actions check app URL omits runId, not null');
+  assert.equal('jobId' in lint, false);
+  assert.equal('runId' in legacy, false, 'a row with no detailsUrl omits runId, not null');
+  assert.equal('jobId' in legacy, false);
+});
+
+test('buildChecks: a row with no parseable URL and a row with no URL fingerprint identically', () => {
+  // Load-bearing for delta.id stability: omit-vs-null must be applied
+  // consistently, or two rows that are semantically "no runId" would hash
+  // differently and churn ids for a non-change.
+  const noUrl = { name: 'ci', kind: 'check', status: 'completed', conclusion: 'success' };
+  const unparseableUrl = {
+    name: 'ci',
+    kind: 'check',
+    status: 'completed',
+    conclusion: 'success',
+    detailsUrl: 'https://example.com/not-actions',
+  };
+  assert.deepEqual(
+    buildChecks([noUrl]).map(({ detailsUrl: _detailsUrl, ...rest }) => rest),
+    buildChecks([unparseableUrl]).map(({ detailsUrl: _detailsUrl, ...rest }) => rest),
+  );
 });
 
 test('buildReviews sorts deterministically regardless of input order', () => {

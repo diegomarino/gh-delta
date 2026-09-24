@@ -137,6 +137,7 @@ test('prSummary reads already-normalized fields and names headSha unambiguously'
     isDraft: false,
     unresolvedReviewThreads: 0,
     headSha: 'a'.repeat(40),
+    failedChecks: [],
   });
   assert.equal(typeof summary.isDraft, 'boolean');
 });
@@ -160,6 +161,52 @@ test('prSummary counts unresolvedReviewThreads from threads[], not a stored coun
     ],
   });
   assert.equal(summary.unresolvedReviewThreads, 2);
+});
+
+test('prSummary.failedChecks lists only the failing checks, carrying runId/jobId when parsed', () => {
+  const summary = prSummary({
+    state: 'open',
+    checks: [
+      { name: 'build', kind: 'check', status: 'completed', conclusion: 'success' },
+      {
+        name: 'lint',
+        kind: 'check',
+        status: 'completed',
+        conclusion: 'failure',
+        detailsUrl: 'https://github.com/o/r/actions/runs/1/job/2',
+        runId: '1',
+        jobId: '2',
+      },
+      {
+        name: 'ci/legacy',
+        kind: 'status',
+        status: 'error',
+        conclusion: 'error',
+        detailsUrl: 'https://ci.example.com/build/9',
+      },
+    ],
+  });
+  assert.deepEqual(summary.failedChecks, [
+    {
+      name: 'lint',
+      runId: '1',
+      jobId: '2',
+      detailsUrl: 'https://github.com/o/r/actions/runs/1/job/2',
+    },
+    { name: 'ci/legacy', detailsUrl: 'https://ci.example.com/build/9' },
+  ]);
+  assert.equal('runId' in summary.failedChecks[1], false, 'unparsed row omits runId, not null');
+});
+
+test('prSummary.failedChecks is empty for a PR with no checks or no failing checks', () => {
+  assert.deepEqual(prSummary({ state: 'open' }).failedChecks, []);
+  assert.deepEqual(
+    prSummary({
+      state: 'open',
+      checks: [{ name: 'build', kind: 'check', status: 'completed', conclusion: 'success' }],
+    }).failedChecks,
+    [],
+  );
 });
 
 test('deltaSummary applies only to PR deltas with an observed to-state', () => {

@@ -50,6 +50,7 @@ test('status reads local snapshot summaries without GitHub or writes', () => {
       isDraft: false,
       unresolvedReviewThreads: 0,
       headSha: '',
+      failedChecks: [],
     },
     lastChangedAt: '2026-09-20T00:00:00.000Z',
     ticksSinceChange: 3,

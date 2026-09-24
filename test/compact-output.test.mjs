@@ -55,6 +55,7 @@ test('compactReport emits self-contained agent deltas only', () => {
           isDraft: false,
           unresolvedReviewThreads: 0,
           headSha: '',
+          failedChecks: [],
         },
         changed: { checks: { fixed: ['lint'] } },
         detail: [{ class: 'ci-changed' }],
