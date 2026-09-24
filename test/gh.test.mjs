@@ -46,7 +46,10 @@ function prNode(over = {}) {
     latestReviews: { nodes: [], pageInfo: { hasNextPage: false } },
     reviewThreads: {
       totalCount: 2,
-      nodes: [{ isResolved: false }, { isResolved: true }],
+      nodes: [
+        { id: 'T_A', isResolved: false },
+        { id: 'T_B', isResolved: true },
+      ],
       pageInfo: { hasNextPage: false },
     },
     ...over,
@@ -239,8 +242,8 @@ test('targeted PR fetch uses one aliased query and the canonical normalizer', ()
     rows.map((row) => row.number),
     [3, 9],
   );
-  assert.deepEqual(rows[0].statusCheckRollup, [
-    { __typename: 'CheckRun', name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' },
+  assert.deepEqual(rows[0].checks, [
+    { name: 'build', kind: 'check', status: 'completed', conclusion: 'success', detailsUrl: null },
   ]);
 });
 
@@ -278,12 +281,14 @@ test('baseline (null horizon) fetches only open PRs and normalizes rows', () => 
   assert.equal(calls.length, 1);
   assert.ok(calls[0].args.some((a) => a === 'states[]=OPEN'));
   assert.equal(calls[0].opts.timeoutMs, DEFAULT_GH_TIMEOUT_MS);
-  assert.deepEqual(rows[0].statusCheckRollup, [
-    { __typename: 'CheckRun', name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' },
+  assert.deepEqual(rows[0].checks, [
+    { name: 'build', kind: 'check', status: 'completed', conclusion: 'success', detailsUrl: null },
   ]);
-  assert.equal(rows[0].totalCommentsCount, 2);
-  assert.equal(rows[0].reviewThreads, 2);
-  assert.equal(rows[0].unresolvedReviewThreads, 1);
+  assert.equal(rows[0].comments, 2);
+  assert.deepEqual(rows[0].threads, [
+    { id: 'T_A', resolved: false, comments: 0 },
+    { id: 'T_B', resolved: true, comments: 0 },
+  ]);
 });
 
 test('queries and normalizes bounded comment identities plus failed check URLs', () => {
@@ -323,8 +328,8 @@ test('queries and normalizes bounded comment identities plus failed check URLs',
   });
   assert.match(prQuery, /CheckRun \{ name status conclusion detailsUrl \}/);
   assert.match(prQuery, /comments\(last: 5\) \{ totalCount nodes \{ id author \{ login \} \} \}/);
-  assert.deepEqual(prs[0].commentNodes, [{ id: 'C1', author: 'Bot[bot]' }]);
-  assert.equal(prs[0].statusCheckRollup[0].detailsUrl, 'https://ci/build');
+  assert.deepEqual(prs[0].recentComments, [{ id: 'C1', author: 'Bot[bot]' }]);
+  assert.equal(prs[0].checks[0].detailsUrl, 'https://ci/build');
 
   let issueQuery = '';
   const issues = fetchIssues('o/r', {
@@ -348,7 +353,7 @@ test('queries and normalizes bounded comment identities plus failed check URLs',
     issueQuery,
     /comments\(last: 5\) \{ totalCount nodes \{ id author \{ login \} \} \}/,
   );
-  assert.deepEqual(issues[0].commentNodes, [{ id: 'I1', author: 'bot' }]);
+  assert.deepEqual(issues[0].recentComments, [{ id: 'I1', author: 'bot' }]);
 });
 
 test('incremental fetch adds updated items and cuts at the horizon', () => {
@@ -390,7 +395,7 @@ test('fails closed when open items exceed the page cap', () => {
   assert.throws(() => fetchPRs('o/r', { exec, horizonCutoff: null }), /exceeded 10 pages/);
 });
 
-test('the PR query requests review-thread id and normalizePr carries reviewThreadNodes', () => {
+test('the PR query requests review-thread id/comments and normalizePr carries threads[]', () => {
   let sentQuery = '';
   const exec = (_cmd, args) => {
     sentQuery = args.find((a) => a.startsWith('query=')) ?? '';
@@ -399,8 +404,8 @@ test('the PR query requests review-thread id and normalizePr carries reviewThrea
         reviewThreads: {
           totalCount: 2,
           nodes: [
-            { id: 'T_A', isResolved: false },
-            { id: 'T_B', isResolved: true },
+            { id: 'T_A', isResolved: false, comments: { totalCount: 3 } },
+            { id: 'T_B', isResolved: true, comments: { totalCount: 0 } },
           ],
           pageInfo: { hasNextPage: false },
         },
@@ -408,14 +413,17 @@ test('the PR query requests review-thread id and normalizePr carries reviewThrea
     ]);
   };
   const rows = fetchPRs('o/r', { exec, horizonCutoff: null });
-  assert.match(sentQuery, /reviewThreads\(first: \d+\) \{ totalCount nodes \{ id isResolved \}/);
-  assert.deepEqual(rows[0].reviewThreadNodes, [
-    { id: 'T_A', isResolved: false },
-    { id: 'T_B', isResolved: true },
+  assert.match(
+    sentQuery,
+    /reviewThreads\(first: \d+\) \{ totalCount nodes \{ id isResolved comments \{ totalCount \} \}/,
+  );
+  assert.deepEqual(rows[0].threads, [
+    { id: 'T_A', resolved: false, comments: 3 },
+    { id: 'T_B', resolved: true, comments: 0 },
   ]);
 });
 
-test('normalizePr drops review threads with no id and defaults reviewThreadNodes to [] when absent', () => {
+test('normalizePr drops review threads with no id and defaults threads to [] when absent', () => {
   const exec = () =>
     page([
       prNode({
@@ -427,7 +435,7 @@ test('normalizePr drops review threads with no id and defaults reviewThreadNodes
       }),
     ]);
   const rows = fetchPRs('o/r', { exec, horizonCutoff: null });
-  assert.deepEqual(rows[0].reviewThreadNodes, []);
+  assert.deepEqual(rows[0].threads, []);
 });
 
 test('fails closed on nested pagination and GraphQL errors', () => {
@@ -548,12 +556,12 @@ test('normalizePr filters null elements from statusCheckRollup contexts nodes', 
     },
   });
   const rows = fetchPRs('o/r', { exec: () => page([nodeWithNullContext]), horizonCutoff: null });
-  assert.deepEqual(rows[0].statusCheckRollup, [
-    { __typename: 'CheckRun', name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' },
+  assert.deepEqual(rows[0].checks, [
+    { name: 'build', kind: 'check', status: 'completed', conclusion: 'success', detailsUrl: null },
   ]);
 });
 
-test('the PR query requests mergeStateStatus and normalizePr defaults it to UNKNOWN if absent', () => {
+test('the PR query requests mergeStateStatus and normalizePr defaults it to unknown if absent', () => {
   let sentQuery = '';
   const exec = (_cmd, args) => {
     sentQuery = args.find((a) => a.startsWith('query=')) ?? '';
@@ -564,7 +572,7 @@ test('the PR query requests mergeStateStatus and normalizePr defaults it to UNKN
     sentQuery.includes('mergeStateStatus'),
     'PR GraphQL selection must request mergeStateStatus',
   );
-  assert.equal(rows[0].mergeStateStatus, 'UNKNOWN');
+  assert.equal(rows[0].mergeStateStatus, 'unknown');
 });
 
 test('the PR query requests base ref, labels, assignees, and review requests and normalizePr carries them', () => {
@@ -591,7 +599,7 @@ test('the PR query requests base ref, labels, assignees, and review requests and
   for (const field of ['baseRefName', 'labels', 'assignees', 'reviewRequests']) {
     assert.ok(sentQuery.includes(field), `PR GraphQL selection must request ${field}`);
   }
-  assert.equal(rows[0].baseRefName, 'main');
+  assert.equal(rows[0].baseRef, 'main');
   assert.deepEqual(rows[0].labels, [{ name: 'bug' }]);
   assert.deepEqual(rows[0].assignees, ['alice']);
   assert.deepEqual(rows[0].reviewRequests, ['bob', 'org/platform-team']);
@@ -599,7 +607,7 @@ test('the PR query requests base ref, labels, assignees, and review requests and
 
 test('normalizePr defaults the new fields when a node predates them', () => {
   const rows = fetchPRs('o/r', { exec: () => page([prNode()]), horizonCutoff: null });
-  assert.equal(rows[0].baseRefName, '');
+  assert.equal(rows[0].baseRef, '');
   assert.deepEqual(rows[0].labels, []);
   assert.deepEqual(rows[0].assignees, []);
   assert.deepEqual(rows[0].reviewRequests, []);
@@ -641,5 +649,5 @@ test('normalizePr passes through a present mergeStateStatus verbatim', () => {
     exec: () => page([prNode({ mergeStateStatus: 'BEHIND' })]),
     horizonCutoff: null,
   });
-  assert.equal(rows[0].mergeStateStatus, 'BEHIND');
+  assert.equal(rows[0].mergeStateStatus, 'behind');
 });
