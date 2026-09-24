@@ -279,6 +279,11 @@ developer polling loops or webhook-driven automation.
 ## Operating Rules
 
 - Do not edit snapshot files by hand. The tool owns them.
+- On exit `2` for an unreadable, corrupt, or pre-schema-v2 snapshot/log, run
+  `gh-delta reset --repo <owner/name> --monitor-id <id>
+(--state-file <path>|--state-dir <dir>) --yes` — the documented recovery —
+  then let the next tick re-seed the baseline. See
+  [Troubleshooting](docs/troubleshooting.md) for the full recovery flow.
 - Keep scheduler logs for tick output. A delta is acknowledged by snapshot
   advancement before any downstream action completes.
 - If using `--outpost-url`, make the endpoint idempotent and deduplicate by
