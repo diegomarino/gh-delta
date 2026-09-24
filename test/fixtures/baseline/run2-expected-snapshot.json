@@ -1,61 +1,99 @@
 {
   "pr": {
     "1": {
-      "state": "OPEN",
-      "updatedAt": "2026-01-01T00:30:00Z",
-      "isDraft": false,
-      "ci": "53d176557e2f",
-      "ciChecks": [
-        {
-          "name": "build",
-          "status": "COMPLETED",
-          "conclusion": "SUCCESS"
-        }
-      ],
-      "review": "REVIEW_REQUIRED",
-      "reviews": "da39a3ee5e6b",
-      "reviewSummary": [],
-      "mergeable": "MERGEABLE",
-      "mergeStateStatus": "CLEAN",
-      "comments": 5,
-      "reviewThreads": 0,
-      "unresolvedReviewThreads": 0,
-      "threadDigest": "da39a3ee5e6b",
-      "threadStates": [],
-      "head": "aaaaaaa1",
-      "base": "main",
-      "labels": [
-        "enhancement",
-        "priority-high"
-      ],
-      "assignees": [
-        "alice"
-      ],
-      "reviewRequests": [
-        "bob"
-      ]
+      "fingerprint": {
+        "state": "open",
+        "updatedAt": "2026-01-01T00:30:00Z",
+        "isDraft": false,
+        "headSha": "aaaaaaa1",
+        "baseRef": "main",
+        "mergeable": "mergeable",
+        "mergeStateStatus": "clean",
+        "reviewDecision": "review_required",
+        "checks": [
+          {
+            "name": "build",
+            "kind": "check",
+            "status": "completed",
+            "conclusion": "success",
+            "detailsUrl": null
+          }
+        ],
+        "reviews": [],
+        "threads": [],
+        "conversationComments": 5,
+        "reviewComments": 0,
+        "recentComments": [],
+        "labels": [
+          "enhancement",
+          "priority-high"
+        ],
+        "assignees": [
+          "alice"
+        ],
+        "reviewRequests": [
+          "bob"
+        ]
+      },
+      "context": {
+        "id": "PR_1",
+        "title": "Add widget factory",
+        "url": "https://github.com/acme/widgets/pull/1",
+        "author": "alice",
+        "createdAt": "2025-11-01T09:00:00Z",
+        "headRefName": "feature/widget-factory"
+      },
+      "meta": {
+        "seenAt": "2026-01-01T01:00:00Z",
+        "changedAt": "2026-01-01T01:00:00Z",
+        "ticksSinceChange": 0,
+        "missingTicks": 0,
+        "staleEmittedFor": null
+      }
     }
   },
   "issue": {
     "10": {
-      "state": "CLOSED",
-      "updatedAt": "2026-01-01T00:15:00Z",
-      "labels": [
-        "bug"
-      ],
-      "assignees": [
-        "carol"
-      ],
-      "comments": 1
+      "fingerprint": {
+        "state": "closed",
+        "updatedAt": "2026-01-01T00:15:00Z",
+        "labels": [
+          "bug"
+        ],
+        "assignees": [
+          "carol"
+        ],
+        "conversationComments": 1,
+        "recentComments": []
+      },
+      "context": {
+        "id": "ISSUE_10",
+        "title": "Widgets sometimes squeak",
+        "url": "https://github.com/acme/widgets/issues/10",
+        "author": "carol",
+        "createdAt": "2025-11-15T08:00:00Z"
+      },
+      "meta": {
+        "seenAt": "2026-01-01T01:00:00Z",
+        "changedAt": "2026-01-01T01:00:00Z",
+        "ticksSinceChange": 0,
+        "missingTicks": 0,
+        "staleEmittedFor": null
+      }
     }
   },
   "meta": {
-    "horizon": "2026-01-01T01:00:00Z",
+    "schemaVersion": 2,
+    "ghDeltaVersion": "0.6.1",
     "repo": "acme/widgets",
     "monitorId": "contract-baseline",
     "entities": [
       "pr",
       "issue"
-    ]
+    ],
+    "scope": "poll",
+    "horizon": "2026-01-01T01:00:00Z",
+    "createdAt": "2026-01-01T00:00:00Z",
+    "updatedAt": "2026-01-01T01:00:00Z"
   }
 }
