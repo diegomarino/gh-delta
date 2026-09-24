@@ -449,7 +449,9 @@ test('threadReplyIncrements only reports threads present in both sides, with a p
     { id: 'T2', resolved: false, comments: 3 }, // unchanged
     { id: 'T3', resolved: false, comments: 5 }, // brand new thread, no prior baseline: excluded
   ];
-  assert.deepEqual(threadReplyIncrements(oldThreads, newThreads), [{ id: 'T1', increment: 2 }]);
+  assert.deepEqual(threadReplyIncrements(oldThreads, newThreads), [
+    { id: 'T1', increment: 2, total: 3 },
+  ]);
 });
 
 test('threadReplyIncrements returns [] for no threads or no increments', () => {

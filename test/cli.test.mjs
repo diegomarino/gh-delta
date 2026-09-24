@@ -1433,7 +1433,7 @@ test('--ignore-authors suppresses review-comments-added when --enrich thread-rep
   );
   assert.equal(result.code, 0);
   assert.deepEqual(result.report.deltas, []);
-  assert.deepEqual(calls, [[{ id: 'T1', increment: 2 }]]);
+  assert.deepEqual(calls, [[{ id: 'T1', increment: 2, total: 3 }]]);
   // The suppressed delta never reaches the durable log: filtering happens
   // before appendDeltaLog is called.
   assert.deepEqual(
@@ -1530,7 +1530,7 @@ test('--ignore-authors + --enrich thread-replies warns and does not suppress rev
   const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
   const d = deps([[after]], { existing });
   d.fetchThreadReplies = (entries) => {
-    assert.deepEqual(entries, [{ id: 'T1', increment: 1 }]);
+    assert.deepEqual(entries, [{ id: 'T1', increment: 1, total: 2 }]);
     return {
       rows: [{ id: 'T1', replies: [{ id: 'C1', author: 'bot', createdAt: 'now', body: 'x' }] }],
       rateLimit: RATE_LIMIT,

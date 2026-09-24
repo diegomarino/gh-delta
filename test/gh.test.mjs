@@ -915,6 +915,61 @@ test('fetchThreadReplies requests one aliased node(id:) per thread with its own 
   assert.deepEqual(rateLimit, { cost: 1, remaining: 100, resetAt: '2026-07-01T12:00:00Z' });
 });
 
+test('fetchThreadReplies requests totalCount and accepts a matching total', () => {
+  const exec = () =>
+    JSON.stringify({
+      data: {
+        rateLimit: { cost: 1, remaining: 100, resetAt: '2026-07-01T12:00:00Z' },
+        t0: {
+          __typename: 'PullRequestReviewThread',
+          id: 'T1',
+          comments: { totalCount: 3, nodes: [] },
+        },
+      },
+    });
+  const { rows } = fetchThreadReplies([{ id: 'T1', increment: 2, total: 3 }], { exec });
+  assert.deepEqual(rows, [{ id: 'T1', replies: [] }]);
+});
+
+test('fetchThreadReplies fails the whole batch open when a reply landed between observation and fetch', () => {
+  // T1's totalCount (4) no longer matches the observed total (3) supplied by
+  // threadReplyIncrements: a reply landed (or was removed) between
+  // observation and this fetch, so `comments(last: 2)` no longer names the
+  // window the increment was computed from. Refuse the entire call rather
+  // than silently reporting a subset that may hide the real cause.
+  const exec = () =>
+    JSON.stringify({
+      data: {
+        rateLimit: { cost: 1, remaining: 100, resetAt: '2026-07-01T12:00:00Z' },
+        t0: {
+          __typename: 'PullRequestReviewThread',
+          id: 'T1',
+          comments: { totalCount: 4, nodes: [] },
+        },
+      },
+    });
+  assert.throws(
+    () => fetchThreadReplies([{ id: 'T1', increment: 2, total: 3 }], { exec }),
+    /reply count changed between observation and fetch/,
+  );
+});
+
+test('fetchThreadReplies skips the totalCount check when a caller supplies no total', () => {
+  const exec = () =>
+    JSON.stringify({
+      data: {
+        rateLimit: { cost: 1, remaining: 100, resetAt: '2026-07-01T12:00:00Z' },
+        t0: {
+          __typename: 'PullRequestReviewThread',
+          id: 'T1',
+          comments: { totalCount: 999, nodes: [] },
+        },
+      },
+    });
+  const { rows } = fetchThreadReplies([{ id: 'T1', increment: 2 }], { exec });
+  assert.deepEqual(rows, [{ id: 'T1', replies: [] }]);
+});
+
 test('fetchThreadReplies with an empty entries array makes no call', () => {
   const { rows, rateLimit } = fetchThreadReplies([], {
     exec: () => {
