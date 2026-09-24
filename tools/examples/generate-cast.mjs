@@ -108,6 +108,21 @@ function renderBaseline(report) {
   return formatTextOutput({ code: 0, report: clone(report), now: () => report.at });
 }
 
+// Snapshot items store `{ fingerprint, context, meta }`; wrap a raw compared-
+// fields fragment (e.g. `pending`/`failed` below) into that shape.
+const loopItem = (fingerprint) =>
+  fingerprint && {
+    fingerprint,
+    context: { title: 'Add billing webhook', headRefName: 'feature/billing-webhook' },
+    meta: {
+      seenAt: null,
+      changedAt: null,
+      ticksSinceChange: 0,
+      missingTicks: 0,
+      staleEmittedFor: null,
+    },
+  };
+
 function loopDelta(classes, from, to) {
   const delta = {
     entity: 'pr',
@@ -115,8 +130,8 @@ function loopDelta(classes, from, to) {
     title: 'Add billing webhook',
     headRefName: 'feature/billing-webhook',
     classes,
-    from,
-    to,
+    from: loopItem(from),
+    to: loopItem(to),
   };
   return { id: deltaId(deltaIdentity('owner/repo', delta)), ...delta };
 }

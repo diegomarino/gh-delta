@@ -12,6 +12,21 @@ import { addWatch, watchDirPath } from '../lib/watch.mjs';
 
 const NOW = '2026-07-08T12:00:00.000Z';
 
+// Schema v2 item shape: `{ fingerprint, context, meta }`. list.mjs never reads
+// into an item's internals (only Object.keys().length for counts), so a
+// minimal valid item is enough for every fixture below.
+const item = (fingerprint = { state: 'OPEN' }) => ({
+  fingerprint,
+  context: {},
+  meta: {
+    seenAt: null,
+    changedAt: null,
+    ticksSinceChange: 0,
+    missingTicks: 0,
+    staleEmittedFor: null,
+  },
+});
+
 function seed(dir, repo, monitorId, entities, snapshot) {
   const path = snapshotPath(repo, monitorId, entities, dir);
   writeSnapshotAtomic(path, snapshot);
@@ -63,13 +78,13 @@ test('parseSince accepts the s/m/h/d grammar and rejects everything else', () =>
 test('listMonitors inventories derived snapshots, newest first', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-list-'));
   seed(dir, 'o/r', 'prs-5m', 'pr', {
-    pr: { 1: { state: 'OPEN' }, 2: { state: 'OPEN' } },
+    pr: { 1: item(), 2: item() },
     issue: {},
     meta: { horizon: '2026-07-08T11:00:00.000Z' },
   });
   seed(dir, 'o/other', 'all', 'pr,issue', {
     pr: {},
-    issue: { 7: { state: 'OPEN' } },
+    issue: { 7: item() },
     meta: { horizon: '2026-07-08T09:00:00.000Z' },
   });
   writeFileSync(join(dir, 'notes.json'), '{}');
@@ -153,7 +168,7 @@ test('listMonitors reports derived watch counts and surfaces corrupt watch state
 test('listMonitors identifies self-describing snapshots with arbitrary filenames', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-list-'));
   writeSnapshotAtomic(join(dir, 'my-private-monitor.json'), {
-    pr: { 5: { state: 'OPEN' } },
+    pr: { 5: item() },
     issue: {},
     meta: {
       horizon: '2026-07-08T11:00:00.000Z',
@@ -180,7 +195,7 @@ test('listMonitors merges the registry, dedupes scanned paths, and marks stale e
 
   // Monitor A: derived snapshot inside the scanned dir, also registered.
   const scanned = seed(stateDir, 'o/r', 'prs-5m', 'pr', {
-    pr: { 1: { state: 'OPEN' } },
+    pr: { 1: item() },
     issue: {},
     meta: { horizon: '2026-07-08T11:00:00.000Z' },
   });
@@ -196,7 +211,7 @@ test('listMonitors merges the registry, dedupes scanned paths, and marks stale e
   const external = join(elsewhere, 'private.json');
   writeSnapshotAtomic(external, {
     pr: {},
-    issue: { 9: { state: 'OPEN' } },
+    issue: { 9: item() },
     meta: { horizon: '2026-07-08T10:00:00.000Z' },
   });
   registerMonitor({
@@ -241,7 +256,7 @@ test('registry-only economical snapshots retain their PR scope and counts', () =
   const externalDir = mkdtempSync(join(tmpdir(), 'gd-external-'));
   const external = join(externalDir, 'custom.watch.json');
   writeSnapshotAtomic(external, {
-    pr: { 42: { state: 'OPEN' } },
+    pr: { 42: item() },
     issue: {},
     meta: { horizon: NOW, repo: 'o/r', monitorId: 'watch', entities: ['pr'], scope: 'watch-pr' },
   });

@@ -22,6 +22,15 @@ const STATE_FILE = '/tmp/gh-delta-user/repo-owner%2Frepo__monitor-host-9c1f7b2a4
 const AT = '2026-07-01T12:05:00.000Z';
 const AT_BASELINE = '2026-07-01T12:00:00.000Z';
 
+// Snapshot items store `{ fingerprint, context, meta }` (schema v2 -- see
+// lib/snapshot.mjs); a delta's `from`/`to` are items too. `item()` wraps a
+// bare compared-fields fragment into that shape for these fixtures.
+const item = (fingerprint, context = {}) => ({
+  fingerprint,
+  context,
+  meta: { seenAt: AT, changedAt: AT, ticksSinceChange: 0, missingTicks: 0, staleEmittedFor: null },
+});
+
 // The PR #42 delta: a single item that exercises three distinct detail field
 // groups (`ci`, `review`, and the reviewRequests add/remove set diff) so
 // `--detail` is shown off in one place. The reviewer approving satisfies their
@@ -30,39 +39,48 @@ const AT_BASELINE = '2026-07-01T12:00:00.000Z';
 // omit the ciChecks/reviewSummary summaries, so the ci/reviews details render
 // the `opaque: true` fallback (the output of a first tick over a pre-summary
 // snapshot).
+const pr42Context = { title: 'Add billing webhook', headRefName: 'feature/billing-webhook' };
 const pr42 = withId({
   entity: 'pr',
   number: 42,
   title: 'Add billing webhook',
   headRefName: 'feature/billing-webhook',
   classes: ['ci-changed', 'review-changed', 'review-requests-changed'],
-  from: {
-    state: 'OPEN',
-    ci: 'a1b2c3',
-    review: 'CHANGES_REQUESTED',
-    reviews: 'r-9f8e',
-    reviewRequests: ['alice'],
-  },
-  to: {
-    state: 'OPEN',
-    ci: 'd4e5f6',
-    review: 'APPROVED',
-    reviews: 'r-2c1d',
-    reviewRequests: [],
-  },
+  from: item(
+    {
+      state: 'OPEN',
+      ci: 'a1b2c3',
+      review: 'CHANGES_REQUESTED',
+      reviews: 'r-9f8e',
+      reviewRequests: ['alice'],
+    },
+    pr42Context,
+  ),
+  to: item(
+    {
+      state: 'OPEN',
+      ci: 'd4e5f6',
+      review: 'APPROVED',
+      reviews: 'r-2c1d',
+      reviewRequests: [],
+    },
+    pr42Context,
+  ),
 });
 
+const issue17Context = { title: 'Backfill customer imports' };
 const issue17 = withId({
   entity: 'issue',
   number: 17,
   title: 'Backfill customer imports',
   classes: ['relabeled'],
-  from: { state: 'OPEN', labels: ['worker'] },
-  to: { state: 'OPEN', labels: ['backend', 'worker'] },
+  from: item({ state: 'OPEN', labels: ['worker'] }, issue17Context),
+  to: item({ state: 'OPEN', labels: ['backend', 'worker'] }, issue17Context),
 });
 
 // An unchanged open PR that has crossed the explicit inactivity threshold. Its
 // UTC period is part of the public, content-addressed stale delta identity.
+const pr88Context = { title: 'Refresh release notes', headRefName: 'docs/release-notes' };
 const pr88Stale = withId({
   entity: 'pr',
   number: 88,
@@ -70,8 +88,8 @@ const pr88Stale = withId({
   headRefName: 'docs/release-notes',
   classes: ['stale'],
   staleAt: '2026-07-01',
-  from: { state: 'OPEN', head: 'd0c5' },
-  to: { state: 'OPEN', head: 'd0c5' },
+  from: item({ state: 'OPEN', head: 'd0c5' }, pr88Context),
+  to: item({ state: 'OPEN', head: 'd0c5' }, pr88Context),
 });
 
 // lib/cli.mjs never puts a `warnings` key on the base report object (see

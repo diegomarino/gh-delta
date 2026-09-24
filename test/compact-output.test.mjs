@@ -2,6 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { compactReport, ndjsonReport } from '../lib/compact-output.mjs';
 
+// Schema v2: `from`/`to` are snapshot items (`{ fingerprint, context, meta }`).
+const item = (fingerprint) => ({ fingerprint, context: {}, meta: {} });
+
 const delta = {
   id: 'x',
   repo: 'o/r',
@@ -9,8 +12,14 @@ const delta = {
   number: 7,
   title: 'Fix',
   classes: ['ci-changed'],
-  from: { state: 'OPEN', ciChecks: [{ name: 'lint', status: 'COMPLETED', conclusion: 'FAILURE' }] },
-  to: { ciChecks: [{ name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS' }], state: 'OPEN' },
+  from: item({
+    state: 'OPEN',
+    ciChecks: [{ name: 'lint', status: 'COMPLETED', conclusion: 'FAILURE' }],
+  }),
+  to: item({
+    ciChecks: [{ name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+    state: 'OPEN',
+  }),
   details: [{ class: 'ci-changed' }],
   summaryLine: 'legacy',
 };

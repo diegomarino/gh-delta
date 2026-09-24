@@ -67,13 +67,15 @@ test('fully enriched deltas jointly cover exactly the frozen DELTA_FIELDS', () =
   // only present when a current object exists (to !== null). They are mutually
   // exclusive, so coverage is asserted over the union of a missing delta and a
   // PR change delta. --detail is the richest mode (summaryLine, line, details).
+  // Schema v2: `from`/`to` are snapshot items (`{ fingerprint, context, meta }`).
+  const item = (fingerprint, meta = {}) => ({ fingerprint, context: {}, meta });
   const missing = {
     entity: 'pr',
     number: 42,
     title: '(missing from current fetch)',
     classes: ['still-missing'],
     missingTicks: 2,
-    from: { state: 'OPEN', missing: true, missingTicks: 1 },
+    from: item({ state: 'OPEN' }, { missingTicks: 1 }),
     to: null,
   };
   const change = {
@@ -83,8 +85,8 @@ test('fully enriched deltas jointly cover exactly the frozen DELTA_FIELDS', () =
     title: 'Add widget',
     headRefName: 'feature/widget',
     classes: ['new-comments'],
-    from: { state: 'OPEN', comments: 1 },
-    to: { state: 'OPEN', comments: 3 },
+    from: item({ state: 'OPEN', comments: 1 }),
+    to: item({ state: 'OPEN', comments: 3 }),
     enrichment: {
       comments: [
         {
