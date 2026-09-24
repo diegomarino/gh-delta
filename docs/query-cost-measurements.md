@@ -1,8 +1,9 @@
 # GraphQL query cost measurements
 
-Status: measurement log, not public contract. `docs/contract.md`'s cost table
-(owned by task E0) is the source of truth once published; this file records
-the raw measurements behind it.
+Status: historical measurement log, not public contract. `docs/contract.md`'s
+[Measured query costs](contract.md#measured-query-costs) table is the
+published source of truth; this file is the raw measurement behind it, kept
+for provenance rather than duplicated maintenance.
 
 ## F1 — `reviewThreads { comments { totalCount } } }` (task F1, schema-v2 epic)
 
@@ -37,6 +38,8 @@ adding `comments { totalCount }` per thread did not change the page's total
 cost here. The plan's 7 → 8 estimate does not hold as a general rule at this
 scale; it may become visible on a repository with materially more open PRs
 and/or review threads per PR, where the formula's per-node multiplication
-would surface the added nested field's weight. E0 should re-measure against
-a higher-volume repository before publishing a cost table entry, or publish
-the measured 8→8 result with this caveat.
+would surface the added nested field's weight. Task E0 published the
+measured 8→8 result with this caveat in
+[Measured query costs](contract.md#measured-query-costs); re-run
+`test/e2e/rate-limit-benchmark.mjs` against a higher-volume repository if this
+caveat ever needs to be resolved.

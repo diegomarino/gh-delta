@@ -117,7 +117,8 @@ not the other way around):
 - `skills/gh-delta/` (including generated `references/flags.md`);
 - `.claude-plugin/` marketplace and plugin metadata;
 - `lib/*.mjs`;
-- `docs/architecture.md`, `docs/contract.md`, `docs/usage.md`, `docs/watch-loop-prompt.md`, `docs/release-checklist.md`, `docs/alternatives.md`, `docs/troubleshooting.md`;
+- `schema/` (published JSON Schema copies checked by `npm run schema:check`);
+- `docs/architecture.md`, `docs/contract.md`, `docs/usage.md`, `docs/recipes.md`, `docs/watch-loop-prompt.md`, `docs/release-checklist.md`, `docs/alternatives.md`, `docs/troubleshooting.md`;
 - `docs/img/` (the eight generated SVGs: `demo.svg`, `common-loop.svg`,
   `usage.svg`, `text-output.svg`, `compact-output.svg`, `ndjson-output.svg`,
   `json-output.svg`, `schema-output.svg`);
