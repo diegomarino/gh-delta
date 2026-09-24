@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "JSON report",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "$defs": {
     "delta": {
       "type": "object",
@@ -217,7 +217,7 @@
       ],
       "properties": {
         "schemaVersion": {
-          "const": 1
+          "const": 2
         },
         "detectedAt": {
           "type": "string"
@@ -341,7 +341,7 @@
       "required": ["schemaVersion", "at", "error", "kind"],
       "properties": {
         "schemaVersion": {
-          "const": 1
+          "const": 2
         },
         "at": {
           "type": "string"

@@ -163,7 +163,7 @@ test('firstObserved (populated, boolean-true-only) and reserved seq are declared
 test('schemas accept representative json, compact and NDJSON records', () => {
   assert.ok(
     validates(schemaFor('json'), {
-      schemaVersion: 1,
+      schemaVersion: 2,
       detectedAt: 'now',
       monitorId: 'm',
       entities: ['pr'],
@@ -177,7 +177,7 @@ test('schemas accept representative json, compact and NDJSON records', () => {
   );
   assert.ok(
     validates(schemaFor('json'), {
-      schemaVersion: 1,
+      schemaVersion: 2,
       at: 'now',
       error: 'bad',
       kind: 'config',
@@ -185,12 +185,12 @@ test('schemas accept representative json, compact and NDJSON records', () => {
     }),
   );
   assert.ok(
-    validates(schemaFor('json'), { schemaVersion: 1, at: 'now', error: 'bad', kind: 'config' }),
+    validates(schemaFor('json'), { schemaVersion: 2, at: 'now', error: 'bad', kind: 'config' }),
     'schema accepts a bare error without the additive hint',
   );
   assert.ok(
     validates(schemaFor('compact'), {
-      schemaVersion: 1,
+      schemaVersion: 2,
       repos: ['o/r'],
       at: 'now',
       baseline: false,
@@ -203,7 +203,7 @@ test('schemas accept representative json, compact and NDJSON records', () => {
   assert.ok(
     validates(schemaFor('ndjson'), {
       type: 'end',
-      schemaVersion: 1,
+      schemaVersion: 2,
       at: 'now',
       repos: ['o/r'],
       baseline: false,
@@ -214,9 +214,9 @@ test('schemas accept representative json, compact and NDJSON records', () => {
   );
 });
 test('schemas reject incomplete, unknown, invalid, and forbidden fixtures', () => {
-  assert.equal(validates(schemaFor('json'), { schemaVersion: 1, at: 'now' }), false);
+  assert.equal(validates(schemaFor('json'), { schemaVersion: 2, at: 'now' }), false);
   const base = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     repos: ['o/r'],
     at: 'now',
     baseline: false,
@@ -241,7 +241,7 @@ test('schemas reject incomplete, unknown, invalid, and forbidden fixtures', () =
   assert.equal(
     validates(schemaFor('ndjson'), {
       type: 'end',
-      schemaVersion: 1,
+      schemaVersion: 2,
       at: 'now',
       repos: ['o/r'],
       counts: { deltas: 0, byClass: {}, filteredDeltas: 0 },

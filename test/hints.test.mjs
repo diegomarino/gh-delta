@@ -23,7 +23,7 @@ test('structured errors always carry a useful recovery hint', () => {
 
 test('agent error envelopes retain the recovery hint', () => {
   const compact = compactReport({
-    schemaVersion: 1,
+    schemaVersion: 2,
     at: 'now',
     error: 'bad',
     kind: 'config',

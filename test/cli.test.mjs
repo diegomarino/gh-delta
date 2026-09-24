@@ -273,7 +273,7 @@ test('first run returns code 0 (baseline) and writes the snapshot', () => {
     d,
   );
   assert.equal(code, 0);
-  assert.equal(report.schemaVersion, 1);
+  assert.equal(report.schemaVersion, 2);
   assert.equal(report.results[0].baseline, true);
   assert.equal(report.monitorId, 'main');
   assert.deepEqual(report.entities, ['pr', 'issue']);
@@ -285,7 +285,7 @@ test('error reports carry schemaVersion and omit deltas', () => {
   d.resolveRepo = () => ({ status: 'declined' });
   const { code, report } = run(['--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
   assert.equal(code, 2);
-  assert.equal(report.schemaVersion, 1);
+  assert.equal(report.schemaVersion, 2);
   assert.match(report.error, /--repo/);
   assert.equal(report.deltas, undefined);
   assert.equal(d.writes, 0);
@@ -3418,7 +3418,7 @@ test('list subcommand returns a read-only inventory report with code 0', () => {
   };
   const { code, report } = run(['list', '--state-dir', '/state', '--since', '24h'], d);
   assert.equal(code, 0);
-  assert.equal(report.schemaVersion, 1);
+  assert.equal(report.schemaVersion, 2);
   assert.equal(report.command, 'list');
   assert.equal(report.stateDir, '/state');
   assert.equal(report.since, '24h');

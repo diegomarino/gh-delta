@@ -41,7 +41,7 @@ const delta = {
 
 function baseReport(overrides = {}) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     detectedAt: 'now',
     repos: ['o/r'],
     results: [
@@ -62,7 +62,7 @@ function baseReport(overrides = {}) {
 test('compactReport emits self-contained agent deltas only', () => {
   const value = compactReport(baseReport(), 10, [], { detail: true });
   assert.deepEqual(value, {
-    schemaVersion: 1,
+    schemaVersion: 2,
     repos: ['o/r'],
     at: 'now',
     baseline: false,
@@ -100,7 +100,7 @@ test('ndjsonReport ends with an end record and newline', () => {
   assert.equal(lines[0].type, 'delta');
   assert.deepEqual(lines[1], {
     type: 'end',
-    schemaVersion: 1,
+    schemaVersion: 2,
     at: 'now',
     repos: ['o/r'],
     baseline: false,
@@ -158,7 +158,7 @@ test('a per-repo error folds into the compact errors array, keyed by repo', () =
 
 test('a bare pre-flight error renders without a repos key', () => {
   const report = compactReport(
-    { schemaVersion: 1, at: 'now', error: 'bad flag', kind: 'config', hint: 'fix it' },
+    { schemaVersion: 2, at: 'now', error: 'bad flag', kind: 'config', hint: 'fix it' },
     2,
     [],
   );

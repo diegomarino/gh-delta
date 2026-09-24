@@ -93,7 +93,7 @@ test('receiver rejects unsigned requests before parsing or recording and accepts
   const url = `http://127.0.0.1:${port}/`;
   const body = JSON.stringify({
     type: 'gh-delta.delta',
-    schemaVersion: 1,
+    schemaVersion: 2,
     deliveryId: 'gh-delta.delivery.v1:o/r:m:pr:1:merged:2026-07-01T12:00:00.000Z',
     seq: null,
     monitorId: 'm',
@@ -180,7 +180,7 @@ test('receiver rejects an oversized chunked body before parsing, recording, or f
 function payload({ number = 42, id, classes = ['ci-changed'] } = {}) {
   return {
     type: 'gh-delta.delta',
-    schemaVersion: 1,
+    schemaVersion: 2,
     deliveryId: 'gh-delta.delivery.v1:o/r:m:pr:42:ci-changed:2026-07-01T12:00:00.000Z',
     seq: null,
     monitorId: 'm',

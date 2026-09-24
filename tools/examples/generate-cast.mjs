@@ -141,7 +141,7 @@ function loopDelta(classes, from, to) {
 
 function loopReport(detectedAt, delta = null, baseline = false) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     detectedAt,
     monitorId: 'pr-loop-60-secs',
     entities: ['pr'],
