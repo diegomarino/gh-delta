@@ -2157,7 +2157,7 @@ test('--help-json usage includes detail flags and documents entities grammar', (
   assert.ok(help.output.deltaFields.includes('line'));
   assert.ok(help.output.deltaFields.includes('details'));
   assert.ok(help.output.deltaDetailFields.includes('opaque'));
-  assert.deepEqual(help.output.deltaDetailFieldsByClass['new-comments'], ['comments']);
+  assert.deepEqual(help.output.deltaDetailFieldsByClass['new-comments'], ['conversationComments']);
   assert.deepEqual(help.output.deltaDetailFieldsByClass.relabeled, ['labels']);
   const entities = help.options.find((option) => option.name === '--entities');
   assert.equal(
