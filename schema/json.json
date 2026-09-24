@@ -449,6 +449,14 @@
                   },
                   "resetAt": {
                     "type": "string"
+                  },
+                  "remaining": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "cost": {
+                    "type": "integer",
+                    "minimum": 0
                   }
                 },
                 "additionalProperties": true

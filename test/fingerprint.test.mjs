@@ -285,6 +285,46 @@ test('shuffling the order GitHub returns checks/reviews/threads yields an identi
   }
 });
 
+test('buildChecks tiebreaks on detailsUrl: two rows sharing name/kind/status/conclusion still sort deterministically', () => {
+  // A matrix job (or a re-run, or a CheckRun/StatusContext sharing one name)
+  // can produce two rows identical on name:kind:status:conclusion, differing
+  // only in detailsUrl. Without detailsUrl as a final tiebreaker, the stable
+  // sort merely preserves GitHub's own (unstable) response order, so a
+  // reordered API response would re-serialize checks[] into a different
+  // array and churn delta.id for no real change.
+  const jobA = {
+    name: 'test',
+    kind: 'check',
+    status: 'completed',
+    conclusion: 'success',
+    detailsUrl: 'https://github.com/o/r/actions/runs/1/job/10',
+  };
+  const jobB = {
+    name: 'test',
+    kind: 'check',
+    status: 'completed',
+    conclusion: 'success',
+    detailsUrl: 'https://github.com/o/r/actions/runs/1/job/20',
+  };
+  const canonical = buildChecks([jobA, jobB]);
+  const shuffled = buildChecks([jobB, jobA]);
+  assert.deepEqual(shuffled, canonical);
+
+  const canonicalId = deltaId({
+    repo: 'o/r',
+    entity: 'pr',
+    number: 1,
+    to: { checks: canonical },
+  });
+  const shuffledId = deltaId({
+    repo: 'o/r',
+    entity: 'pr',
+    number: 1,
+    to: { checks: shuffled },
+  });
+  assert.equal(shuffledId, canonicalId);
+});
+
 // --- prFingerprint / issueFingerprint ----------------------------------------
 
 test('prFingerprint carries mergeStateStatus, checks, and reviews directly (no drop-list)', () => {

@@ -28,6 +28,113 @@ const noopLock = {
   releaseLock: () => ({ ok: true }),
 };
 
+test('wait reports a multi-repo partial failure (not results[0]) as an error instead of crashing', async () => {
+  const result = await runCommand(
+    [
+      'wait',
+      '--repo',
+      'a/one,b/two',
+      '--monitor-id',
+      'i9',
+      '--state-dir',
+      '/tmp/i9-wait-partial',
+      '--entities',
+      'pr',
+      '--timeout',
+      '1m',
+      '--until',
+      'ci-changed',
+    ],
+    {
+      ...noopLock,
+      touchHeartbeat: () => {},
+      fetchPRs: (repo) => {
+        if (repo === 'b/two') throw new Error('temporary GitHub failure');
+        return { rows: [], rateLimit: RATE_LIMIT };
+      },
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+      readSnapshot: () => ({
+        pr: {},
+        issue: {},
+        meta: {
+          schemaVersion: 2,
+          ghDeltaVersion: '0.0.0-test',
+          repo: 'a/one',
+          monitorId: 'i9',
+          entities: ['pr'],
+          scope: 'poll',
+          horizon: '2026-09-21T07:00:00.000Z',
+          createdAt: '2026-09-21T07:00:00.000Z',
+          updatedAt: '2026-09-21T07:00:00.000Z',
+        },
+      }),
+      writeSnapshotAtomic: () => {},
+      env: { GH_DELTA_NO_REGISTRY: '1' },
+      now: () => '2026-09-21T08:00:00.000Z',
+    },
+  );
+  assert.equal(result.code, 1);
+  assert.equal(result.report.kind, 'github');
+  assert.match(result.report.error, /temporary GitHub failure/);
+});
+
+test('wait reports the permanent error (exit 2), not a later transient one, when both occur in one tick', async () => {
+  // a/one fails with a permanent snapshot error (exit 2); b/two fails with a
+  // transient github error (exit 1) and is processed second. The aggregate
+  // tick already computes exit 2 (buildDetectorReport: any permanent error
+  // wins outright); wait must report that, not the last-collected error.
+  const result = await runCommand(
+    [
+      'wait',
+      '--repo',
+      'a/one,b/two',
+      '--monitor-id',
+      'i9',
+      '--state-dir',
+      '/tmp/i9-wait-severity',
+      '--entities',
+      'pr',
+      '--timeout',
+      '1m',
+      '--until',
+      'ci-changed',
+    ],
+    {
+      ...noopLock,
+      touchHeartbeat: () => {},
+      readSnapshot: (path) => {
+        if (path.includes('a%2Fone')) throw new Error('invalid snapshot JSON');
+        return {
+          pr: {},
+          issue: {},
+          meta: {
+            schemaVersion: 2,
+            ghDeltaVersion: '0.0.0-test',
+            repo: 'b/two',
+            monitorId: 'i9',
+            entities: ['pr'],
+            scope: 'poll',
+            horizon: '2026-09-21T07:00:00.000Z',
+            createdAt: '2026-09-21T07:00:00.000Z',
+            updatedAt: '2026-09-21T07:00:00.000Z',
+          },
+        };
+      },
+      fetchPRs: (repo) => {
+        if (repo === 'b/two') throw new Error('temporary GitHub failure');
+        return { rows: [], rateLimit: RATE_LIMIT };
+      },
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+      writeSnapshotAtomic: () => {},
+      env: { GH_DELTA_NO_REGISTRY: '1' },
+      now: () => '2026-09-21T08:00:00.000Z',
+    },
+  );
+  assert.equal(result.code, 2);
+  assert.equal(result.report.kind, 'snapshot');
+  assert.match(result.report.error, /invalid snapshot JSON/);
+});
+
 test('wait without --timeout fails before resolving a repository or fetching GitHub', async () => {
   let resolved = false;
   const result = await runCommand(['wait', '--until', 'ci-changed'], {
@@ -532,6 +639,19 @@ test('wait parses typed summary predicates and rejects invalid typed values', as
   ]);
   assert.equal(invalid.code, 2);
   assert.match(invalid.report.error, /non-negative integers/);
+});
+
+test('wait rejects --until-summary failedChecks=... as a config error instead of silently never matching', async () => {
+  const rejected = await runCommand([
+    'wait',
+    '--timeout',
+    '1m',
+    '--until-summary',
+    'failedChecks=lint',
+  ]);
+  assert.equal(rejected.code, 2);
+  assert.match(rejected.report.error, /failedChecks/);
+  assert.match(rejected.report.error, /list, not a scalar/);
 });
 
 test('wait creates its derived default heartbeat before an aggregate first tick without undefined snapshot reads', async () => {

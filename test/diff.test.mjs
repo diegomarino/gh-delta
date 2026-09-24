@@ -101,6 +101,43 @@ test('diffFingerprint names added/removed/changed reviews by id, and checks by n
   assert.deepEqual(result.reviews, { added: ['PRR_2'] });
 });
 
+test('diffFingerprint marks checks opaque instead of silently dropping a duplicate check name', () => {
+  // Two rows named `test` (a CheckRun and a StatusContext sharing one name,
+  // or a re-run): the name-keyed map can only keep one, so a real failure ->
+  // success flip on the shadowed row must not be reported as "nothing
+  // changed" -- see lib/fingerprint.mjs buildChecks for the same ambiguity
+  // at the sort-key level.
+  const from = {
+    checks: [
+      { name: 'test', kind: 'check', status: 'completed', conclusion: 'failure' },
+      { name: 'test', kind: 'status', status: 'success', conclusion: 'success' },
+    ],
+  };
+  const to = {
+    checks: [
+      { name: 'test', kind: 'check', status: 'completed', conclusion: 'success' },
+      { name: 'test', kind: 'status', status: 'success', conclusion: 'success' },
+    ],
+  };
+  const result = diffFingerprint(from, to);
+  assert.deepEqual(result.checks, { opaque: true });
+});
+
+test('diffFingerprint reports no checks entry when duplicate-named checks are byte-identical', () => {
+  // Same duplicate-name shape as above, but nothing about checks changed --
+  // only labels did. Falling back to opaque here would be a false positive:
+  // it would tell a consumer checks changed when they did not.
+  const checks = [
+    { name: 'test', kind: 'check', status: 'completed', conclusion: 'failure' },
+    { name: 'test', kind: 'status', status: 'success', conclusion: 'success' },
+  ];
+  const from = { checks, labels: ['bug'] };
+  const to = { checks, labels: ['enhancement'] };
+  const result = diffFingerprint(from, to);
+  assert.equal(Object.hasOwn(result, 'checks'), false);
+  assert.deepEqual(result.labels, { added: ['enhancement'], removed: ['bug'] });
+});
+
 test('diffFingerprint names added/removed thread ids and recentComment ids', () => {
   const from = {
     threads: [{ id: 'T_A', resolved: false, comments: 0 }],

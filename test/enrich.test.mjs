@@ -193,7 +193,9 @@ test('thread-replies fetches exactly the threads whose count rose, with per-thre
       };
     },
   });
-  assert.deepEqual(calls, [{ kind: 'thread-replies', ids: [{ id: 'T1', increment: 2 }] }]);
+  assert.deepEqual(calls, [
+    { kind: 'thread-replies', ids: [{ id: 'T1', increment: 2, total: 3 }] },
+  ]);
   assert.equal(warnings.length, 0);
   assert.deepEqual(delta.enrichment['thread-replies'], [
     { id: 'T1', replies: [{ id: 'C1', author: 'bob', createdAt: 'now', body: 'x' }] },

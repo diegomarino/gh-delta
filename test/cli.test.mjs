@@ -924,6 +924,47 @@ test('--detail does not leak threads into generic updated rows (P2-2)', () => {
   }
 });
 
+test('an updated delta with a same-count recentComments rotation does not emit an undeclared detail field', () => {
+  // recentComments is a bounded rolling window: one comment can drop off
+  // while another enters, leaving conversationComments unchanged but the
+  // window's contents different. That rotation alone must not surface as an
+  // `updated` detail field -- recentComments is deliberately excluded from
+  // changedFingerprintFields (see lib/cli.mjs) and is not declared in
+  // DELTA_DETAIL_FIELDS_BY_CLASS.updated.
+  const before = {
+    ...basePr,
+    recentComments: [{ id: 'C1', author: 'alice' }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    recentComments: [{ id: 'C2', author: 'bob' }],
+  };
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--detail'],
+    d,
+  );
+  assert.equal(code, 10);
+  const delta = report.deltas[0];
+  assert.ok(delta.classes.includes('updated'));
+  const updatedFields = delta.details
+    .filter((row) => row.class === 'updated')
+    .map((row) => row.field);
+  assert.ok(!updatedFields.includes('recentComments'));
+
+  for (const row of delta.details) {
+    const allowed = DELTA_DETAIL_FIELDS_BY_CLASS[row.class];
+    assert.ok(allowed, `no field map for class "${row.class}"`);
+    if (!['presence', 'unknown'].includes(row.field)) {
+      assert.ok(
+        allowed.includes(row.field),
+        `field "${row.field}" not declared for class "${row.class}"`,
+      );
+    }
+  }
+});
+
 test('--detail names the exact checks and reviews that changed when the snapshot carries summaries', () => {
   const before = {
     ...basePr,
@@ -1392,7 +1433,7 @@ test('--ignore-authors suppresses review-comments-added when --enrich thread-rep
   );
   assert.equal(result.code, 0);
   assert.deepEqual(result.report.deltas, []);
-  assert.deepEqual(calls, [[{ id: 'T1', increment: 2 }]]);
+  assert.deepEqual(calls, [[{ id: 'T1', increment: 2, total: 3 }]]);
   // The suppressed delta never reaches the durable log: filtering happens
   // before appendDeltaLog is called.
   assert.deepEqual(
@@ -1431,6 +1472,41 @@ test('--ignore-authors + --enrich thread-replies warns (does not silently suppre
   assert.ok(result.warnings.some((w) => /attributable/i.test(w.reason)));
 });
 
+test('--number scope excludes a non-selected PR before the --ignore-authors thread-reply fetch, not after', () => {
+  const { before: before42, after: after42 } = threadReplyFixture(1, 1);
+  const { before: before99, after: after99 } = threadReplyFixture(1, 3);
+  const existing = {
+    pr: { 42: item(prFingerprint(before42)), 99: item(prFingerprint(before99)) },
+    issue: {},
+  };
+  const d = deps(
+    [
+      [
+        { ...after42, number: 42 },
+        { ...after99, number: 99 },
+      ],
+    ],
+    { existing },
+  );
+  d.fetchThreadReplies = () => {
+    throw new Error('must not be called: PR #99 is outside the --number 42 selection');
+  };
+  const result = run(
+    [...FILTER_ARGS, '--number', '42', '--ignore-authors', 'bot', '--enrich', 'thread-replies'],
+    d,
+  );
+  assert.equal(result.code, 10);
+  assert.deepEqual(
+    result.report.deltas.map((delta) => delta.number),
+    [42],
+  );
+  assert.ok(!result.report.deltas[0].classes.includes('review-comments-added'));
+  assert.deepEqual(
+    result.warnings.filter((w) => /thread-repl/i.test(w.label)),
+    [],
+  );
+});
+
 test('--ignore-authors + --enrich thread-replies warns and does not suppress review-comments-added when a brand-new thread only partly explains the rise', () => {
   // T1 is established and rose by 1 (attributable, all-bot). T2 is brand new
   // this tick with 2 comments from a human -- threadReplyIncrements excludes
@@ -1454,7 +1530,7 @@ test('--ignore-authors + --enrich thread-replies warns and does not suppress rev
   const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
   const d = deps([[after]], { existing });
   d.fetchThreadReplies = (entries) => {
-    assert.deepEqual(entries, [{ id: 'T1', increment: 1 }]);
+    assert.deepEqual(entries, [{ id: 'T1', increment: 1, total: 2 }]);
     return {
       rows: [{ id: 'T1', replies: [{ id: 'C1', author: 'bot', createdAt: 'now', body: 'x' }] }],
       rateLimit: RATE_LIMIT,
@@ -2553,6 +2629,10 @@ test('two monitors observing the same change produce the same delta.id but a dif
 
 test('outpost payload has exactly the documented top-level key set, and embeds the report delta verbatim (no root-level field duplication)', async () => {
   const { buildOutpostPayload } = await import('../lib/outpost.mjs');
+  // Already CLI-shaped (repo/summary/changed stamped, `to` stripped to the
+  // bare fingerprint) -- the normal case, matching what a real report.deltas
+  // entry looks like. See the un-normalized detectDeltas() case below for the
+  // documented direct-embedding path.
   const delta = {
     id: 'a'.repeat(64),
     repo: 'o/r',
@@ -2561,7 +2641,10 @@ test('outpost payload has exactly the documented top-level key set, and embeds t
     context: { title: 'x', headRefName: 'feature' },
     classes: ['merged'],
     seq: 7,
-    to: item({ state: 'merged', labels: [] }),
+    summary: { state: 'merged' },
+    changed: {},
+    from: null,
+    to: { state: 'merged', labels: [] },
   };
   const payload = buildOutpostPayload({
     report: { repo: 'o/r', monitorId: 'main', detectedAt: '2026-07-01T12:00:00Z' },
@@ -3120,6 +3203,8 @@ test('--rate-limit-floor gates fetch after snapshot read and reports a low quota
   assert.equal(result.code, 1);
   assert.equal(result.report.results[0].error.kind, 'rate-limit');
   assert.equal(result.report.results[0].error.resetAt, '2026-07-01T13:00:00.000Z');
+  assert.equal(result.report.results[0].error.remaining, 3);
+  assert.equal(Object.hasOwn(result.report.results[0].error, 'cost'), false);
   assert.match(result.report.results[0].error.message, /remaining 3.*floor 4/);
   assert.deepEqual(order, ['read', 'rate']);
   assert.equal(writes, 0);

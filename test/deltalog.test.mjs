@@ -1192,6 +1192,65 @@ test('resetDeltaLog deletes the manifest and data file, and is idempotent on a c
   assert.doesNotThrow(() => resetDeltaLog(logFile));
 });
 
+test('resetDeltaLog recovers the dataFile from a schema-invalid-but-parseable manifest, deleting the compacted generation file too', () => {
+  // A manifest that is valid JSON naming a real, same-directory dataFile, but
+  // fails full validateManifest() (an extra field trips the strict key
+  // check). Reset's whole point is recovering from exactly this kind of
+  // corruption -- falling all the way back to `logFile` here would leave
+  // this generation file, and every historical delta in it, on disk while
+  // reset reports success.
+  const logFile = tempPath('reset-invalid-manifest.ndjson');
+  const dir = dirname(logFile);
+  const genFile = join(dir, 'gen-1.ndjson');
+  writeFileSync(genFile, '');
+  writeFileSync(logFile, '');
+  writeFileSync(
+    manifestPath(logFile),
+    JSON.stringify({
+      version: 3,
+      firstSeq: 1,
+      lastSeq: 1,
+      byteLength: 0,
+      dataFile: 'gen-1.ndjson',
+      extra: 'field',
+    }),
+  );
+  assert.ok(existsSync(genFile));
+
+  resetDeltaLog(logFile);
+
+  assert.equal(existsSync(genFile), false);
+  assert.equal(existsSync(logFile), false);
+  assert.equal(existsSync(manifestPath(logFile)), false);
+});
+
+test('resetDeltaLog never unlinks a dataFile outside the log directory, even from a crafted manifest', () => {
+  // dataFile fails the same same-directory-basename check validateManifest
+  // enforces -- the recovery path must honor that exact check, or a crafted
+  // manifest could make reset delete an arbitrary path.
+  const logFile = tempPath('reset-traversal-manifest.ndjson');
+  const outsideDir = mkdtempSync(join(tmpdir(), 'gh-delta-outside-'));
+  const outsideFile = join(outsideDir, 'victim.ndjson');
+  writeFileSync(outsideFile, 'do not delete');
+  writeFileSync(logFile, '');
+  writeFileSync(
+    manifestPath(logFile),
+    JSON.stringify({
+      version: 3,
+      firstSeq: 1,
+      lastSeq: 1,
+      byteLength: 0,
+      dataFile: `../${basename(outsideDir)}/victim.ndjson`,
+    }),
+  );
+
+  resetDeltaLog(logFile);
+
+  assert.ok(existsSync(outsideFile), 'a path-traversal dataFile must never be unlinked');
+  assert.equal(existsSync(logFile), false);
+  assert.equal(existsSync(manifestPath(logFile)), false);
+});
+
 test('a cursor pointing past the tail of a reset (deleted) log is a clear log error, not a silent restart', () => {
   const logFile = tempPath('reset-cursor.ndjson');
   appendDeltaLog(logFile, {

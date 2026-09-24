@@ -227,6 +227,30 @@ test('status text output renders each returned item truthfully', async () => {
   assert.match(result.output, /ticksSinceChange=2/);
 });
 
+test('status text output shows title and author when the snapshot context carries them, sanitized', async () => {
+  const result = await runCommand(
+    ['status', '--repo', 'o/r', '--state-file', '/tmp/status-text.json', '--format', 'text'],
+    {
+      readSnapshot: () => ({
+        pr: {
+          42: item(
+            { state: 'open' },
+            { changedAt: '2026-09-20T00:00:00.000Z', ticksSinceChange: 0 },
+            { title: 'Fix login\x07bug', author: 'alice' },
+          ),
+        },
+        issue: {},
+      }),
+    },
+  );
+  assert.equal(result.code, 0);
+  assert.match(result.output, /PR #42 Fix login bug/);
+  assert.match(result.output, /author=alice/);
+  // GitHub-derived title text must be sanitized like every other rendered
+  // field -- the raw BEL above must not survive into the output.
+  assert.ok(!result.output.includes('\x07'));
+});
+
 test('status --refresh keeps tracking meta bookkeeping for an unchanged item, without a --stale-after flag', () => {
   // Schema v2: meta.changedAt/ticksSinceChange/staleEmittedFor are tracked on
   // every tick regardless of whether --stale-after is passed this run;
