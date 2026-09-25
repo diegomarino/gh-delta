@@ -11,7 +11,8 @@ import { run, runCommand } from '../lib/cli.mjs';
 import { outpostSignature } from '../lib/outpost.mjs';
 import { prFingerprint } from '../lib/fingerprint.mjs';
 import { DELTA_DETAIL_FIELDS_BY_CLASS } from '../lib/contract.mjs';
-import { addWatch, writeTerminalIgnoredLocked } from '../lib/watch.mjs';
+import { addWatch } from '../lib/watch.mjs';
+import { writeTerminalIgnoredLocked } from '../lib/watch-lock.mjs';
 
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 

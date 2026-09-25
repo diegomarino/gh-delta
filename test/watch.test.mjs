@@ -5,15 +5,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   addWatch,
-  ENTRY_LOCK_LEASE_MS,
   listWatch,
   markTerminalIgnored,
   readWatch,
   removeWatch,
   removeWatchUnchanged,
   watchDirPath,
-  withTerminalMarkLocks,
 } from '../lib/watch.mjs';
+import { ENTRY_LOCK_LEASE_MS, withTerminalMarkLocks } from '../lib/watch-lock.mjs';
 import { LOCK_EXPIRY_SLACK_MS } from '../lib/lock.mjs';
 
 // The canonical shape as `addWatch` creates it: {entity, number, until,
