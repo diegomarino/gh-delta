@@ -7,14 +7,14 @@
 // `baseline.report?.baseline`, both always-undefined off a real v2 report).
 //
 // Three layers, each catching a different half of the failure:
-//   (1) a static source sweep over lib/examples/tools/examples/docs for the
-//       exact shape of every fixed instance -- a `<something>report`
-//       reference (a literal `.report` property, or an identifier ending in
-//       `Report`) immediately dereferencing one of the four retired fields.
-//       This catches CONSUMERS, but is brittle against aliasing: `const r =
-//       x.report; r.stateFile` slips through unnoticed, by design (see the
-//       task's own caveat) -- it only catches the literal spelling every real
-//       instance of this bug used.
+//   (1) a static source sweep for the exact shape of every fixed instance --
+//       a `<something>report` reference (a literal `.report` property, or an
+//       identifier ending in `Report`) immediately dereferencing one of the
+//       four retired fields. This catches CONSUMERS, but is brittle against
+//       aliasing: `const r = x.report; r.stateFile` slips through unnoticed,
+//       by design (see the task's own caveat) -- it only catches the literal
+//       spelling every real instance of this bug used. See SWEEP_ROOTS below
+//       for exactly what this covers and what it deliberately does not.
 //   (2) a runtime shape assertion that a real, enveloped v2 report (one that
 //       carries `results[]`, i.e. not the pre-flight bareError shape) never
 //       carries these fields at its own top level. This catches PRODUCERS --
@@ -52,11 +52,54 @@ const STALE_PATH_PATTERN = new RegExp(
   `(?:\\.report|\\b\\w*Report)\\??\\.(${STALE_FIELDS.join('|')})\\b`,
 );
 
+// Directories walked for `.mjs`/`.js`/`.md` files, plus a short list of
+// individual root-level files. This is a JS-property-access regex, so it
+// only ever catches JS source and Markdown code fences/prose written in that
+// style -- see the exclusions below for what that leaves out.
+//
+// Covered, and why each belongs:
+//   - lib/            production code -- the primary target.
+//   - examples/        shipped integration snippets users copy verbatim.
+//   - tools/            build/doc-generation scripts (schema, skill docs,
+//                       the README example-artifact renderer) that consume
+//                       real report shapes to build committed output.
+//   - docs/             prose that names real report field paths.
+//   - skills/           the packaged `gh-delta` skill's reference docs,
+//                       shipped alongside the package.
+//   - test/e2e/         the ONE test/ subtree included: these scripts spawn
+//                       the real `gh-delta` binary as a subprocess and parse
+//                       its genuine stdout JSON (see
+//                       test/e2e/playground-e2e-helpers.mjs's
+//                       detectorResultFromProcess) -- a real consumer, not a
+//                       mock. This is exactly the gap that let
+//                       test/e2e/playground-e2e.mjs:257 read the retired
+//                       `report.baseline` for an entire round undetected:
+//                       `npm run check` never runs it (it needs live GitHub
+//                       credentials), so nothing but this sweep could have
+//                       caught it, and the sweep didn't look there.
+//   - gh-delta.mjs      the published bin entrypoint (root-level, scanned
+//                       individually, not as a directory).
+//
+// Deliberately excluded:
+//   - the rest of test/ (unit/integration tests). These intentionally
+//     construct old-shape literals for mocks and regression fixtures (e.g.
+//     a `deps()` fake, or a fixture proving code correctly REJECTS a v1
+//     shape) -- scanning them would flag deliberate historical shapes as
+//     false positives. Unlike test/e2e/, they never call the real CLI as a
+//     subprocess and parse its genuine output.
+//   - `.github/workflows/*.yml` and other YAML/jq consumers (e.g.
+//     examples/github-actions-slack-digest/gh-delta-watch.yml, which reads
+//     `jq -r '.results[0].baseline // false'`). This regex is JS-syntax
+//     specific and cannot match jq's `.baseline`/`.results[0].baseline`
+//     shape at all -- adding `.yml` to the extension filter would add no
+//     real coverage here, only false confidence. Spot-checked by hand and
+//     currently clean; a jq-aware stale-path detector would need to be a
+//     separate tool, not an extension added to this one.
+const SWEEP_ROOTS = ['lib', 'examples', 'tools', 'docs', 'skills', 'test/e2e'];
+const SWEEP_ROOT_FILES = ['gh-delta.mjs'];
+
 test('no shipped code dereferences the retired v1 top-level report paths', () => {
-  const roots = ['lib', 'examples', 'tools/examples', 'docs'].map(
-    (dir) => new URL(`../${dir}/`, import.meta.url),
-  );
-  const files = [];
+  const files = SWEEP_ROOT_FILES.map((name) => new URL(`../${name}`, import.meta.url));
   const walk = (dirUrl) => {
     for (const entry of readdirSync(dirUrl, { withFileTypes: true })) {
       const entryUrl = new URL(entry.name + (entry.isDirectory() ? '/' : ''), dirUrl);
@@ -64,7 +107,7 @@ test('no shipped code dereferences the retired v1 top-level report paths', () =>
       else if (/\.(mjs|js|md)$/.test(entry.name)) files.push(entryUrl);
     }
   };
-  for (const root of roots) walk(root);
+  for (const root of SWEEP_ROOTS) walk(new URL(`../${root}/`, import.meta.url));
 
   for (const fileUrl of files) {
     const text = readFileSync(fileUrl, 'utf8');
