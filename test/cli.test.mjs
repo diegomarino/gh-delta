@@ -1332,8 +1332,10 @@ test('a real concurrent watch add attempted during mark-and-publish fails fast, 
 // Run with a --gh-timeout-ms tiny enough that the OLD (round 9) coupling
 // would have given the entry lock only a ~6-second lease; confirm the
 // lease actually granted, inspected mid-critical-section, still reflects
-// --lock-stale-ms's own (much larger) default -- end to end, through the
-// real CLI flags, not just the lib/watch.mjs unit test.
+// withTerminalMarkLocks' own fixed ENTRY_LOCK_LEASE_MS default (round 12
+// decoupled this from --lock-stale-ms too, see the test right after this
+// one) -- end to end, through the real CLI flags, not just the
+// lib/watch.mjs unit test.
 test('a tiny --gh-timeout-ms does not shrink the entry lock lease', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-watch-lease-integration-'));
   const state = join(dir, 'state.json');
@@ -1377,11 +1379,69 @@ test('a tiny --gh-timeout-ms does not shrink the entry lock lease', () => {
     d,
   );
   assert.equal(code, 0);
-  // --lock-stale-ms defaults to 10 minutes; the lease must reflect that,
-  // not the 100ms/6-second network timeout.
+  // The lease must reflect withTerminalMarkLocks' own fixed default, not the
+  // 100ms/6-second network timeout.
   assert.ok(
     impliedLeaseMs > 500000,
-    `expected the entry lock lease to reflect --lock-stale-ms's 10m default, not --gh-timeout-ms's 100ms; got ${impliedLeaseMs}ms`,
+    `expected the entry lock lease to reflect its own fixed default, not --gh-timeout-ms's 100ms; got ${impliedLeaseMs}ms`,
+  );
+});
+
+// Round 12: this is the actual regression -- round 11 reused --lock-stale-ms
+// for this lease, but lib/help.mjs and docs/contract.md both document that
+// flag as governing only an UNREADABLE/corrupt lock, never a readable lock's
+// expiresAt. An operator has every reason to set it small (it's documented
+// as a corrupt-lock detection ceiling) with nothing telling them that doing
+// so also shortens this unrelated critical section. Run with a
+// --lock-stale-ms tiny enough that the round-11 coupling would have given
+// the entry lock only a ~6-second lease; confirm the lease actually granted
+// still reflects the fixed internal default instead.
+test('a tiny --lock-stale-ms does not shrink the entry lock lease', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-lease-integration-lsm-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const merged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
+  const d = deps([[]], { existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: [merged], rateLimit: RATE_LIMIT });
+  let impliedLeaseMs;
+  const before = Date.now();
+  d.writeTerminalIgnoredLocked = (path, bytes, ignoredAt) => {
+    const marked = writeTerminalIgnoredLocked(path, bytes, ignoredAt);
+    const lock = JSON.parse(readFileSync(`${path}.lock`, 'utf8'));
+    impliedLeaseMs = Date.parse(lock.expiresAt) - before;
+    return marked;
+  };
+  const { code } = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      state,
+      '--watch-dir',
+      watch,
+      '--ignore-classes',
+      'merged',
+      // A --lock-stale-ms this small would give the entry lock only a
+      // ~6-second lease under the round-11 coupling (--lock-stale-ms +
+      // lib/lock.mjs's 5s slack) -- far too short to survive any real
+      // snapshot write under load.
+      '--lock-stale-ms',
+      '1s',
+    ],
+    d,
+  );
+  assert.equal(code, 0);
+  assert.ok(
+    impliedLeaseMs > 500000,
+    `expected the entry lock lease to reflect its own fixed default, not --lock-stale-ms's 1s; got ${impliedLeaseMs}ms`,
   );
 });
 

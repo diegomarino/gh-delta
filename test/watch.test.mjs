@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   addWatch,
+  ENTRY_LOCK_LEASE_MS,
   listWatch,
   markTerminalIgnored,
   readWatch,
@@ -115,6 +116,8 @@ test('canonical validation still rejects an unknown extra key or a malformed ign
 // on disk, not just against behavior, so a future regression that
 // reintroduces a --gh-timeout-ms-flavored value here fails immediately
 // rather than only under a slow-filesystem race that is hard to reproduce.
+// (An explicit override is used here so the assertion pins an exact number;
+// the test below this one covers the no-argument default.)
 test('withTerminalMarkLocks sizes the entry lock lease from leaseMs alone', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-watch-lease-'));
   const added = addWatch(dir, 'pr:42', 'merged', { now: () => '2026-09-20T12:00:00.000Z' });
@@ -126,7 +129,7 @@ test('withTerminalMarkLocks sizes the entry lock lease from leaseMs alone', () =
       const lock = JSON.parse(readFileSync(`${added.path}.lock`, 'utf8'));
       expiresAtMs = Date.parse(lock.expiresAt);
     },
-    { leaseMs: 600000 }, // --lock-stale-ms's own 10m default
+    { leaseMs: 600000 },
   );
   const impliedLeaseMs = expiresAtMs - before;
   // Must reflect the 600000ms leaseMs (plus the shared slack constant every
@@ -136,6 +139,29 @@ test('withTerminalMarkLocks sizes the entry lock lease from leaseMs alone', () =
   assert.ok(
     impliedLeaseMs >= 600000 && impliedLeaseMs <= 600000 + LOCK_EXPIRY_SLACK_MS + 1000,
     `expected the lease to reflect leaseMs (600000ms) + slack, got ${impliedLeaseMs}ms`,
+  );
+});
+
+// Round 12: the lease must not be derived from --lock-stale-ms either (round
+// 11's own regression -- lib/help.mjs and docs/contract.md document that flag
+// as governing only an unreadable/corrupt lock, never a readable lock's
+// expiresAt). Calling with no options at all -- the shape the one real call
+// site (lib/cli.mjs's run()) now uses -- must fall back to the module's own
+// fixed ENTRY_LOCK_LEASE_MS constant.
+test('withTerminalMarkLocks defaults the entry lock lease to ENTRY_LOCK_LEASE_MS with no override', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-lease-default-'));
+  const added = addWatch(dir, 'pr:42', 'merged', { now: () => '2026-09-20T12:00:00.000Z' });
+  const before = Date.now();
+  let expiresAtMs;
+  withTerminalMarkLocks([added.path], () => {
+    const lock = JSON.parse(readFileSync(`${added.path}.lock`, 'utf8'));
+    expiresAtMs = Date.parse(lock.expiresAt);
+  });
+  const impliedLeaseMs = expiresAtMs - before;
+  assert.ok(
+    impliedLeaseMs >= ENTRY_LOCK_LEASE_MS &&
+      impliedLeaseMs <= ENTRY_LOCK_LEASE_MS + LOCK_EXPIRY_SLACK_MS + 1000,
+    `expected the default lease to reflect ENTRY_LOCK_LEASE_MS (${ENTRY_LOCK_LEASE_MS}ms) + slack, got ${impliedLeaseMs}ms`,
   );
 });
 
