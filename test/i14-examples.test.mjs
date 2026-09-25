@@ -12,7 +12,16 @@ test('I-14 agent examples are executable deterministic local smokes', () => {
   for (const name of examples) {
     const script = fileURLToPath(path(`examples/${name}/run.sh`));
     accessSync(script, constants.X_OK);
-    const output = execFileSync(script, [], { encoding: 'utf8' });
+    // agent-worker-wait/coordinator-fanout resolve a real repo through a real
+    // detector tick (examples/_local-demo.mjs) -- without this, every test
+    // run writes a real breadcrumb into the developer's REAL
+    // ~/.local/state/gh-delta/registry for a demo repo that never really
+    // existed. The example script itself is untouched: a real user running
+    // it directly still gets the real registry, which is the correct default.
+    const output = execFileSync(script, [], {
+      encoding: 'utf8',
+      env: { ...process.env, GH_DELTA_NO_REGISTRY: '1' },
+    });
     assert.doesNotThrow(() => JSON.parse(output), `${name} must emit a local JSON proof`);
     const readme = readFileSync(path(`examples/${name}/README.md`), 'utf8');
     assert.match(readme, /run\.sh/);

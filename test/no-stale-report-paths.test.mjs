@@ -195,6 +195,7 @@ test('a real post-resolution failure exposes its error only under results[], nev
       throw new Error('invalid snapshot JSON');
     },
     writeSnapshotAtomic: () => {},
+    env: { GH_DELTA_NO_REGISTRY: '1' },
   });
   assert.equal(result.code, 2);
   assertNoStaleTopLevelFields(result.report, 'post-resolution failure');

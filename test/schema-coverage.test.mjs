@@ -74,6 +74,12 @@ const locks = {
   releaseLock: () => ({ ok: true }),
   assertLockOwned: () => true,
 };
+// Every trigger below resolves a real repo, so a post-resolution failure or
+// success alike reaches lib/cli.mjs's registerAttempt -- without this, each
+// one would write a persistent breadcrumb into the developer's REAL
+// ~/.local/state/gh-delta/registry (env defaults to process.env, which does
+// not redirect it) for a state file that never really existed.
+const NO_REGISTRY = { GH_DELTA_NO_REGISTRY: '1' };
 const T = '2026-01-01T00:00:00.000Z';
 const noRows = {
   fetchPRs: () => ({ rows: [], rateLimit: RATE_LIMIT }),
@@ -124,6 +130,7 @@ const KIND_TRIGGERS = {
         throw new Error('invalid snapshot JSON');
       },
       now: () => T,
+      env: NO_REGISTRY,
     },
   }),
   github: () => ({
@@ -136,6 +143,7 @@ const KIND_TRIGGERS = {
       },
       fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
       now: () => T,
+      env: NO_REGISTRY,
     },
   }),
   io: () => ({
@@ -148,6 +156,7 @@ const KIND_TRIGGERS = {
       assertLockOwned: () => true,
       ...noRows,
       now: () => T,
+      env: NO_REGISTRY,
     },
   }),
   busy: () => ({
@@ -158,6 +167,7 @@ const KIND_TRIGGERS = {
       assertLockOwned: () => true,
       ...noRows,
       now: () => T,
+      env: NO_REGISTRY,
     },
   }),
   log: () => ({
@@ -174,6 +184,7 @@ const KIND_TRIGGERS = {
         throw err;
       },
       now: () => T,
+      env: NO_REGISTRY,
     },
   }),
   'rate-limit': () => ({
@@ -192,6 +203,7 @@ const KIND_TRIGGERS = {
       ...noRows,
       fetchRateLimit: () => ({ remaining: 10, resetAt: T }),
       now: () => T,
+      env: NO_REGISTRY,
     },
   }),
 };
@@ -294,6 +306,7 @@ test('baseline, real deltas, and a no-change tick each validate against every fo
     const baseline = await runCommand(argv(), {
       ...noRows,
       now: () => T,
+      env: NO_REGISTRY,
     });
     assert.equal(baseline.code, 0);
     assert.ok(validates(schemaFor('json'), baseline.report));
@@ -303,6 +316,7 @@ test('baseline, real deltas, and a no-change tick each validate against every fo
       fetchPRs: () => ({ rows: [changedPr()], rateLimit: RATE_LIMIT }),
       fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
       now: () => '2026-01-01T01:00:00.000Z',
+      env: NO_REGISTRY,
     });
     assert.equal(withDeltas.code, 10);
     assert.ok(validates(schemaFor('json'), withDeltas.report));
@@ -319,7 +333,7 @@ test('baseline, real deltas, and a no-change tick each validate against every fo
       const formatStateFile = join(dir, `format-${format}.json`);
       const seed = await runCommand(
         ['--repo', 'o/r', '--monitor-id', 'm', '--state-file', formatStateFile],
-        { ...noRows, now: () => T },
+        { ...noRows, now: () => T, env: NO_REGISTRY },
       );
       assert.equal(seed.code, 0);
       const rendered = await runCommand(
@@ -328,6 +342,7 @@ test('baseline, real deltas, and a no-change tick each validate against every fo
           fetchPRs: () => ({ rows: [changedPr()], rateLimit: RATE_LIMIT }),
           fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
           now: () => '2026-01-01T01:00:00.000Z',
+          env: NO_REGISTRY,
         },
       );
       assert.equal(
@@ -356,6 +371,7 @@ test('baseline, real deltas, and a no-change tick each validate against every fo
       fetchPRs: () => ({ rows: [changedPr()], rateLimit: RATE_LIMIT }),
       fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
       now: () => '2026-01-01T02:00:00.000Z',
+      env: NO_REGISTRY,
     });
     assert.equal(noChange.code, 0);
     assert.deepEqual(noChange.report.deltas, []);

@@ -114,6 +114,11 @@ test('status --refresh performs one detector tick before reading the local statu
       rateLimit: { cost: 1, remaining: 4999, resetAt: '2026-09-21T01:00:00.000Z' },
     }),
     now: () => '2026-09-21T00:00:00.000Z',
+    // `status --refresh` performs a real detector tick internally, so
+    // without this it writes a real breadcrumb into the developer's
+    // ~/.local/state/gh-delta/registry (env defaults to process.env, which
+    // does not redirect it).
+    env: { GH_DELTA_NO_REGISTRY: '1' },
   };
   const result = run(
     [
@@ -307,6 +312,7 @@ test('status --refresh keeps tracking meta bookkeeping for an unchanged item, wi
         rateLimit: { cost: 1, remaining: 4999, resetAt: '2026-09-20T01:00:00.000Z' },
       }),
       now: () => '2026-09-20T00:00:00.000Z',
+      env: { GH_DELTA_NO_REGISTRY: '1' },
     },
   );
   assert.equal(result.code, 0);
@@ -341,6 +347,7 @@ test('status --refresh reuses the repository resolved by the detector', () => {
       rateLimit: { cost: 1, remaining: 4999, resetAt: '2026-09-20T01:00:00.000Z' },
     }),
     now: () => '2026-09-20T00:00:00.000Z',
+    env: { GH_DELTA_NO_REGISTRY: '1' },
   });
   assert.equal(result.code, 0);
   assert.equal(result.report.repo, 'enterprise/project');

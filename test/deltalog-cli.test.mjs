@@ -92,6 +92,11 @@ function producerDeps(overrides = {}) {
       return { fromSeq: 1, toSeq: payload.deltas.length, appended: payload.deltas.length };
     },
     now: () => '2026-09-20T12:00:00.000Z',
+    // Every caller here resolves a real repo, so without this every one
+    // writes a persistent breadcrumb into the developer's REAL
+    // ~/.local/state/gh-delta/registry (env defaults to process.env, which
+    // does not redirect it) for a state file that never really existed.
+    env: { GH_DELTA_NO_REGISTRY: '1' },
     ...overrides,
     events,
   };
@@ -228,6 +233,7 @@ test('compact rejects unsafe duration before locking and reports lock contention
     acquireLock: () => ({ ok: false, reason: 'held' }),
     compactDeltaLog: () => assert.fail('busy compact must not read or mutate the log'),
     now: () => '2026-09-20T13:00:00.000Z',
+    env: { GH_DELTA_NO_REGISTRY: '1' },
   });
   assert.equal(busy.code, 1);
   assert.equal(busy.report.kind, 'busy');

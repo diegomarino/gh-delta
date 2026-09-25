@@ -134,7 +134,11 @@ test('--outpost-secret reads the injected environment and does not leak its valu
     rateLimit: RATE_LIMIT,
   });
   let sent;
-  d.env = { OUTPOST_SECRET: 'not-in-report' };
+  // This overwrites the whole `env` object, so it must re-include the
+  // module-level GH_DELTA_NO_REGISTRY guard (line 6) itself -- otherwise this
+  // one resolved detector tick writes a real breadcrumb into the developer's
+  // ~/.local/state/gh-delta/registry.
+  d.env = { OUTPOST_SECRET: 'not-in-report', GH_DELTA_NO_REGISTRY: '1' };
   d.outpostFetch = async (_url, options) => {
     sent = options;
     return { ok: true, status: 202 };
@@ -3015,10 +3019,14 @@ test('missing --monitor-id defaults to a stable per-machine host id', () => {
 });
 
 test('monitor id precedence is flag then environment then the generated default', () => {
+  // Each `env` here replaces `d.env` wholesale, overriding the module-level
+  // GH_DELTA_NO_REGISTRY guard above -- re-include it explicitly so this
+  // resolved detector tick doesn't write a real breadcrumb into the
+  // developer's ~/.local/state/gh-delta/registry.
   for (const [argv, env, expected] of [
-    [['--monitor-id', 'flag'], { GH_DELTA_MONITOR_ID: 'env' }, 'flag'],
-    [[], { GH_DELTA_MONITOR_ID: 'env' }, 'env'],
-    [[], {}, 'generated'],
+    [['--monitor-id', 'flag'], { GH_DELTA_MONITOR_ID: 'env', GH_DELTA_NO_REGISTRY: '1' }, 'flag'],
+    [[], { GH_DELTA_MONITOR_ID: 'env', GH_DELTA_NO_REGISTRY: '1' }, 'env'],
+    [[], { GH_DELTA_NO_REGISTRY: '1' }, 'generated'],
   ]) {
     const d = deps([[]]);
     d.env = env;
@@ -4670,7 +4678,12 @@ test('a busy detector attempt is recorded as a registry failure', () => {
 test('generated monitor identity collision warning is included on success and failure', () => {
   for (const fail of [false, true]) {
     const d = deps([[]]);
-    d.env = {};
+    // monitorIdentityWarnings (the mechanism under test) reads via the
+    // mocked readRegistry below regardless of GH_DELTA_NO_REGISTRY -- only
+    // the WRITE side (registerAttempt) checks that flag, and this test never
+    // asserts on a write, so disabling it here just stops a real breadcrumb
+    // landing in the developer's ~/.local/state/gh-delta/registry.
+    d.env = { GH_DELTA_NO_REGISTRY: '1' };
     d.defaultMonitor = () => 'host-current';
     d.machineId = 'machine-a';
     d.readRegistry = () => ({
@@ -4688,26 +4701,36 @@ test('generated monitor identity collision warning is included on success and fa
 });
 
 test('monitor identity collision warning excludes inapplicable and unavailable registry cases', () => {
+  // Same reasoning as the test above: monitorIdentityWarnings reads through
+  // the mocked readRegistry regardless of GH_DELTA_NO_REGISTRY, so setting it
+  // here only stops registerAttempt's WRITE side, which nothing here asserts
+  // on, from landing a real breadcrumb in the developer's registry.
   const cases = [
-    { argv: ['--format', 'json'], env: {} },
-    { argv: ['--format', 'text', '--monitor-id', 'host-current'], env: {} },
-    { argv: ['--format', 'text'], env: { GH_DELTA_MONITOR_ID: 'host-current' } },
+    { argv: ['--format', 'json'], env: { GH_DELTA_NO_REGISTRY: '1' } },
+    {
+      argv: ['--format', 'text', '--monitor-id', 'host-current'],
+      env: { GH_DELTA_NO_REGISTRY: '1' },
+    },
     {
       argv: ['--format', 'text'],
-      env: {},
+      env: { GH_DELTA_MONITOR_ID: 'host-current', GH_DELTA_NO_REGISTRY: '1' },
+    },
+    {
+      argv: ['--format', 'text'],
+      env: { GH_DELTA_NO_REGISTRY: '1' },
       entry: { repo: 'o/r', machineId: 'machine-a', monitorId: 'host-current' },
     },
     {
       argv: ['--format', 'text'],
-      env: {},
+      env: { GH_DELTA_NO_REGISTRY: '1' },
       entry: { repo: 'x/y', machineId: 'machine-a', monitorId: 'host-other' },
     },
     {
       argv: ['--format', 'text'],
-      env: {},
+      env: { GH_DELTA_NO_REGISTRY: '1' },
       entry: { repo: 'o/r', machineId: 'machine-b', monitorId: 'host-other' },
     },
-    { argv: ['--format', 'text'], env: {}, registryError: true },
+    { argv: ['--format', 'text'], env: { GH_DELTA_NO_REGISTRY: '1' }, registryError: true },
   ];
   for (const { argv, env, entry, registryError } of cases) {
     const d = deps([[]]);

@@ -165,7 +165,7 @@ async function buildFixtures() {
     fetchPRs: () => ({ rows: [pr1()], rateLimit: null }),
     fetchIssues: () => ({ rows: [issue10()], rateLimit: null }),
     now: () => T0,
-    env: {},
+    env: { GH_DELTA_NO_REGISTRY: '1' },
   });
   assert.equal(tick1.code, 0);
 
@@ -183,7 +183,7 @@ async function buildFixtures() {
       rateLimit: null,
     }),
     now: () => T2H,
-    env: {},
+    env: { GH_DELTA_NO_REGISTRY: '1' },
   });
   assert.equal(tick2.code, 10);
 
@@ -206,7 +206,7 @@ async function buildFixtures() {
     }),
     fetchIssues: () => ({ rows: [issue10()], rateLimit: null }),
     now: () => T3H,
-    env: {},
+    env: { GH_DELTA_NO_REGISTRY: '1' },
   });
   assert.equal(tick3.code, 10);
 
@@ -219,7 +219,7 @@ async function buildFixtures() {
         throw new Error('invalid snapshot JSON');
       },
       now: () => T3H,
-      env: {},
+      env: { GH_DELTA_NO_REGISTRY: '1' },
     },
   );
   assert.equal(failed.code, 2);
@@ -262,7 +262,7 @@ async function buildFixtures() {
       fetchPRs: () => ({ rows: [{ ...pr1(), number: 1 }], rateLimit: null }),
       fetchIssues: () => ({ rows: [], rateLimit: null }),
       now: () => T0,
-      env: {},
+      env: { GH_DELTA_NO_REGISTRY: '1' },
     },
   );
   assert.equal(auxTick1.code, 0);
@@ -285,7 +285,7 @@ async function buildFixtures() {
       }),
       fetchIssues: () => ({ rows: [], rateLimit: null }),
       now: () => T2H,
-      env: {},
+      env: { GH_DELTA_NO_REGISTRY: '1' },
     },
   );
   assert.equal(auxTick2.code, 10);
@@ -312,7 +312,7 @@ async function buildFixtures() {
       }),
       fetchIssues: () => ({ rows: [], rateLimit: null }),
       now: () => T3H,
-      env: {},
+      env: { GH_DELTA_NO_REGISTRY: '1' },
     },
   );
   assert.equal(auxTick3.code, 10);
@@ -427,7 +427,7 @@ async function buildFixtures() {
       fetchPRs: () => ({ rows: [waitAfter], rateLimit: null }),
       fetchIssues: () => ({ rows: [], rateLimit: null }),
       now: () => T0,
-      env: {},
+      env: { GH_DELTA_NO_REGISTRY: '1' },
     },
   );
   assert.equal(waitSuccess.code, 10);
@@ -457,7 +457,7 @@ async function buildFixtures() {
       },
       fetchIssues: () => ({ rows: [], rateLimit: null }),
       now: () => T0,
-      env: {},
+      env: { GH_DELTA_NO_REGISTRY: '1' },
     },
   );
   assert.equal(waitFailed.code, 1);

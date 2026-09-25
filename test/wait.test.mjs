@@ -26,6 +26,11 @@ const noopLock = {
   assertLockOwned: () => true,
   extendLockDeadline: () => ({ ok: true }),
   releaseLock: () => ({ ok: true }),
+  // Every test here resolves a real repo (explicit or autodetected) through
+  // wait's inner detector tick, so without this each one writes a real
+  // breadcrumb into the developer's ~/.local/state/gh-delta/registry (env
+  // defaults to process.env, which does not redirect it).
+  env: { GH_DELTA_NO_REGISTRY: '1' },
 };
 
 test('wait reports a multi-repo partial failure (not results[0]) as an error instead of crashing', async () => {

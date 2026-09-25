@@ -6,6 +6,11 @@ const lockDeps = {
   acquireLock: () => ({ ok: true, token: 'lock' }),
   releaseLock: () => ({ ok: true }),
   assertLockOwned: () => true,
+  // `init` performs a real baseline detector tick internally, so without
+  // this it writes a real breadcrumb into the developer's REAL
+  // ~/.local/state/gh-delta/registry (env defaults to process.env, which
+  // does not redirect it).
+  env: { GH_DELTA_NO_REGISTRY: '1' },
 };
 const pr = {
   number: 1,

@@ -280,6 +280,7 @@ test('a post-resolution failed tick validates against the json schema', () => {
       },
       writeSnapshotAtomic: () => {},
       now: () => 'now',
+      env: { GH_DELTA_NO_REGISTRY: '1' },
     },
   );
   assert.equal(code, 2);
