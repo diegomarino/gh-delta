@@ -580,7 +580,11 @@ test('wait preserves --number scope for log consumers and catalogs its identity 
   assert.equal(result.code, 0);
   assert.equal(result.report.reason, 'timeout');
   assert.deepEqual(result.report.deltas, []);
-  for (const field of ['repo', 'repos', 'monitorId']) assert.ok(WAIT_REPORT_FIELDS.includes(field));
+  // `repo` (singular) is deliberately absent from WAIT_REPORT_FIELDS: wait's
+  // tick is always either run() (whose report only ever carries `repos`,
+  // plural) or, under --from-log like this very scenario, `read`'s report
+  // (which carries neither at all) -- see lib/contract.mjs's own comment.
+  for (const field of ['repos', 'monitorId']) assert.ok(WAIT_REPORT_FIELDS.includes(field));
 });
 
 test('wait keeps log records for --until-summary when --until names a different class', async () => {
