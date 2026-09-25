@@ -11,34 +11,29 @@ const stateDir = mkdtempSync(join(tmpdir(), 'gh-delta-example-'));
 const base = {
   number: 42,
   title: 'Demo pull request',
-  state: 'OPEN',
+  state: 'open',
   updatedAt: '2026-09-21T08:00:00.000Z',
   isDraft: false,
-  statusCheckRollup: [{ name: 'CI', status: 'COMPLETED', conclusion: 'SUCCESS' }],
-  reviewDecision: 'REVIEW_REQUIRED',
-  latestReviews: [],
-  mergeable: 'MERGEABLE',
-  comments: [],
-  headRefOid: 'demo-sha',
+  checks: [{ name: 'CI', kind: 'check', status: 'completed', conclusion: 'success' }],
+  reviewDecision: 'review_required',
+  reviews: [],
+  mergeable: 'mergeable',
+  conversationComments: 0,
+  reviewComments: 0,
+  headSha: 'demo-sha',
 };
 const changed = {
   ...base,
   updatedAt: '2026-09-21T08:01:00.000Z',
-  statusCheckRollup: [{ name: 'CI', status: 'COMPLETED', conclusion: 'FAILURE' }],
+  checks: [{ name: 'CI', kind: 'check', status: 'completed', conclusion: 'failure' }],
 };
+const demoRateLimit = { cost: 1, remaining: 4999, resetAt: '2026-09-21T09:00:00.000Z' };
 const detector = (observation) =>
-  run(
-    [
-      '--repo',
-      'diegomarino/gh-delta-demo',
-      '--state-dir',
-      stateDir,
-      '--entities',
-      'pr',
-      '--summaries',
-    ],
-    { fetchPRs: () => observation, fetchIssues: () => [], now: () => '2026-09-21T08:00:00.000Z' },
-  );
+  run(['--repo', 'diegomarino/gh-delta-demo', '--state-dir', stateDir, '--entities', 'pr'], {
+    fetchPRs: () => ({ rows: observation, rateLimit: demoRateLimit }),
+    fetchIssues: () => ({ rows: [], rateLimit: demoRateLimit }),
+    now: () => '2026-09-21T08:00:00.000Z',
+  });
 
 try {
   if (mode === 'agent-worker-wait') {
@@ -56,7 +51,11 @@ try {
         '--until-summary',
         'ciRollup=green',
       ],
-      { fetchPRs: () => [base], fetchIssues: () => [], now: () => '2026-09-21T08:00:00.000Z' },
+      {
+        fetchPRs: () => ({ rows: [base], rateLimit: demoRateLimit }),
+        fetchIssues: () => ({ rows: [], rateLimit: demoRateLimit }),
+        now: () => '2026-09-21T08:00:00.000Z',
+      },
     );
     if (result.code !== 10 || result.report.reason !== 'already-satisfied')
       throw new Error('wait demo did not satisfy CI');
@@ -66,27 +65,22 @@ try {
   } else if (mode === 'coordinator-fanout') {
     detector([base]);
     const tick = run(
-      [
-        '--repo',
-        'diegomarino/gh-delta-demo',
-        '--state-dir',
-        stateDir,
-        '--entities',
-        'pr',
-        '--summaries',
-        '--log',
-      ],
-      { fetchPRs: () => [changed], fetchIssues: () => [], now: () => '2026-09-21T08:01:00.000Z' },
+      ['--repo', 'diegomarino/gh-delta-demo', '--state-dir', stateDir, '--entities', 'pr', '--log'],
+      {
+        fetchPRs: () => ({ rows: [changed], rateLimit: demoRateLimit }),
+        fetchIssues: () => ({ rows: [], rateLimit: demoRateLimit }),
+        now: () => '2026-09-21T08:01:00.000Z',
+      },
     );
-    if (tick.code !== 10 || !tick.report.logFile)
-      throw new Error('coordinator did not append a delta log');
+    const logFile = tick.report.results?.[0]?.logFile;
+    if (tick.code !== 10 || !logFile) throw new Error('coordinator did not append a delta log');
     for (const worker of ['reviewer', 'notifier', 'triage']) {
       const cursor = join(stateDir, `${worker}.cursor.json`);
-      setCursorAtomic(cursor, { cursorVersion: 1, logFile: tick.report.logFile, seq: 0 });
+      setCursorAtomic(cursor, { cursorVersion: 1, logFile, seq: 0 });
       const read = await runCommand(['read', '--cursor', cursor, '--number', '42'], {});
       if (read.code !== 10) throw new Error(`${worker} did not receive the delta`);
     }
-    console.log(JSON.stringify({ workers: 3, logFile: tick.report.logFile }));
+    console.log(JSON.stringify({ workers: 3, logFile }));
   } else if (mode === 'claude-code-hook' || mode === 'github-action') {
     detector([base]);
     const result = detector([changed]);

@@ -6,6 +6,11 @@ const lockDeps = {
   acquireLock: () => ({ ok: true, token: 'lock' }),
   releaseLock: () => ({ ok: true }),
   assertLockOwned: () => true,
+  // `init` performs a real baseline detector tick internally, so without
+  // this it writes a real breadcrumb into the developer's REAL
+  // ~/.local/state/gh-delta/registry (env defaults to process.env, which
+  // does not redirect it).
+  env: { GH_DELTA_NO_REGISTRY: '1' },
 };
 const pr = {
   number: 1,
@@ -141,7 +146,16 @@ test('explain requires explicit local input and demo never contacts the public r
     now: () => '2026-01-01T00:00:00Z',
     readFileSync: () =>
       JSON.stringify({
-        deltas: [{ id, classes: ['closed'], from: { state: 'OPEN' }, to: { state: 'CLOSED' } }],
+        deltas: [
+          {
+            id,
+            classes: ['closed'],
+            // Schema v2: a delta's from/to are the bare compared fingerprint,
+            // not the full snapshot item.
+            from: { state: 'OPEN' },
+            to: { state: 'CLOSED' },
+          },
+        ],
       }),
   });
   assert.equal(explain.code, 0);

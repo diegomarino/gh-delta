@@ -12,28 +12,40 @@ import { DELTA_CLASSES } from '../lib/contract.mjs';
 const issueDelta = {
   entity: 'issue',
   number: 17,
-  title: 'Backfill customer imports',
+  context: { title: 'Backfill customer imports' },
   classes: ['relabeled'],
-  line: 'ISSUE #17 "Backfill customer imports": relabeled',
 };
 
 const prDelta = {
   entity: 'pr',
   number: 42,
-  title: 'Add billing webhook',
+  context: { title: 'Add billing webhook' },
   classes: ['ci-changed', 'review-changed'],
-  line: 'PR #42 "Add billing webhook": ci-changed, review-changed',
 };
+
+// One repo's result row, as the enveloped report shape (lib/cli.mjs's
+// buildDetectorReport) always carries it.
+function result(overrides = {}) {
+  return {
+    repo: 'owner/repo',
+    baseline: false,
+    repoSource: 'flag',
+    stateFile: '/tmp/state.json',
+    rateLimit: null,
+    ...overrides,
+  };
+}
 
 test('baseline text output prints a heartbeat and baseline note', () => {
   const output = formatTextOutput({
     code: 0,
     report: {
-      baseline: true,
-      repo: 'owner/repo',
+      detectedAt: '2026-07-01T10:00:00.000Z',
       monitorId: 'watch',
-      at: '2026-07-01T10:00:00.000Z',
+      repos: ['owner/repo'],
+      results: [result({ baseline: true })],
       deltas: [],
+      filteredDeltas: 0,
       summary: 'baseline established: 1 PRs, 2 issues',
     },
     now: () => '2026-07-01T10:00:00.000Z',
@@ -49,10 +61,10 @@ test('text output makes suppressed attention-filter deltas visible to operators'
   const output = formatTextOutput({
     code: 0,
     report: {
-      baseline: false,
-      repo: 'owner/repo',
+      detectedAt: '2026-07-01T10:00:00.000Z',
       monitorId: 'watch',
-      at: '2026-07-01T10:00:00.000Z',
+      repos: ['owner/repo'],
+      results: [result()],
       deltas: [],
       filteredDeltas: 2,
     },
@@ -69,47 +81,43 @@ test('delta text output prints each delta with suggested action', () => {
   const output = formatTextOutput({
     code: 10,
     report: {
-      baseline: false,
-      repo: 'owner/repo',
+      detectedAt: '2026-07-01T10:05:00.000Z',
       monitorId: 'watch',
-      at: '2026-07-01T10:05:00.000Z',
+      repos: ['owner/repo'],
+      results: [result()],
+      filteredDeltas: 0,
       deltas: [
         prDelta,
         issueDelta,
         {
           entity: 'pr',
           number: 8,
-          title: '(missing from current fetch)',
+          context: { title: null },
           classes: ['still-missing'],
-          line: 'PR #8 "(missing from current fetch)": still-missing',
         },
         {
           entity: 'pr',
           number: 9,
-          title: 'Refactor queue worker',
+          context: { title: 'Refactor queue worker' },
           classes: ['unresolved-threads-added'],
-          line: 'PR #9 "Refactor queue worker": unresolved-threads-added',
         },
         {
           entity: 'issue',
           number: 21,
-          title: 'Webhook retries',
+          context: { title: 'Webhook retries' },
           classes: ['reappeared'],
-          line: 'ISSUE #21 "Webhook retries": reappeared',
         },
         {
           entity: 'pr',
           number: 10,
-          title: '(missing from current fetch)',
+          context: { title: null },
           classes: ['presumed-deleted'],
-          line: 'PR #10 "(missing from current fetch)": presumed-deleted',
         },
         {
           entity: 'pr',
           number: 11,
-          title: 'Deploy backend v2',
+          context: { title: 'Deploy backend v2' },
           classes: ['merged', 'ci-changed'],
-          line: 'PR #11 "Deploy backend v2": merged, ci-changed',
         },
       ],
       summary: '7 delta(s)',
@@ -122,13 +130,13 @@ test('delta text output prints each delta with suggested action', () => {
   assert.match(output, /suggested action: CI\/review changed/);
   assert.match(output, /ISSUE #17 "Backfill customer imports"/);
   assert.match(output, /suggested action: scope\/state changed/);
-  assert.match(output, /PR #8 "\(missing from current fetch\)"/);
+  assert.match(output, /PR #8 "\(no title\)"/);
   assert.match(output, /suggested action: object is still absent/);
   assert.match(output, /PR #9 "Refactor queue worker"/);
   assert.match(output, /suggested action: unresolved review threads/);
   assert.match(output, /ISSUE #21 "Webhook retries"/);
   assert.match(output, /suggested action: object returned to the fetch/);
-  assert.match(output, /PR #10 "\(missing from current fetch\)"/);
+  assert.match(output, /PR #10 "\(no title\)"/);
   assert.match(output, /suggested action: absent for several consecutive ticks/);
   assert.match(output, /PR #11 "Deploy backend v2"/);
   assert.match(output, /suggested action: item completed or closed/);
@@ -140,11 +148,12 @@ test('every contract delta class has a specific suggested action', () => {
     const output = formatTextOutput({
       code: 10,
       report: {
-        baseline: false,
-        repo: 'owner/repo',
+        detectedAt: '2026-07-01T10:05:00.000Z',
         monitorId: 'watch',
-        at: '2026-07-01T10:05:00.000Z',
-        deltas: [{ entity: 'pr', number: 1, title: 't', classes: [klass] }],
+        repos: ['owner/repo'],
+        results: [result()],
+        filteredDeltas: 0,
+        deltas: [{ entity: 'pr', number: 1, context: { title: 't' }, classes: [klass] }],
       },
       now: () => '2026-07-01T10:05:00.000Z',
     });
@@ -156,14 +165,38 @@ test('every contract delta class has a specific suggested action', () => {
   }
 });
 
+test('review-comments-added and review-comments-removed have operator suggestions', () => {
+  const render = (classes) =>
+    formatTextOutput({
+      code: 10,
+      report: {
+        detectedAt: '2026-07-01T10:05:00.000Z',
+        monitorId: 'watch',
+        repos: ['owner/repo'],
+        results: [result()],
+        filteredDeltas: 0,
+        deltas: [{ entity: 'pr', number: 1, context: { title: 't' }, classes }],
+      },
+      now: () => '2026-07-01T10:05:00.000Z',
+    });
+  assert.match(render(['review-comments-added']), /review thread repl/i);
+  assert.match(render(['review-comments-removed']), /review thread repl/i);
+});
+
 test('error text output reports snapshot-preserving failure', () => {
   const output = formatTextOutput({
     code: 1,
     report: {
-      error: 'gh: API rate limit exceeded',
-      repo: 'owner/repo',
+      detectedAt: '2026-07-01T10:10:00.000Z',
       monitorId: 'watch',
-      at: '2026-07-01T10:10:00.000Z',
+      repos: ['owner/repo'],
+      results: [
+        result({
+          error: { kind: 'github', message: 'gh: API rate limit exceeded' },
+        }),
+      ],
+      deltas: [],
+      filteredDeltas: 0,
     },
     now: () => '2026-07-01T10:10:00.000Z',
   });
@@ -181,15 +214,16 @@ test('text output neutralizes terminal control sequences in GitHub-derived title
   const output = formatTextOutput({
     code: 10,
     report: {
-      baseline: false,
-      repo: 'owner/repo',
+      detectedAt: '2026-07-01T10:05:00.000Z',
       monitorId: 'watch',
-      at: '2026-07-01T10:05:00.000Z',
+      repos: ['owner/repo'],
+      results: [result()],
+      filteredDeltas: 0,
       deltas: [
         {
           entity: 'pr',
           number: 1,
-          title: 'pwn\x1b]0;hijacked\x07\nowner/repo | 99 delta(s)',
+          context: { title: 'pwn\x1b]0;hijacked\x07\nowner/repo | 99 delta(s)' },
           classes: ['new'],
         },
       ],
@@ -310,6 +344,30 @@ test('permanent error text output tells operator to fix before retrying', () => 
   assert.match(output, /Fix the configuration or snapshot; retrying will not help/);
 });
 
+test('single-repo repo-scoped error renders through the enveloped results[] row', () => {
+  const output = formatTextOutput({
+    code: 2,
+    report: {
+      detectedAt: '2026-07-01T10:10:00.000Z',
+      monitorId: 'watch',
+      repos: ['owner/repo'],
+      results: [
+        result({
+          error: { kind: 'snapshot', message: 'invalid snapshot JSON', hint: 'run gh-delta reset' },
+        }),
+      ],
+      deltas: [],
+      filteredDeltas: 0,
+    },
+    now: () => '2026-07-01T10:10:00.000Z',
+  });
+
+  assert.match(output, /error \| 0 delta\(s\)/);
+  assert.match(output, /invalid snapshot JSON/);
+  assert.match(output, /hint: run gh-delta reset/);
+  assert.match(output, /Fix the configuration or snapshot; retrying will not help/);
+});
+
 test('text error renderers retain structured recovery hints without altering successes', () => {
   const report = { at: '2026-01-01T00:00:00Z', error: 'bad input', hint: 'use --repo owner/name' };
   assert.match(
@@ -329,10 +387,15 @@ test('text error renderers retain structured recovery hints without altering suc
     code: 1,
     now: () => report.at,
     report: {
-      at: report.at,
-      repos: ['o/r'],
+      detectedAt: report.at,
+      monitorId: 'watch',
+      repos: ['o/r', 'o/r2'],
+      results: [
+        result({ repo: 'o/r' }),
+        result({ repo: 'o/r2', error: { kind: 'io', message: 'nope', hint: 'fix disk' } }),
+      ],
       deltas: [],
-      errors: [{ repo: 'o/r', kind: 'io', message: 'nope', hint: 'fix disk' }],
+      filteredDeltas: 0,
     },
   });
   assert.match(aggregate, /hint: fix disk/);

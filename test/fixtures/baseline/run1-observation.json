@@ -2,32 +2,35 @@
   "pr": [
     {
       "number": 1,
+      "id": "PR_1",
       "title": "Add widget factory",
-      "state": "OPEN",
+      "url": "https://github.com/acme/widgets/pull/1",
+      "author": "alice",
+      "createdAt": "2025-11-01T09:00:00Z",
+      "headRefName": "feature/widget-factory",
+      "state": "open",
       "updatedAt": "2025-12-01T10:00:00Z",
       "isDraft": false,
-      "mergeable": "MERGEABLE",
-      "mergeStateStatus": "CLEAN",
-      "reviewDecision": "REVIEW_REQUIRED",
-      "statusCheckRollup": [
+      "headSha": "aaaaaaa1",
+      "baseRef": "main",
+      "mergeable": "mergeable",
+      "mergeStateStatus": "clean",
+      "reviewDecision": "review_required",
+      "checks": [
         {
           "name": "build",
-          "status": "COMPLETED",
-          "conclusion": "SUCCESS"
+          "kind": "check",
+          "status": "completed",
+          "conclusion": "success",
+          "detailsUrl": null
         }
       ],
-      "latestReviews": [],
-      "totalCommentsCount": 2,
-      "headRefOid": "aaaaaaa1",
-      "headRefName": "feature/widget-factory",
-      "reviewThreads": 0,
-      "unresolvedReviewThreads": 0,
-      "baseRefName": "main",
-      "labels": [
-        {
-          "name": "enhancement"
-        }
-      ],
+      "reviews": [],
+      "threads": [],
+      "conversationComments": 2,
+      "reviewComments": 0,
+      "recentComments": [],
+      "labels": [{ "name": "enhancement" }],
       "assignees": ["alice"],
       "reviewRequests": ["bob"]
     }
@@ -35,16 +38,17 @@
   "issue": [
     {
       "number": 10,
+      "id": "ISSUE_10",
       "title": "Widgets sometimes squeak",
-      "state": "OPEN",
+      "url": "https://github.com/acme/widgets/issues/10",
+      "author": "carol",
+      "createdAt": "2025-11-15T08:00:00Z",
+      "state": "open",
       "updatedAt": "2025-12-01T09:00:00Z",
-      "labels": [
-        {
-          "name": "bug"
-        }
-      ],
+      "labels": [{ "name": "bug" }],
       "assignees": ["carol"],
-      "comments": 1
+      "conversationComments": 1,
+      "recentComments": []
     }
   ]
 }

@@ -20,6 +20,8 @@ import { enrichDelta } from '../../lib/cli.mjs';
 import { compactReport, ndjsonReport } from '../../lib/compact-output.mjs';
 import { schemaFor } from '../../lib/schema.mjs';
 import { deltaId, deltaIdentity } from '../../lib/fingerprint.mjs';
+import { diffFingerprint } from '../../lib/diff.mjs';
+import { deltaSummary } from '../../lib/summary.mjs';
 import { baselineReport, deltaReport, detailReport } from './fixtures.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -99,44 +101,73 @@ function clone(report) {
 }
 
 function renderText(report) {
-  const r = clone(report);
-  for (const d of r.deltas) enrichDelta(d, { legacyLine: true });
-  return formatTextOutput({ code: 0, report: r, now: () => r.at });
+  return formatTextOutput({ code: 0, report: clone(report), now: () => report.detectedAt });
 }
 
 function renderBaseline(report) {
-  return formatTextOutput({ code: 0, report: clone(report), now: () => report.at });
+  return formatTextOutput({ code: 0, report: clone(report), now: () => report.detectedAt });
 }
+
+// Snapshot items store `{ fingerprint, context, meta }`; wrap a raw compared-
+// fields fragment (e.g. `pending`/`failed` below) into that shape.
+const loopItem = (fingerprint) =>
+  fingerprint && {
+    fingerprint,
+    context: { title: 'Add billing webhook', headRefName: 'feature/billing-webhook' },
+    meta: {
+      seenAt: null,
+      changedAt: null,
+      ticksSinceChange: 0,
+      missingTicks: 0,
+      staleEmittedFor: null,
+    },
+  };
 
 function loopDelta(classes, from, to) {
   const delta = {
+    repo: 'owner/repo',
     entity: 'pr',
     number: 42,
-    title: 'Add billing webhook',
-    headRefName: 'feature/billing-webhook',
+    context: { title: 'Add billing webhook', headRefName: 'feature/billing-webhook' },
     classes,
-    from,
-    to,
+    from: loopItem(from),
+    to: loopItem(to),
   };
-  return { id: deltaId(deltaIdentity('owner/repo', delta)), ...delta };
+  delta.id = deltaId(deltaIdentity('owner/repo', delta));
+  delta.changed = diffFingerprint(delta.from?.fingerprint, delta.to?.fingerprint);
+  delta.summary = deltaSummary(delta);
+  // Public contract: from/to are the bare fingerprint, not the full item --
+  // see lib/cli.mjs's matching strip step.
+  delta.from = delta.from?.fingerprint ?? null;
+  delta.to = delta.to?.fingerprint ?? null;
+  return delta;
 }
 
-function loopReport(at, delta = null, baseline = false) {
+function loopReport(detectedAt, delta = null, baseline = false) {
   return {
-    schemaVersion: 1,
-    baseline,
-    repo: 'owner/repo',
-    repoSource: 'flag',
+    schemaVersion: 2,
+    detectedAt,
     monitorId: 'pr-loop-60-secs',
     entities: ['pr'],
-    stateFile: '.gh-delta/repo-owner%2Frepo__monitor-pr-loop-60-secs__pr.json',
-    at,
+    repos: ['owner/repo'],
+    results: [
+      {
+        repo: 'owner/repo',
+        baseline,
+        repoSource: 'flag',
+        stateFile: '.gh-delta/repo-owner%2Frepo__monitor-pr-loop-60-secs__pr.json',
+        rateLimit: null,
+      },
+    ],
     deltas: delta ? [delta] : [],
+    filteredDeltas: 0,
+    warnings: [],
     summary: delta ? '1 delta(s)' : baseline ? 'baseline established: 0 PRs' : '0 delta(s)',
   };
 }
 
-// `--format json --detail`: summaryLine + legacy line + structured details.
+// `--format json --detail`: summaryLine + structured details, on top of the
+// always-on changed/summary fields.
 function colorJson(value, args = ['-C', '.']) {
   const plain = typeof value === 'string' ? value : `${JSON.stringify(value, null, 2)}\n`;
   // Colorize exactly the way an operator would read it in a shell.
@@ -145,7 +176,21 @@ function colorJson(value, args = ['-C', '.']) {
 
 function renderJson(report) {
   const r = clone(report);
-  for (const d of r.deltas) enrichDelta(d, { summaryLine: true, legacyLine: true, details: true });
+  for (const d of r.deltas) {
+    // fixtures.mjs's withId already stripped from/to to the public bare
+    // fingerprint (see lib/cli.mjs's matching strip step), but enrichDelta
+    // expects the pre-strip item shape ({fingerprint, context, meta}) --
+    // that's what a live run passes it (enrich, THEN strip). Rewrap here so
+    // enrichDelta recomputes changed/summary/details from real fingerprints
+    // instead of from two `undefined`s, then discard the rewrap.
+    const asItem = (fp) => fp && { fingerprint: fp, context: d.context, meta: {} };
+    const rewrapped = { ...d, from: asItem(d.from), to: asItem(d.to) };
+    enrichDelta(rewrapped, { summaryLine: true, details: true });
+    d.summaryLine = rewrapped.summaryLine;
+    d.details = rewrapped.details;
+    d.changed = rewrapped.changed;
+    d.summary = rewrapped.summary;
+  }
   return colorJson(r);
 }
 
@@ -160,7 +205,7 @@ const schemaColored = colorJson({
   $schema: compactSchema.$schema,
   title: compactSchema.title,
   schemaVersion: compactSchema.schemaVersion,
-  variants: compactSchema.anyOf.map((variant) => variant.required),
+  variants: [compactSchema.required],
 });
 
 // demo.cast — baseline followed by the agent-oriented compact delta report.
@@ -245,7 +290,7 @@ const schema = cast({ width: 100, autoHeight: true, title: 'gh-delta — compact
 schema
   .prompt()
   .command(
-    'gh-delta schema --format compact | jq \'{"$schema": ."$schema", title, schemaVersion, variants: [.anyOf[].required]}\'',
+    'gh-delta schema --format compact | jq \'{"$schema": ."$schema", title, schemaVersion, variants: [.required]}\'',
   )
   .enter()
   .block(schemaColored, 0.03)
@@ -269,10 +314,11 @@ const showActivity = (lines) => {
     .wait(2.8);
 };
 
-const pending = { state: 'OPEN', head: 'a1b2c3d', ci: 'pending' };
-const failed = { state: 'OPEN', head: 'a1b2c3d', ci: 'failed' };
-const fixPending = { state: 'OPEN', head: '9f31c2a', ci: 'pending' };
-const green = { state: 'OPEN', head: '9f31c2a', ci: 'green' };
+const check = (status, conclusion) => [{ name: 'test-unit', kind: 'check', status, conclusion }];
+const pending = { state: 'open', headSha: 'a1b2c3d', checks: check('in_progress', null) };
+const failed = { state: 'open', headSha: 'a1b2c3d', checks: check('completed', 'failure') };
+const fixPending = { state: 'open', headSha: '9f31c2a', checks: check('in_progress', null) };
+const green = { state: 'open', headSha: '9f31c2a', checks: check('completed', 'success') };
 
 commonLoop
   .prompt()

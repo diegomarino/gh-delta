@@ -1,7 +1,13 @@
 // ============================================================================
 // CONTRACT: the zero-new-flags CLI path must stay byte-for-byte identical to
-// released v0.5.0, forever. Every future PR is additive; any drift here on a
-// no-flags invocation is a BREAKING CONTRACT CHANGE, not a fixture bug.
+// released v0.7.0 (schema v2), forever. Every future PR is additive; any
+// drift here on a no-flags invocation is a BREAKING CONTRACT CHANGE, not a
+// fixture bug.
+//
+// These golden fixtures were regenerated exactly once, by hand-reviewed
+// design, as the schema-v2 epic's single deliberate act (E0): schema v1's
+// fixtures were retired along with REPORT_SCHEMA_VERSION 1. Do not regenerate
+// again outside of an equally deliberate, human-reviewed schemaVersion bump.
 //
 // This test compares REAL SERIALIZED BYTES on both sides, not parsed objects:
 //   - Report: the `output` string returned by `runCommand()` (the exact
@@ -42,7 +48,7 @@
 // ============================================================================
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -50,6 +56,7 @@ process.env.GH_DELTA_NO_REGISTRY = '1';
 
 import { runCommand } from '../lib/cli.mjs';
 import { REPORT_FIELDS } from '../lib/contract.mjs';
+import { getPackageMetadata } from '../lib/version.mjs';
 
 const UPDATE = process.env.GH_DELTA_UPDATE_BASELINE === '1';
 
@@ -95,6 +102,16 @@ function normalizeStateFile(text, stateFile) {
   return text.split(stateFile).join(STATE_FILE_PLACEHOLDER);
 }
 
+// The snapshot's `meta.ghDeltaVersion` echoes the live package version
+// (lib/cli.mjs), which release-please bumps on every release. Swap it for a
+// stable placeholder before comparing, the same way the state file path is
+// normalized above, so this golden fixture does not break on every version
+// bump -- only on an actual change to the snapshot's shape or content.
+const GH_DELTA_VERSION_PLACEHOLDER = '<GH_DELTA_VERSION>';
+function normalizeGhDeltaVersion(text) {
+  return text.split(getPackageMetadata().version).join(GH_DELTA_VERSION_PLACEHOLDER);
+}
+
 function assertBytesEqualOrUpdate(actualText, expectedFixtureName, message) {
   if (UPDATE) {
     writeFixtureText(expectedFixtureName, actualText);
@@ -119,13 +136,13 @@ test('contract-baseline: run1 seeds a baseline with no deltas', async () => {
   const { dir, stateFile } = makeTmpStateDir();
   try {
     const result = await runCommand(argv(stateFile), {
-      fetchPRs: () => observation.pr,
-      fetchIssues: () => observation.issue,
+      fetchPRs: () => ({ rows: observation.pr, rateLimit: null }),
+      fetchIssues: () => ({ rows: observation.issue, rateLimit: null }),
       now: () => '2026-01-01T00:00:00Z',
-      env: {},
+      env: { GH_DELTA_NO_REGISTRY: '1' },
     });
     assert.equal(result.code, 0);
-    assert.equal(result.report.baseline, true);
+    assert.equal(result.report.results[0].baseline, true);
     assert.deepEqual(result.report.deltas, []);
     // Sanity: report only carries fields from the frozen contract list.
     for (const key of Object.keys(result.report)) {
@@ -139,7 +156,7 @@ test('contract-baseline: run1 seeds a baseline with no deltas', async () => {
       'run1-expected-report.json',
       contractBreakMessage('run1 report'),
     );
-    const snapshotBytes = readFileSync(stateFile, 'utf8');
+    const snapshotBytes = normalizeGhDeltaVersion(readFileSync(stateFile, 'utf8'));
     assertBytesEqualOrUpdate(
       snapshotBytes,
       'run1-expected-snapshot.json',
@@ -158,10 +175,10 @@ test('contract-baseline: run2 reports real deltas against the prior snapshot', a
     // bytes straight into the state file, exercising the real read path.
     writeFileSync(stateFile, readFixtureText('run1-expected-snapshot.json'));
     const result = await runCommand(argv(stateFile), {
-      fetchPRs: () => observation.pr,
-      fetchIssues: () => observation.issue,
+      fetchPRs: () => ({ rows: observation.pr, rateLimit: null }),
+      fetchIssues: () => ({ rows: observation.issue, rateLimit: null }),
       now: () => '2026-01-01T01:00:00Z',
-      env: {},
+      env: { GH_DELTA_NO_REGISTRY: '1' },
     });
     assert.equal(result.code, 10);
     assert.equal(result.report.deltas.length, 2);
@@ -173,7 +190,7 @@ test('contract-baseline: run2 reports real deltas against the prior snapshot', a
       'run2-expected-report.json',
       contractBreakMessage('run2 report'),
     );
-    const snapshotBytes = readFileSync(stateFile, 'utf8');
+    const snapshotBytes = normalizeGhDeltaVersion(readFileSync(stateFile, 'utf8'));
     assertBytesEqualOrUpdate(
       snapshotBytes,
       'run2-expected-snapshot.json',
@@ -190,10 +207,10 @@ test('contract-baseline: run3 is a no-change tick with zero deltas', async () =>
   try {
     writeFileSync(stateFile, readFixtureText('run2-expected-snapshot.json'));
     const result = await runCommand(argv(stateFile), {
-      fetchPRs: () => observation.pr,
-      fetchIssues: () => observation.issue,
+      fetchPRs: () => ({ rows: observation.pr, rateLimit: null }),
+      fetchIssues: () => ({ rows: observation.issue, rateLimit: null }),
       now: () => '2026-01-01T02:00:00Z',
-      env: {},
+      env: { GH_DELTA_NO_REGISTRY: '1' },
     });
     assert.equal(result.code, 0);
     assert.deepEqual(result.report.deltas, []);
@@ -202,7 +219,7 @@ test('contract-baseline: run3 is a no-change tick with zero deltas', async () =>
       'run3-expected-report.json',
       contractBreakMessage('run3 report'),
     );
-    const snapshotBytes = readFileSync(stateFile, 'utf8');
+    const snapshotBytes = normalizeGhDeltaVersion(readFileSync(stateFile, 'utf8'));
     assertBytesEqualOrUpdate(
       snapshotBytes,
       'run3-expected-snapshot.json',
@@ -210,5 +227,54 @@ test('contract-baseline: run3 is a no-change tick with zero deltas', async () =>
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Guard: the v1 compat surface the schema-v2 epic retired must not creep
+// back into live code. `lib/fingerprint.mjs` is allowed one historical
+// mention of `comparableFingerprint` explaining what v1 used to do (marked
+// as history, no parens -- never called); a real reintroduction would call
+// it as a function. Docs and test comments that narrate the removal by name
+// are out of scope here (see docs/contract.md and test suites); this guard
+// only walks the shipped code surfaces named in the schema-v2 epic plan.
+test('schema-v2 leftover sweep: retired v1 identifiers do not reappear in shipped code', () => {
+  const roots = ['lib', 'examples', 'tools/examples'].map(
+    (dir) => new URL(`../${dir}/`, import.meta.url),
+  );
+  const files = [];
+  const walk = (dirUrl) => {
+    for (const entry of readdirSync(dirUrl, { withFileTypes: true })) {
+      const entryUrl = new URL(entry.name + (entry.isDirectory() ? '/' : ''), dirUrl);
+      if (entry.isDirectory()) walk(entryUrl);
+      else if (/\.(mjs|js|json|md)$/.test(entry.name)) files.push(entryUrl);
+    }
+  };
+  for (const root of roots) walk(root);
+
+  const forbidden = [
+    { name: 'hideInternalDetails', pattern: /hideInternalDetails/ },
+    { name: 'stripMissingBookkeeping', pattern: /stripMissingBookkeeping/ },
+    { name: 'commentsOverflow', pattern: /commentsOverflow/ },
+    // The retired `delta.line` alias and its `legacyLine` gate (see R3).
+    { name: 'delta.line alias', pattern: /\bdelta\.line\b|\blegacyLine\b/ },
+    // A live `comparableFingerprint` call/definition, not the historical
+    // prose mention in lib/fingerprint.mjs (which never appends `(`).
+    { name: 'comparableFingerprint call/definition', pattern: /comparableFingerprint\s*\(/ },
+    // v1's upgrade-compat guards for snapshots predating a given field.
+    {
+      name: 'oldFp compat guard',
+      pattern: /typeof oldFp\.\w+\s*===\s*['"]string['"]|Array\.isArray\(oldFp\./,
+    },
+  ];
+
+  for (const fileUrl of files) {
+    const text = readFileSync(fileUrl, 'utf8');
+    for (const { name, pattern } of forbidden) {
+      assert.equal(
+        pattern.test(text),
+        false,
+        `${fileUrl.pathname} still references retired identifier/pattern "${name}"`,
+      );
+    }
   }
 });

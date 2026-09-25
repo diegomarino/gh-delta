@@ -44,8 +44,8 @@ test('package includes README image assets referenced by docs', () => {
 
 test('gh-delta/contract exposes the runtime contract constants', async () => {
   const contract = await import('gh-delta/contract');
-  assert.equal(contract.REPORT_SCHEMA_VERSION, 1);
-  assert.equal(contract.OUTPOST_SCHEMA_VERSION, 1);
+  assert.equal(contract.REPORT_SCHEMA_VERSION, 2);
+  assert.equal(contract.OUTPOST_SCHEMA_VERSION, 2);
   assert.ok(Object.isFrozen(contract.DELTA_CLASSES));
   assert.ok(contract.DELTA_CLASSES.includes('first-seen'));
   assert.ok(contract.DELTA_CLASSES.includes('presumed-deleted'));
@@ -54,12 +54,16 @@ test('gh-delta/contract exposes the runtime contract constants', async () => {
   assert.ok(Object.isFrozen(contract.DELTA_FIELDS));
   assert.ok(contract.DELTA_FIELDS.includes('summaryLine'));
   assert.ok(contract.DELTA_FIELDS.includes('enrichment'));
-  assert.ok(contract.DELTA_FIELDS.includes('line'));
+  assert.ok(contract.DELTA_FIELDS.includes('context'));
+  assert.ok(contract.DELTA_FIELDS.includes('changed'));
+  assert.ok(contract.DELTA_FIELDS.includes('firstObserved'));
+  assert.ok(contract.DELTA_FIELDS.includes('seq'));
+  assert.equal(contract.DELTA_FIELDS.includes('line'), false);
   assert.ok(contract.DELTA_FIELDS.includes('details'));
   assert.ok(Object.isFrozen(contract.DELTA_DETAIL_FIELDS));
   assert.ok(contract.DELTA_DETAIL_FIELDS.includes('opaque'));
   assert.ok(Object.isFrozen(contract.DELTA_DETAIL_FIELDS_BY_CLASS));
-  assert.deepEqual(contract.DELTA_DETAIL_FIELDS_BY_CLASS['new-comments'], ['comments']);
+  assert.deepEqual(contract.DELTA_DETAIL_FIELDS_BY_CLASS['new-comments'], ['conversationComments']);
   assert.deepEqual(contract.DELTA_DETAIL_FIELDS_BY_CLASS.relabeled, ['labels']);
   assert.deepEqual(contract.ERROR_KINDS, [
     'config',

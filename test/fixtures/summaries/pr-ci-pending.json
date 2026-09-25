@@ -255,6 +255,11 @@
           "endCursor": null
         }
       }
+    },
+    "rateLimit": {
+      "cost": 1,
+      "remaining": 4999,
+      "resetAt": "2026-07-11T13:00:00Z"
     }
   }
 }

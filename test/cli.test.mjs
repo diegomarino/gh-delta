@@ -1,7 +1,6 @@
 // CLI contract tests: exit codes, snapshot safety, and user-facing detail output.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHmac } from 'node:crypto';
 
 // Tests must never leave breadcrumbs in the developer's real run registry.
 process.env.GH_DELTA_NO_REGISTRY = '1';
@@ -12,33 +11,69 @@ import { run, runCommand } from '../lib/cli.mjs';
 import { outpostSignature } from '../lib/outpost.mjs';
 import { prFingerprint } from '../lib/fingerprint.mjs';
 import { DELTA_DETAIL_FIELDS_BY_CLASS } from '../lib/contract.mjs';
+import { addWatch } from '../lib/watch.mjs';
+import { writeTerminalIgnoredLocked } from '../lib/watch-lock.mjs';
 
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 const basePr = {
   number: 42,
   title: 'add widget',
-  state: 'OPEN',
+  state: 'open',
   updatedAt: '2026-07-01T10:00:00Z',
   isDraft: false,
-  statusCheckRollup: [],
-  reviewDecision: 'REVIEW_REQUIRED',
-  latestReviews: [],
-  mergeable: 'UNKNOWN',
-  comments: [],
-  headRefOid: 'sha1',
+  checks: [],
+  reviewDecision: 'review_required',
+  reviews: [],
+  mergeable: 'unknown',
+  conversationComments: 0,
+  reviewComments: 0,
+  headSha: 'sha1',
 };
 
-test('outpostSignature matches the published HMAC-SHA256 known vector', () => {
+// Schema v2 snapshot item shape: `{ fingerprint, context, meta }` (see
+// lib/snapshot.mjs). Wraps a bare fingerprint fragment (often built by
+// prFingerprint) into the shape a persisted snapshot map now stores.
+const item = (fingerprint, meta = {}) => ({
+  fingerprint,
+  context: {},
+  meta: {
+    seenAt: null,
+    changedAt: null,
+    ticksSinceChange: 0,
+    missingTicks: 0,
+    staleEmittedFor: null,
+    ...meta,
+  },
+});
+
+// The prior-tick fingerprint most `existing` snapshot fixtures below start
+// from: PR 42 at rest, matching a fresh fetch of `basePr` (empty CI rollup,
+// empty reviews, no labels/assignees/reviewRequests, etc). Deviating fixtures
+// build their own via `prFingerprint({ ...basePr, ...overrides })` instead.
+const openFp = prFingerprint(basePr);
+
+// Standard Webhooks (https://www.standardwebhooks.com/) worked example,
+// independently verified: id, timestamp, body, and secret are fixed
+// literals, and the expected signature is a fixed literal too -- this must
+// catch a construction bug (wrong field order, wrong separator, hex instead
+// of base64, ms instead of seconds) that a round-trip through outpostSignature
+// itself could never catch.
+test('outpostSignature matches a fixed Standard Webhooks v1 test vector', () => {
   assert.equal(
-    outpostSignature('The quick brown fox jumps over the lazy dog', 'key'),
-    'sha256=f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8',
+    outpostSignature(
+      'msg_p5jXN8AQM9LWM0D4loKWxJek',
+      '1614265330',
+      '{"test": 2432232314}',
+      'MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw',
+    ),
+    'v1,ELhqG0Ku1gwOc1f4jyKdp3SFGFLAOdJ9bvpWLciCakI=',
   );
 });
 
-test('postOutpost signs the exact serialized body with the configured HMAC secret', async () => {
-  const { postOutpost } = await import('../lib/outpost.mjs');
-  const payload = { type: 'gh-delta.delta', title: 'snowman ☃' };
+test('postOutpost signs the exact serialized body with Standard Webhooks headers', async () => {
+  const { postOutpost, outpostSignature: sign } = await import('../lib/outpost.mjs');
+  const payload = { type: 'gh-delta.delta', deliveryId: 'gh-delta.delivery.v1:o/r:m:pr:1:x:t' };
   let sent;
 
   await postOutpost('https://example.com/hook', payload, {
@@ -49,11 +84,14 @@ test('postOutpost signs the exact serialized body with the configured HMAC secre
     },
   });
 
-  const expectedBody = '{"type":"gh-delta.delta","title":"snowman ☃"}';
+  const expectedBody =
+    '{"type":"gh-delta.delta","deliveryId":"gh-delta.delivery.v1:o/r:m:pr:1:x:t"}';
   assert.equal(sent.body, expectedBody, 'the signed bytes must be the bytes sent');
+  assert.equal(sent.headers['webhook-id'], payload.deliveryId);
+  assert.match(sent.headers['webhook-timestamp'], /^\d+$/);
   assert.equal(
-    sent.headers['X-GhDelta-Signature'],
-    `sha256=${createHmac('sha256', 'Jefe').update(expectedBody, 'utf8').digest('hex')}`,
+    sent.headers['webhook-signature'],
+    sign(payload.deliveryId, sent.headers['webhook-timestamp'], expectedBody, 'Jefe'),
   );
 });
 
@@ -75,27 +113,33 @@ test('--outpost-secret validates its environment-variable name before repo deriv
 
 test('--outpost-secret reads the injected environment and does not leak its value', async () => {
   const { runWithOutpost } = await import('../lib/cli.mjs');
-  const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
+  const d = deps([[{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: {
       pr: {
-        42: {
-          state: 'OPEN',
+        42: item({
+          state: 'open',
           updatedAt: '2026-07-01T10:00:00Z',
           isDraft: false,
           ci: 'x',
-          review: 'REVIEW_REQUIRED',
+          review: 'review_required',
           reviews: 'x',
-          mergeable: 'UNKNOWN',
-          comments: 0,
+          mergeable: 'unknown',
           head: 'sha1',
-        },
+        }),
       },
       issue: {},
     },
   });
-  d.fetchPRsByNumber = () => [{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }];
+  d.fetchPRsByNumber = () => ({
+    rows: [{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }],
+    rateLimit: RATE_LIMIT,
+  });
   let sent;
-  d.env = { OUTPOST_SECRET: 'not-in-report' };
+  // This overwrites the whole `env` object, so it must re-include the
+  // module-level GH_DELTA_NO_REGISTRY guard (line 6) itself -- otherwise this
+  // one resolved detector tick writes a real breadcrumb into the developer's
+  // ~/.local/state/gh-delta/registry.
+  d.env = { OUTPOST_SECRET: 'not-in-report', GH_DELTA_NO_REGISTRY: '1' };
   d.outpostFetch = async (_url, options) => {
     sent = options;
     return { ok: true, status: 202 };
@@ -117,7 +161,9 @@ test('--outpost-secret reads the injected environment and does not leak its valu
     d,
   );
 
-  assert.match(sent.headers['X-GhDelta-Signature'], /^sha256=[0-9a-f]{64}$/);
+  assert.match(sent.headers['webhook-signature'], /^v1,[A-Za-z0-9+/]+=*$/);
+  assert.match(sent.headers['webhook-timestamp'], /^\d+$/);
+  assert.equal(sent.headers['webhook-id'], JSON.parse(sent.body).deliveryId);
   assert.doesNotMatch(JSON.stringify(result), /not-in-report/);
   assert.doesNotMatch(sent.body, /not-in-report/);
 });
@@ -138,7 +184,7 @@ test('--outpost-secret requires an outpost URL and a non-empty injected value', 
   assert.match(emptyValue.report.error, /OUTPOST_SECRET.*unset or empty/);
 });
 
-test('unsigned postOutpost keeps the legacy headers and body bytes', async () => {
+test('unsigned postOutpost sends no Standard Webhooks headers and keeps the exact body bytes', async () => {
   const { postOutpost } = await import('../lib/outpost.mjs');
   let sent;
   await postOutpost(
@@ -168,15 +214,39 @@ const NOOP_LOCK_DEPS = {
   assertLockOwned: () => true,
 };
 
+// Every fetcher's real (lib/gh.mjs) return shape is `{ rows, rateLimit }`.
+// Most tests here don't care about the quota number, so this is the shared
+// default a mocked fetch gets unless a test overrides `fetchRateLimit`/the
+// fetcher itself to assert on it (see the accumulation tests near
+// --rate-limit-floor and the "tick accumulates" test below).
+const RATE_LIMIT = { cost: 1, remaining: 4999, resetAt: '2026-07-01T13:00:00.000Z' };
+
+// Schema v2 snapshot-wide meta is mandatory (lib/snapshot.mjs). Most
+// `existing` fixtures below only care about pr/issue contents, so `deps()`
+// stamps a valid default meta onto any `existing` snapshot that doesn't
+// already carry one -- letting horizonCutoff/writeSnapshotAtomic's meta
+// bookkeeping proceed without every fixture spelling out the full shape.
+const DEFAULT_OLD_META = {
+  schemaVersion: 2,
+  ghDeltaVersion: '0.0.0-test',
+  repo: 'o/r',
+  monitorId: 'main',
+  entities: ['pr', 'issue'],
+  scope: 'poll',
+  horizon: '2026-07-01T11:00:00.000Z',
+  createdAt: '2026-07-01T11:00:00.000Z',
+  updatedAt: '2026-07-01T11:00:00.000Z',
+};
+
 function deps(prSeq, { existing = null } = {}) {
   let writes = 0;
-  let stored = existing;
+  let stored = existing && !existing.meta ? { ...existing, meta: DEFAULT_OLD_META } : existing;
   let readPath;
   let writePath;
   return {
     ...NOOP_LOCK_DEPS,
-    fetchPRs: () => prSeq.shift(),
-    fetchIssues: () => [],
+    fetchPRs: () => ({ rows: prSeq.shift(), rateLimit: RATE_LIMIT }),
+    fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
     readSnapshot: (p) => {
       readPath = p;
       return stored;
@@ -209,8 +279,8 @@ test('first run returns code 0 (baseline) and writes the snapshot', () => {
     d,
   );
   assert.equal(code, 0);
-  assert.equal(report.schemaVersion, 1);
-  assert.equal(report.baseline, true);
+  assert.equal(report.schemaVersion, 2);
+  assert.equal(report.results[0].baseline, true);
   assert.equal(report.monitorId, 'main');
   assert.deepEqual(report.entities, ['pr', 'issue']);
   assert.equal(d.writes, 1);
@@ -221,7 +291,7 @@ test('error reports carry schemaVersion and omit deltas', () => {
   d.resolveRepo = () => ({ status: 'declined' });
   const { code, report } = run(['--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
   assert.equal(code, 2);
-  assert.equal(report.schemaVersion, 1);
+  assert.equal(report.schemaVersion, 2);
   assert.match(report.error, /--repo/);
   assert.equal(report.deltas, undefined);
   assert.equal(d.writes, 0);
@@ -254,7 +324,7 @@ test('eligible PR-only watch uses the economical fetch and separate explicit sta
   let targeted;
   d.fetchPRsByNumber = (_repo, numbers, options) => {
     targeted = { numbers, options };
-    return numbers.map((number) => ({ ...basePr, number }));
+    return { rows: numbers.map((number) => ({ ...basePr, number })), rateLimit: RATE_LIMIT };
   };
   d.fetchPRs = () => {
     throw new Error('broad fetch must not run for an eligible watch');
@@ -275,7 +345,7 @@ test('eligible PR-only watch uses the economical fetch and separate explicit sta
   assert.equal(result.code, 0);
   assert.deepEqual(targeted.numbers, [3, 9]);
   assert.equal(targeted.options.onProgress instanceof Function, true);
-  assert.equal(result.report.stateFile, '/tmp/economical.json.watch.json');
+  assert.equal(result.report.results[0].stateFile, '/tmp/economical.json.watch.json');
   assert.equal(d.readPath, '/tmp/economical.json.watch.json');
   assert.equal(d.writePath, '/tmp/economical.json.watch.json');
   assert.deepEqual(Object.keys(d.stored.pr), ['3', '9']);
@@ -298,7 +368,7 @@ test('empty eligible watch makes no GitHub calls and snapshots an empty PR unive
     d,
   );
   assert.equal(result.code, 0);
-  assert.equal(result.report.stateFile, '/tmp/empty-economical.json.watch.json');
+  assert.equal(result.report.results[0].stateFile, '/tmp/empty-economical.json.watch.json');
   assert.deepEqual(d.stored.pr, {});
   assert.deepEqual(d.stored.issue, {});
 });
@@ -320,7 +390,7 @@ test('ineligible watch lists retain broad fetch and ordinary state history', () 
     d,
   );
   assert.equal(result.code, 0);
-  assert.equal(result.report.stateFile, '/tmp/broad-watch.json');
+  assert.equal(result.report.results[0].stateFile, '/tmp/broad-watch.json');
   assert.equal(d.readPath, '/tmp/broad-watch.json');
 });
 
@@ -333,13 +403,13 @@ test('removing a watch projects old economical state without a missing delta', (
   const d = deps([], {
     existing: {
       pr: {
-        3: prFingerprint({ ...basePr, number: 3 }),
-        9: prFingerprint({ ...basePr, number: 9 }),
+        3: item(prFingerprint({ ...basePr, number: 3 })),
+        9: item(prFingerprint({ ...basePr, number: 9 })),
       },
       issue: {},
     },
   });
-  d.fetchPRsByNumber = () => [{ ...basePr, number: 3 }];
+  d.fetchPRsByNumber = () => ({ rows: [{ ...basePr, number: 3 }], rateLimit: RATE_LIMIT });
   const result = run(
     ['--repo', 'o/r', '--state-file', '/tmp/project-watch.json', '--watch-dir', dir],
     d,
@@ -356,9 +426,9 @@ test('a null alias for a still-watched PR enters the normal missing lifecycle', 
     JSON.stringify({ entity: 'pr', number: 3, until: 'merged', addedAt: '2026-07-01T00:00:00Z' }),
   );
   const d = deps([], {
-    existing: { pr: { 3: prFingerprint({ ...basePr, number: 3 }) }, issue: {} },
+    existing: { pr: { 3: item(prFingerprint({ ...basePr, number: 3 })) }, issue: {} },
   });
-  d.fetchPRsByNumber = () => [];
+  d.fetchPRsByNumber = () => ({ rows: [], rateLimit: RATE_LIMIT });
   const result = run(
     ['--repo', 'o/r', '--state-file', '/tmp/null-watch.json', '--watch-dir', dir],
     d,
@@ -377,28 +447,35 @@ test('economical watch logs derive from the selected state identity for explicit
     JSON.stringify({ entity: 'pr', number: 42, until: 'merged', addedAt: '2026-07-01T00:00:00Z' }),
   );
   const runEconomical = (stateArgs) => {
-    const d = deps([], { existing: { pr: { 42: prFingerprint(basePr) }, issue: {} } });
-    d.fetchPRsByNumber = () => [{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }];
+    const d = deps([], { existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} } });
+    d.fetchPRsByNumber = () => ({
+      rows: [{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }],
+      rateLimit: RATE_LIMIT,
+    });
     let appended;
-    d.appendDeltaLog = (file) => {
+    d.appendDeltaLog = (file, record) => {
       appended = file;
+      return { fromSeq: 1, toSeq: record.deltas.length, appended: record.deltas.length };
     };
     d.removeWatchUnchanged = () => false;
     const result = run(['--repo', 'o/r', '--watch-dir', watch, '--log', ...stateArgs], d);
     return { result, appended };
   };
   const explicit = runEconomical(['--state-file', '/tmp/economical-log.json']);
-  assert.equal(explicit.result.report.stateFile, '/tmp/economical-log.json.watch.json');
+  assert.equal(explicit.result.report.results[0].stateFile, '/tmp/economical-log.json.watch.json');
   assert.equal(
-    explicit.result.report.logFile,
+    explicit.result.report.results[0].logFile,
     '/tmp/economical-log.json.watch.json.deltalog.ndjson',
   );
-  assert.equal(explicit.appended, explicit.result.report.logFile);
+  assert.equal(explicit.appended, explicit.result.report.results[0].logFile);
 
   const derived = runEconomical(['--state-dir', '/tmp/economical-log-state']);
-  assert.match(derived.result.report.stateFile, /__watch-pr\.json$/);
-  assert.equal(derived.result.report.logFile, `${derived.result.report.stateFile}.deltalog.ndjson`);
-  assert.equal(derived.appended, derived.result.report.logFile);
+  assert.match(derived.result.report.results[0].stateFile, /__watch-pr\.json$/);
+  assert.equal(
+    derived.result.report.results[0].logFile,
+    `${derived.result.report.results[0].stateFile}.deltalog.ndjson`,
+  );
+  assert.equal(derived.appended, derived.result.report.results[0].logFile);
 });
 
 test('--entities issue makes a PR-only watch list retain normal full-fetch state', () => {
@@ -425,7 +502,7 @@ test('--entities issue makes a PR-only watch list retain normal full-fetch state
     d,
   );
   assert.equal(result.code, 0);
-  assert.equal(result.report.stateFile, '/tmp/issue-watch.json');
+  assert.equal(result.report.results[0].stateFile, '/tmp/issue-watch.json');
   assert.deepEqual(d.stored.pr, {});
   assert.deepEqual(d.stored.issue, {});
 });
@@ -437,7 +514,7 @@ test('economical run registers PR-only watch identity and scope', () => {
     JSON.stringify({ entity: 'pr', number: 42, until: 'merged', addedAt: '2026-07-01T00:00:00Z' }),
   );
   const d = deps([[]]);
-  d.fetchPRsByNumber = () => [{ ...basePr }];
+  d.fetchPRsByNumber = () => ({ rows: [{ ...basePr }], rateLimit: RATE_LIMIT });
   const registered = [];
   d.registerMonitor = (entry) => registered.push(entry);
   d.env = { GH_DELTA_REGISTRY_DIR: '/tmp/economical-registry' };
@@ -453,7 +530,7 @@ test('watch add local derivation decline is config without GitHub fetches', () =
     resolveLocalRepo: () => ({ status: 'declined' }),
     fetchPRs: () => {
       fetched = true;
-      return [];
+      return { rows: [], rateLimit: RATE_LIMIT };
     },
   });
   assert.equal(result.code, 2);
@@ -485,10 +562,13 @@ test('watch cleanup failure warns after snapshot publication', () => {
     join(watch, 'pr-42.json'),
     '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
   );
-  const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
-    existing: { pr: { 42: prFingerprint(basePr) }, issue: {} },
+  const d = deps([[{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }]], {
+    existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} },
   });
-  d.fetchPRsByNumber = () => [{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }];
+  d.fetchPRsByNumber = () => ({
+    rows: [{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }],
+    rateLimit: RATE_LIMIT,
+  });
   d.removeWatchUnchanged = () => {
     throw new Error('unlink denied');
   };
@@ -515,10 +595,13 @@ test('ignored merged terminal delta keeps its watch entry while snapshot advance
     entry,
     '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
   );
-  const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
-    existing: { pr: { 42: prFingerprint(basePr) }, issue: {} },
+  const d = deps([[{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }]], {
+    existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} },
   });
-  d.fetchPRsByNumber = () => [{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }];
+  d.fetchPRsByNumber = () => ({
+    rows: [{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }],
+    rateLimit: RATE_LIMIT,
+  });
   let cleanup = false;
   d.removeWatchUnchanged = () => {
     cleanup = true;
@@ -556,10 +639,13 @@ test('--until closed watch entry is cleaned up when the PR merges', () => {
     entry,
     '{"entity":"pr","number":42,"until":"closed","addedAt":"2026-07-01T00:00:00.000Z"}\n',
   );
-  const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
-    existing: { pr: { 42: prFingerprint(basePr) }, issue: {} },
+  const d = deps([[{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }]], {
+    existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} },
   });
-  d.fetchPRsByNumber = () => [{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }];
+  d.fetchPRsByNumber = () => ({
+    rows: [{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }],
+    rateLimit: RATE_LIMIT,
+  });
   const { code } = run(
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', state, '--watch-dir', watch],
     d,
@@ -578,10 +664,13 @@ test('--until merged keeps its watch entry when the PR closes without merging', 
     entry,
     '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
   );
-  const d = deps([[{ ...basePr, state: 'CLOSED', updatedAt: '2026-07-01T11:00:00Z' }]], {
-    existing: { pr: { 42: prFingerprint(basePr) }, issue: {} },
+  const d = deps([[{ ...basePr, state: 'closed', updatedAt: '2026-07-01T11:00:00Z' }]], {
+    existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} },
   });
-  d.fetchPRsByNumber = () => [{ ...basePr, state: 'CLOSED', updatedAt: '2026-07-01T11:00:00Z' }];
+  d.fetchPRsByNumber = () => ({
+    rows: [{ ...basePr, state: 'closed', updatedAt: '2026-07-01T11:00:00Z' }],
+    rateLimit: RATE_LIMIT,
+  });
   const { code } = run(
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', state, '--watch-dir', watch],
     d,
@@ -594,6 +683,879 @@ test('--until merged keeps its watch entry when the PR closes without merging', 
   assert.deepEqual(ls.report.entries, [
     { entity: 'pr', number: 42, until: 'merged', addedAt: '2026-07-01T00:00:00.000Z' },
   ]);
+});
+
+// A PR that merges AND relabels in the same tick still carries `to.state ===
+// 'merged'` even after `--ignore-classes merged` strips the `merged` class
+// (attention filtering only touches `delta.classes`, never the compared
+// fingerprint -- see applyAttentionFilters). The cleanup loop must key off a
+// SURVIVING terminal class, not the raw unfiltered state, or an operator's
+// explicit --ignore-classes is silently overridden and monitoring ends anyway.
+test('--ignore-classes merged protects a --until merged watch entry even when the PR also merges', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-ignore-merged-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const mergedAndRelabeled = {
+    ...basePr,
+    state: 'merged',
+    updatedAt: '2026-07-01T11:00:00Z',
+    labels: [{ name: 'shipped' }],
+  };
+  const d = deps([[mergedAndRelabeled]], {
+    existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} },
+  });
+  d.fetchPRsByNumber = () => ({ rows: [mergedAndRelabeled], rateLimit: RATE_LIMIT });
+  const { code, report } = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      state,
+      '--watch-dir',
+      watch,
+      '--ignore-classes',
+      'merged',
+    ],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.deepEqual(report.deltas[0].classes, ['relabeled']);
+  assert.equal(existsSync(entry), true, 'the watch entry must survive: merged was ignored');
+});
+
+// Same tick, no --ignore-classes: the merged class survives filtering (there
+// is no filtering), so cleanup must still fire -- guards against
+// over-correcting the fix above into never cleaning up a relabeled merge.
+test('the same merge-and-relabel tick without --ignore-classes still cleans up the watch entry', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-merged-relabeled-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const mergedAndRelabeled = {
+    ...basePr,
+    state: 'merged',
+    updatedAt: '2026-07-01T11:00:00Z',
+    labels: [{ name: 'shipped' }],
+  };
+  const d = deps([[mergedAndRelabeled]], {
+    existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} },
+  });
+  d.fetchPRsByNumber = () => ({ rows: [mergedAndRelabeled], rateLimit: RATE_LIMIT });
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', state, '--watch-dir', watch],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.deepEqual(report.deltas[0].classes.sort(), ['merged', 'relabeled'].sort());
+  assert.equal(existsSync(entry), false);
+});
+
+// diffEntity's `new`/`first-seen` path never combines its class with
+// `merged`/`closed` (see lib/detect.mjs: `classes: [fp.state === 'open' ?
+// 'new' : 'first-seen']` is always a bare one-element array) -- a watched PR
+// absent from the snapshot but already terminal on its first observation
+// (e.g. it merges between `watch add` and the first poll) can NEVER carry a
+// surviving transition class, with or without any filter in play. Requiring
+// one, as the previous round did, stranded the watch entry forever: the
+// snapshot records the terminal fingerprint, so no later tick fires any
+// delta at all for it. `first-seen`/`baseline-state`/`new` are OBSERVATION
+// classes (delta.firstObserved === true) -- "first time seeing this item" --
+// which says nothing about a transition an attention filter could mean to
+// protect, unlike a real `merged`/`closed` transition class, which
+// classifyPr/classifyIssue only ever attach when an actual state change was
+// observed (see the `if (oldFp.state !== fp.state)` guard there).
+test('a watched PR absent from the snapshot but already merged on first observation is cleaned up (no leaked watch entry)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-first-seen-merged-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const alreadyMerged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
+  // PR 42 is absent from the existing snapshot's pr map (present but empty),
+  // so this is NOT a baseline run -- diffEntity takes the first-seen path.
+  const d = deps([[alreadyMerged]], { existing: { pr: {}, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: [alreadyMerged], rateLimit: RATE_LIMIT });
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', state, '--watch-dir', watch],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.deepEqual(report.deltas[0].classes, ['first-seen']);
+  assert.equal(report.deltas[0].firstObserved, true);
+  assert.equal(existsSync(entry), false, 'the watch entry must not be stranded forever');
+});
+
+// The `--until closed` equivalent of the above: a watched PR absent from the
+// snapshot but already closed (not merged) on first observation.
+test('a watched PR absent from the snapshot but already closed on first observation is cleaned up under --until closed', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-first-seen-closed-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"closed","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const alreadyClosed = { ...basePr, state: 'closed', updatedAt: '2026-07-01T11:00:00Z' };
+  const d = deps([[alreadyClosed]], { existing: { pr: {}, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: [alreadyClosed], rateLimit: RATE_LIMIT });
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', state, '--watch-dir', watch],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.deepEqual(report.deltas[0].classes, ['first-seen']);
+  assert.equal(existsSync(entry), false);
+});
+
+// A first-seen delta is an observation, not a transition -- an attention
+// filter targeting it is a report-shaping preference, never a "do not clean
+// up" instruction the way `--ignore-classes merged` legitimately is for a
+// real transition (see the two tests above this block). Filtering
+// `first-seen` itself drops the WHOLE delta before the cleanup loop ever
+// sees it (applyAttentionFilters discards a delta once every class is
+// stripped), so cleanup does not fire on this tick either way -- this test
+// pins that this is a report-visibility side effect, not a silent
+// resurrection of the fixed leak, and is a pre-existing characteristic of
+// "attention filtering also gates which deltas the cleanup loop ever sees"
+// that predates all three rounds on this predicate (see the note in the
+// commit message about it being out of scope here).
+test('--ignore-classes first-seen drops the delta entirely, so cleanup does not fire this tick either', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-ignore-first-seen-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const alreadyMerged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
+  const d = deps([[alreadyMerged]], { existing: { pr: {}, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: [alreadyMerged], rateLimit: RATE_LIMIT });
+  const { code, report } = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      state,
+      '--watch-dir',
+      watch,
+      '--ignore-classes',
+      'first-seen',
+    ],
+    d,
+  );
+  assert.equal(code, 0);
+  assert.deepEqual(report.deltas, []);
+  assert.equal(existsSync(entry), true);
+});
+
+// `baseline-state` (--baseline-emit-state) can never be terminal by
+// construction: baselineStateDeltas filters to `d.to.fingerprint.state ===
+// 'open'` only (lib/detect.mjs), so there is no reachable watch-cleanup
+// scenario to test end-to-end for it -- this pins that structural invariant
+// directly instead of asserting a real-code-path scenario that cannot occur.
+test('baseline-emit-state deltas can never carry a terminal state (structural invariant backing the observation-class reasoning)', () => {
+  const d = deps([[{ ...basePr, state: 'merged' }]]);
+  const { report } = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/gd-baseline-state-terminal.json',
+      '--baseline-emit-state',
+    ],
+    d,
+  );
+  assert.deepEqual(report.deltas, [], 'a terminal item is silently seeded, never baseline-state');
+});
+
+// The remaining gap in the space: broad polling (forced here by an issue
+// watch entry, per lib/cli.mjs's economicalWatch -- any non-PR entry falls
+// back to full fetching) can already hold an already-terminal item in its
+// snapshot from BEFORE the watch was added. A later metadata-only change
+// (e.g. a relabel) fires a delta whose ONLY class is `relabeled` --
+// classifyPr never re-adds `merged`/`closed` because `from.state` already
+// equals `to.state` (no state transition this tick) -- while `firstObserved`
+// is absent (the item was already known). Neither of the previous two
+// rounds' conditions fires, so cleanup must key off `from.state` already
+// being terminal: there was no transition THIS tick for any attention
+// filter to have meant "ignore" about.
+test('an already-terminal item with only a metadata-only delta (broad polling) is still cleaned up', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-already-terminal-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const prEntry = join(watch, 'pr-42.json');
+  writeFileSync(
+    prEntry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  // An issue watch entry forces broad polling (economicalWatch requires
+  // every watched entry to be a PR) -- irrelevant to this PR's own cleanup,
+  // present only to exercise the broad-polling path the finding names.
+  writeFileSync(
+    join(watch, 'issue-1.json'),
+    '{"entity":"issue","number":1,"until":"closed","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const alreadyMergedFp = prFingerprint({ ...basePr, state: 'merged' });
+  const relabeledStillMerged = {
+    ...basePr,
+    state: 'merged',
+    updatedAt: '2026-07-01T11:00:00Z',
+    labels: [{ name: 'shipped' }],
+  };
+  const d = deps([[relabeledStillMerged]], {
+    existing: { pr: { 42: item(alreadyMergedFp) }, issue: {} },
+  });
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', state, '--watch-dir', watch],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.deepEqual(report.deltas[0].classes, ['relabeled']);
+  assert.equal(report.deltas[0].firstObserved, undefined);
+  assert.equal(existsSync(prEntry), false, 'an already-terminal item must not strand its entry');
+});
+
+// The round-7 defect: classifyPr classifies by DESTINATION state only
+// (`if (oldFp.state !== fp.state) { if (fp.state === 'merged') ... }`), not
+// by requiring the prior state to be open. A PR observed `closed`, then
+// reopened and merged between polls, still emits `merged` -- a genuine
+// transition -- even though `from.state` was already terminal (`closed`).
+// The round-6 predicate wrongly treated ANY terminal from.state as "no
+// transition happened", silently skipping the marker for this exact case.
+test('a PR observed closed, then reopened and merged between polls, under --ignore-classes merged with a surviving class: marked and kept', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-closed-to-merged-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const previouslyClosedFp = prFingerprint({ ...basePr, state: 'closed' });
+  const mergedAndRelabeled = {
+    ...basePr,
+    state: 'merged',
+    updatedAt: '2026-07-01T11:00:00Z',
+    labels: [{ name: 'shipped' }],
+  };
+  const d = deps([[mergedAndRelabeled]], {
+    existing: { pr: { 42: item(previouslyClosedFp) }, issue: {} },
+  });
+  d.fetchPRsByNumber = () => ({ rows: [mergedAndRelabeled], rateLimit: RATE_LIMIT });
+  const { code, report } = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      state,
+      '--watch-dir',
+      watch,
+      '--ignore-classes',
+      'merged',
+    ],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.deepEqual(report.deltas[0].classes, ['relabeled']);
+  assert.equal(existsSync(entry), true, 'closed -> merged is a real transition; it must be marked');
+  assert.equal(
+    JSON.parse(readFileSync(entry, 'utf8')).ignoredTerminalAt !== undefined,
+    true,
+    'the closed -> merged transition must be recorded as ignored',
+  );
+});
+
+test('a PR observed closed, then reopened and merged with the delta ENTIRELY dropped by the filter: marked and kept on a later tick', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-closed-to-merged-dropped-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const previouslyClosedFp = prFingerprint({ ...basePr, state: 'closed' });
+  const merged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
+  const mergedRelabeled = { ...merged, updatedAt: '2026-07-01T12:00:00Z', labels: [{ name: 'a' }] };
+  const rowSeq = [[merged], [mergedRelabeled]];
+  const d = deps([[]], { existing: { pr: { 42: item(previouslyClosedFp) }, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: rowSeq.shift(), rateLimit: RATE_LIMIT });
+  const argvWith = () => [
+    '--repo',
+    'o/r',
+    '--monitor-id',
+    'main',
+    '--state-file',
+    state,
+    '--watch-dir',
+    watch,
+    '--ignore-classes',
+    'merged',
+  ];
+
+  // Tick 1: the closed -> merged transition, its only class `merged`, fully
+  // dropped by the filter (nothing else survives).
+  const tick1 = run(argvWith(), d);
+  assert.equal(tick1.code, 0);
+  assert.deepEqual(tick1.report.deltas, []);
+  assert.equal(existsSync(entry), true);
+  assert.equal(
+    JSON.parse(readFileSync(entry, 'utf8')).ignoredTerminalAt !== undefined,
+    true,
+    'a fully dropped closed -> merged transition must still be marked',
+  );
+
+  // Tick 2: a later, unrelated metadata-only delta under the SAME filter --
+  // the mark recorded on tick 1 must protect it.
+  const tick2 = run(argvWith(), d);
+  assert.equal(tick2.code, 10);
+  assert.deepEqual(tick2.report.deltas[0].classes, ['relabeled']);
+  assert.equal(existsSync(entry), true, 'the mark must protect the entry on the later tick');
+});
+
+// The hole reported in the fourth round on this predicate: 'already-terminal
+// from.state implies eligible' (the fix above) cannot by itself distinguish
+// "terminal before the watch existed" from "terminal transition ignored
+// while watched" -- both look identical in the CURRENT tick's data. Closing
+// it needs new persisted state: lib/watch.mjs's `ignoredTerminalAt`,
+// written the moment a genuine transition's terminal class is filtered
+// (see lib/cli.mjs's watchedTerminalTransitionFilteredThisTick), and
+// checked against the CURRENT invocation's filters on every later tick
+// (isTerminalCleanupEligible) so the entry stays protected for as long as
+// -- and only as long as -- the same filter keeps applying.
+test('--ignore-classes merged protects a --until merged entry across multiple subsequent ticks, until the filter is dropped', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-ignored-sticky-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const merged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
+  const mergedRelabeledA = {
+    ...merged,
+    updatedAt: '2026-07-01T12:00:00Z',
+    labels: [{ name: 'a' }],
+  };
+  const mergedRelabeledB = {
+    ...merged,
+    updatedAt: '2026-07-01T13:00:00Z',
+    labels: [{ name: 'b' }],
+  };
+  const rowSeq = [[merged], [mergedRelabeledA], [mergedRelabeledB]];
+  const d = deps([[]], { existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: rowSeq.shift(), rateLimit: RATE_LIMIT });
+  const argvWith = (extra = []) => [
+    '--repo',
+    'o/r',
+    '--monitor-id',
+    'main',
+    '--state-file',
+    state,
+    '--watch-dir',
+    watch,
+    ...extra,
+  ];
+
+  // Tick 1: the merge itself, under --ignore-classes merged. Its ONLY class
+  // is `merged`, so filtering drops the WHOLE delta -- an empty report, but
+  // the entry must survive AND get marked (this is the moment that trace
+  // would otherwise be lost forever).
+  const tick1 = run(argvWith(['--ignore-classes', 'merged']), d);
+  assert.equal(tick1.code, 0);
+  assert.deepEqual(tick1.report.deltas, []);
+  assert.equal(existsSync(entry), true, 'the filtered merge itself must not strand the entry');
+  assert.equal(
+    JSON.parse(readFileSync(entry, 'utf8')).ignoredTerminalAt !== undefined,
+    true,
+    'the merge tick must durably record that its transition was ignored',
+  );
+
+  // Tick 2: an unrelated metadata-only delta, SAME filter still active. This
+  // is the reported hole: from.state is already 'merged', and the surviving
+  // delta carries no `merged` class at all (the state did not change again)
+  // -- without the recorded mark, this would have silently cleaned up.
+  const tick2 = run(argvWith(['--ignore-classes', 'merged']), d);
+  assert.equal(tick2.code, 10);
+  assert.deepEqual(tick2.report.deltas[0].classes, ['relabeled']);
+  assert.equal(existsSync(entry), true, 'protection must survive a second, unrelated tick');
+
+  // Tick 3: the filter is DROPPED. The mark no longer protects anything --
+  // cleanup fires on the very next delta, whatever its class.
+  const tick3 = run(argvWith(), d);
+  assert.equal(tick3.code, 10);
+  assert.deepEqual(tick3.report.deltas[0].classes, ['relabeled']);
+  assert.equal(existsSync(entry), false, 'dropping the filter must clean up on the next tick');
+});
+
+// The ordering defect: markTerminalIgnored ran AFTER the snapshot publish
+// and its failure was reduced to a warning. A filtered terminal transition
+// is unrepeatable -- once the snapshot advances to the terminal state, no
+// later tick will ever see the transition again -- so publishing anyway
+// permanently strands the entry into the exact premature-cleanup bug the
+// marker exists to prevent. The fix: the marker write now runs BEFORE
+// publication, and a failure there fails the WHOLE tick (same class as an
+// unwritable state directory or a lost lock, already failing ticks a few
+// lines up), so the snapshot never advances past a filtered transition
+// without the marker that protects it.
+test('a marker write failure fails the tick instead of publishing an unmarked terminal snapshot', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-mark-write-fails-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const merged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
+  const mergedRelabeled = {
+    ...merged,
+    updatedAt: '2026-07-01T12:00:00Z',
+    labels: [{ name: 'a' }],
+  };
+  const rowSeq = [[merged], [merged], [mergedRelabeled]];
+  const d = deps([[]], { existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: rowSeq.shift(), rateLimit: RATE_LIMIT });
+  const argvWith = (extra = []) => [
+    '--repo',
+    'o/r',
+    '--monitor-id',
+    'main',
+    '--state-file',
+    state,
+    '--watch-dir',
+    watch,
+    '--ignore-classes',
+    'merged',
+    ...extra,
+  ];
+
+  // Tick 1: the merge, filtered, but the marker write is made to fail.
+  d.writeTerminalIgnoredLocked = () => {
+    throw new Error('EACCES: permission denied');
+  };
+  const tick1 = run(argvWith(), d);
+  assert.equal(tick1.code, 1);
+  assert.equal(tick1.report.results[0].error.kind, 'io');
+  assert.equal(d.writes, 0, 'the snapshot must NOT advance past an unmarked filtered transition');
+  assert.equal(existsSync(entry), true);
+  assert.equal(JSON.parse(readFileSync(entry, 'utf8')).ignoredTerminalAt, undefined);
+
+  // Tick 2: a real retry (marker writes work again). The snapshot never
+  // advanced, so the SAME transition is observed again from scratch, and
+  // this time it is correctly marked and published together.
+  delete d.writeTerminalIgnoredLocked;
+  const tick2 = run(argvWith(), d);
+  assert.equal(tick2.code, 0);
+  assert.equal(d.writes, 1);
+  assert.equal(
+    JSON.parse(readFileSync(entry, 'utf8')).ignoredTerminalAt !== undefined,
+    true,
+    'the retried tick must record the marker this time',
+  );
+
+  // Tick 3: a later, unrelated metadata-only delta under the SAME filter --
+  // the marker recorded on the successful retry must still protect it.
+  const tick3 = run(argvWith(), d);
+  assert.equal(tick3.code, 10);
+  assert.deepEqual(tick3.report.deltas[0].classes, ['relabeled']);
+  assert.equal(
+    existsSync(entry),
+    true,
+    'the marker recorded on retry must protect the entry, not just the failed attempt',
+  );
+});
+
+// The concurrency defect: `watch add`/`rm` never touch the state-file lock
+// this tick holds throughout -- only the per-entry lock, a genuinely
+// separate resource (see the code comment above the marker-write block).
+// A concurrent `watch add` replacing this entry mid-tick is therefore real,
+// not theoretical. Case 1: the replacement lands BEFORE the mark call reads
+// the file, so markTerminalIgnored's own byte comparison correctly returns
+// false -- previously silently ignored. The tick must fail rather than
+// publish a terminal snapshot for a transition nothing now protects.
+test('a watch entry replaced concurrently just before it is marked fails the tick, not silently', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-race-before-mark-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const merged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
+  const d = deps([[]], { existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: [merged], rateLimit: RATE_LIMIT });
+  // Simulate a concurrent `watch add pr:42 --until closed` landing between
+  // watchFiles being read at tick start and the mark write itself: the real
+  // writeTerminalIgnoredLocked, called against the ORIGINAL (now stale)
+  // bytes, correctly observes the mismatch and returns false. (This
+  // replacement is written directly, bypassing the entry's own lock, to
+  // isolate what the byte comparison alone catches -- see the later test
+  // for the lock itself refusing a real, lock-respecting `watch add`.)
+  d.writeTerminalIgnoredLocked = (path, bytes, ignoredAt) => {
+    writeFileSync(
+      path,
+      '{"entity":"pr","number":42,"until":"closed","addedAt":"2026-07-01T00:05:00.000Z"}\n',
+    );
+    return writeTerminalIgnoredLocked(path, bytes, ignoredAt);
+  };
+  const { code, report } = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      state,
+      '--watch-dir',
+      watch,
+      '--ignore-classes',
+      'merged',
+    ],
+    d,
+  );
+  assert.equal(code, 1);
+  assert.equal(report.results[0].error.kind, 'busy');
+  assert.equal(d.writes, 0, 'the snapshot must not advance past an unmarked filtered transition');
+  // The concurrent replacement itself is untouched -- our own write never
+  // even attempted to clobber it (markTerminalIgnored's own compare fenced
+  // that off).
+  assert.equal(JSON.parse(readFileSync(entry, 'utf8')).until, 'closed');
+});
+
+// Round 9: every prior round moved a CHECK (verify the mark survived,
+// re-verify immediately before publication) without ever holding a lock
+// across both the mark and the snapshot publish -- so a replacement landing
+// in the gap between "mark succeeded" and "snapshot committed" always found
+// a fresh window to land in. This test exercises the actual interleaving
+// across that boundary, not just a before-the-fact detection: a REAL,
+// lock-respecting `addWatch` call attempted WHILE the tick is inside its
+// mark-and-publish critical section must fail fast ("watch entry locked"),
+// proving the entry's lock is genuinely held for the whole span, not
+// released between the two writes. The tick itself, unaware its entry lock
+// was contended for a moment, completes normally.
+test('a real concurrent watch add attempted during mark-and-publish fails fast, proving the lock spans both', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-lock-spans-publish-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const merged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
+  const d = deps([[]], { existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: [merged], rateLimit: RATE_LIMIT });
+  let concurrentAddThrew = null;
+  d.writeTerminalIgnoredLocked = (path, bytes, ignoredAt) => {
+    const marked = writeTerminalIgnoredLocked(path, bytes, ignoredAt);
+    // We are still INSIDE withTerminalMarkLocks' held lock here (the mark
+    // write and the eventual snapshot publish both happen inside its
+    // callback) -- a real `watch add` attempting to touch this exact entry
+    // right now must be refused, not silently interleaved.
+    try {
+      addWatch(watch, 'pr:42', 'closed');
+    } catch (err) {
+      concurrentAddThrew = err;
+    }
+    return marked;
+  };
+  const { code } = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      state,
+      '--watch-dir',
+      watch,
+      '--ignore-classes',
+      'merged',
+    ],
+    d,
+  );
+  assert.match(String(concurrentAddThrew?.message), /watch entry locked/);
+  // The tick itself is unaffected by the OTHER process's failed attempt --
+  // its own hold on the lock, not the contender's, is what mattered.
+  assert.equal(code, 0);
+  assert.equal(
+    d.writes,
+    1,
+    'the snapshot must still publish normally for the tick that holds the lock',
+  );
+  assert.equal(
+    JSON.parse(readFileSync(entry, 'utf8')).ignoredTerminalAt !== undefined,
+    true,
+    'the entry must be marked and untouched by the failed concurrent add',
+  );
+  assert.equal(
+    JSON.parse(readFileSync(entry, 'utf8')).until,
+    'merged',
+    'the concurrent add must not have landed at all',
+  );
+});
+
+// Round 10: the entry lock's lease must not be tied to --gh-timeout-ms, a
+// NETWORK timeout with nothing to do with the disk write it now protects.
+// Run with a --gh-timeout-ms tiny enough that the OLD (round 9) coupling
+// would have given the entry lock only a ~6-second lease; confirm the
+// lease actually granted, inspected mid-critical-section, still reflects
+// withTerminalMarkLocks' own fixed ENTRY_LOCK_LEASE_MS default (round 12
+// decoupled this from --lock-stale-ms too, see the test right after this
+// one) -- end to end, through the real CLI flags, not just the
+// lib/watch.mjs unit test.
+test('a tiny --gh-timeout-ms does not shrink the entry lock lease', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-lease-integration-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const merged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
+  const d = deps([[]], { existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: [merged], rateLimit: RATE_LIMIT });
+  let impliedLeaseMs;
+  const before = Date.now();
+  d.writeTerminalIgnoredLocked = (path, bytes, ignoredAt) => {
+    const marked = writeTerminalIgnoredLocked(path, bytes, ignoredAt);
+    const lock = JSON.parse(readFileSync(`${path}.lock`, 'utf8'));
+    impliedLeaseMs = Date.parse(lock.expiresAt) - before;
+    return marked;
+  };
+  const { code } = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      state,
+      '--watch-dir',
+      watch,
+      '--ignore-classes',
+      'merged',
+      // A --gh-timeout-ms this small would give the entry lock only a
+      // ~6-second lease under the round-9 coupling (--gh-timeout-ms +
+      // lib/lock.mjs's 5s slack) -- far too short to survive any real
+      // snapshot write under load.
+      '--gh-timeout-ms',
+      '100',
+    ],
+    d,
+  );
+  assert.equal(code, 0);
+  // The lease must reflect withTerminalMarkLocks' own fixed default, not the
+  // 100ms/6-second network timeout.
+  assert.ok(
+    impliedLeaseMs > 500000,
+    `expected the entry lock lease to reflect its own fixed default, not --gh-timeout-ms's 100ms; got ${impliedLeaseMs}ms`,
+  );
+});
+
+// Round 12: this is the actual regression -- round 11 reused --lock-stale-ms
+// for this lease, but lib/help.mjs and docs/contract.md both document that
+// flag as governing only an UNREADABLE/corrupt lock, never a readable lock's
+// expiresAt. An operator has every reason to set it small (it's documented
+// as a corrupt-lock detection ceiling) with nothing telling them that doing
+// so also shortens this unrelated critical section. Run with a
+// --lock-stale-ms tiny enough that the round-11 coupling would have given
+// the entry lock only a ~6-second lease; confirm the lease actually granted
+// still reflects the fixed internal default instead.
+test('a tiny --lock-stale-ms does not shrink the entry lock lease', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-lease-integration-lsm-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const merged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
+  const d = deps([[]], { existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: [merged], rateLimit: RATE_LIMIT });
+  let impliedLeaseMs;
+  const before = Date.now();
+  d.writeTerminalIgnoredLocked = (path, bytes, ignoredAt) => {
+    const marked = writeTerminalIgnoredLocked(path, bytes, ignoredAt);
+    const lock = JSON.parse(readFileSync(`${path}.lock`, 'utf8'));
+    impliedLeaseMs = Date.parse(lock.expiresAt) - before;
+    return marked;
+  };
+  const { code } = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      state,
+      '--watch-dir',
+      watch,
+      '--ignore-classes',
+      'merged',
+      // A --lock-stale-ms this small would give the entry lock only a
+      // ~6-second lease under the round-11 coupling (--lock-stale-ms +
+      // lib/lock.mjs's 5s slack) -- far too short to survive any real
+      // snapshot write under load.
+      '--lock-stale-ms',
+      '1s',
+    ],
+    d,
+  );
+  assert.equal(code, 0);
+  assert.ok(
+    impliedLeaseMs > 500000,
+    `expected the entry lock lease to reflect its own fixed default, not --lock-stale-ms's 1s; got ${impliedLeaseMs}ms`,
+  );
+});
+
+// The granularity defect: --only-classes is a DELTA-level gate (a delta
+// survives WHOLE once ANY named class matches, all its other classes
+// intact -- see lib/help.mjs's own description), unlike --ignore-classes'
+// CLASS-level removal. merged+relabeled under --only-classes relabeled
+// therefore survives WITH `merged` still present -- there is no
+// suppression to record, and cleanup must fire normally. An earlier version
+// treated `merged` as suppressed merely because --only-classes was active
+// and did not itself name `merged`, writing a spurious marker; the marked
+// (but still-eligible) delta then hit removeWatchUnchanged with bytes this
+// same tick's own spurious write had already made stale, silently
+// stranding the entry forever.
+test('--only-classes relabeled genuinely keeps a merged+relabeled delta WHOLE: no spurious marker, cleanup fires normally', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-only-classes-kept-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const mergedAndRelabeled = {
+    ...basePr,
+    state: 'merged',
+    updatedAt: '2026-07-01T11:00:00Z',
+    labels: [{ name: 'shipped' }],
+  };
+  const d = deps([[mergedAndRelabeled]], {
+    existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} },
+  });
+  d.fetchPRsByNumber = () => ({ rows: [mergedAndRelabeled], rateLimit: RATE_LIMIT });
+  const { code, report } = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      state,
+      '--watch-dir',
+      watch,
+      '--only-classes',
+      'relabeled',
+    ],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.deepEqual(report.deltas[0].classes.sort(), ['merged', 'relabeled'].sort());
+  // The definitive proof: if a spurious marker HAD been written this tick,
+  // removeWatchUnchanged's compare would fail against the now-stale bytes
+  // its own write caused, and the entry would survive. It must not.
+  assert.equal(existsSync(entry), false, 'a delta that genuinely kept merged must still clean up');
+});
+
+test('--only-classes relabeled genuinely rejecting a bare merge writes the marker and protects the entry', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-only-classes-rejected-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const merged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
+  const mergedRelabeled = {
+    ...merged,
+    updatedAt: '2026-07-01T12:00:00Z',
+    labels: [{ name: 'a' }],
+  };
+  const rowSeq = [[merged], [mergedRelabeled]];
+  const d = deps([[]], { existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: rowSeq.shift(), rateLimit: RATE_LIMIT });
+  const argvWith = () => [
+    '--repo',
+    'o/r',
+    '--monitor-id',
+    'main',
+    '--state-file',
+    state,
+    '--watch-dir',
+    watch,
+    '--only-classes',
+    'relabeled',
+  ];
+
+  // Tick 1: a BARE merge (no relabel). Its only class, `merged`, does not
+  // match --only-classes relabeled at all, so the whole delta is genuinely
+  // rejected -- exactly what --only-classes' own delta-level gate means.
+  const tick1 = run(argvWith(), d);
+  assert.equal(tick1.code, 0);
+  assert.deepEqual(tick1.report.deltas, []);
+  assert.equal(existsSync(entry), true);
+  assert.equal(
+    JSON.parse(readFileSync(entry, 'utf8')).ignoredTerminalAt !== undefined,
+    true,
+    'a genuinely rejected transition must still be marked',
+  );
+
+  // Tick 2: a later, unrelated metadata-only delta -- now `relabeled` alone
+  // matches --only-classes relabeled and survives, but the recorded mark
+  // must still protect the entry (state.merged, no fresh merged class here).
+  const tick2 = run(argvWith(), d);
+  assert.equal(tick2.code, 10);
+  assert.deepEqual(tick2.report.deltas[0].classes, ['relabeled']);
+  assert.equal(existsSync(entry), true, 'the marker must protect across a later matching tick');
 });
 
 test('watch text commands render watch-specific output, never detector deltas', async () => {
@@ -621,21 +1583,10 @@ test('--state-dir derives a monitor-scoped snapshot path', () => {
 });
 
 test('a delta returns code 10 and rewrites the snapshot', () => {
-  const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
+  const d = deps([[{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: {
       pr: {
-        42: {
-          state: 'OPEN',
-          updatedAt: '2026-07-01T10:00:00Z',
-          isDraft: false,
-          ci: 'da39a3ee5e6b',
-          review: 'REVIEW_REQUIRED',
-          reviews: 'da39a3ee5e6b',
-          mergeable: 'UNKNOWN',
-          comments: 0,
-          commentsOverflow: false,
-          head: 'sha1',
-        },
+        42: item(openFp),
       },
       issue: {},
     },
@@ -661,8 +1612,8 @@ test('a gh failure returns code 1 and does NOT write the snapshot', () => {
     fetchPRs: () => {
       throw new Error('gh: rate limited');
     },
-    fetchIssues: () => [],
-    readSnapshot: () => ({ pr: {}, issue: {} }),
+    fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+    readSnapshot: () => ({ pr: {}, issue: {}, meta: DEFAULT_OLD_META }),
     writeSnapshotAtomic: () => {
       throw new Error('should not be called');
     },
@@ -672,22 +1623,22 @@ test('a gh failure returns code 1 and does NOT write the snapshot', () => {
   assert.equal(code, 1);
 });
 
+// A prior tick's fingerprint that predates the `checks[]` field entirely (a
+// legacy snapshot written before schema v2's row-level check tracking) --
+// exercises the opaque ci-changed fallback -- but which is otherwise a real
+// prFingerprint() output, so every other compared field (baseRef, labels,
+// assignees, reviewRequests, mergeStateStatus, thread bookkeeping) already
+// matches what a fresh fetch of `basePr` would produce.
+function opaqueCiFixture() {
+  const fp = prFingerprint({ ...basePr, updatedAt: '2026-07-01T10:00:00Z' });
+  delete fp.checks;
+  return fp;
+}
+
 test('--summary-line attaches only the human summary line to each delta', () => {
-  const d = deps([[{ ...basePr, totalCommentsCount: 2, updatedAt: '2026-07-01T11:00:00Z' }]], {
+  const d = deps([[{ ...basePr, conversationComments: 2, updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: {
-      pr: {
-        42: {
-          state: 'OPEN',
-          updatedAt: '2026-07-01T10:00:00Z',
-          isDraft: false,
-          ci: 'x',
-          review: 'REVIEW_REQUIRED',
-          reviews: 'da39a3ee5e6b',
-          mergeable: 'UNKNOWN',
-          comments: 0,
-          head: 'sha1',
-        },
-      },
+      pr: { 42: item(opaqueCiFixture()) },
       issue: {},
     },
   });
@@ -700,22 +1651,10 @@ test('--summary-line attaches only the human summary line to each delta', () => 
   assert.equal(report.deltas[0].details, undefined);
 });
 
-test('--detail keeps line compatibility and adds structured class details', () => {
-  const d = deps([[{ ...basePr, totalCommentsCount: 2, updatedAt: '2026-07-01T11:00:00Z' }]], {
+test('--detail adds summaryLine and structured class details', () => {
+  const d = deps([[{ ...basePr, conversationComments: 2, updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: {
-      pr: {
-        42: {
-          state: 'OPEN',
-          updatedAt: '2026-07-01T10:00:00Z',
-          isDraft: false,
-          ci: 'x',
-          review: 'REVIEW_REQUIRED',
-          reviews: 'da39a3ee5e6b',
-          mergeable: 'UNKNOWN',
-          comments: 0,
-          head: 'sha1',
-        },
-      },
+      pr: { 42: item(opaqueCiFixture()) },
       issue: {},
     },
   });
@@ -724,19 +1663,19 @@ test('--detail keeps line compatibility and adds structured class details', () =
     d,
   );
   const delta = report.deltas[0];
-  assert.equal(delta.line, 'PR #42 "add widget": ci-changed, new-comments');
-  assert.equal(delta.summaryLine, delta.line);
+  assert.equal(delta.summaryLine, 'PR #42 "add widget": ci-changed, new-comments');
+  assert.equal(Object.hasOwn(delta, 'line'), false);
   assert.deepEqual(delta.details, [
     {
       class: 'ci-changed',
-      field: 'ci',
-      from: 'x',
-      to: 'da39a3ee5e6b',
+      field: 'checks',
+      from: null,
+      to: [],
       opaque: true,
     },
     {
       class: 'new-comments',
-      field: 'comments',
+      field: 'conversationComments',
       from: 0,
       to: 2,
       delta: 2,
@@ -745,57 +1684,24 @@ test('--detail keeps line compatibility and adds structured class details', () =
   ]);
 });
 
-test('--detail suppresses additive-field rows the old snapshot predates (no phantom transitions)', () => {
-  // Upgrade path: the stored fingerprint predates base/labels/assignees/
-  // reviewRequests (and mergeStateStatus). A same-tick catch-all change (head
-  // bump) fires `updated`; its details must not report `null -> current` rows
-  // for fields whose first appearance the detector itself suppressed.
-  const legacy = prFingerprint({ ...basePr, totalCommentsCount: 0 });
-  for (const field of ['base', 'labels', 'assignees', 'reviewRequests', 'mergeStateStatus']) {
-    delete legacy[field];
-  }
-  const after = {
-    ...basePr,
-    updatedAt: '2026-07-01T11:00:00Z',
-    headRefOid: 'sha2',
-    baseRefName: 'main',
-    labels: [{ name: 'bug' }],
-    assignees: ['alice'],
-    reviewRequests: ['bob'],
-  };
-  const d = deps([[after]], { existing: { pr: { 42: legacy }, issue: {} } });
-  const { report } = run(
-    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--detail'],
-    d,
-  );
-  const delta = report.deltas[0];
-  // head genuinely moved (sha1 -> sha2), so `head-changed` now coexists with
-  // the `updated` catch-all (see lib/detect.mjs classifyPr). Each class
-  // explains itself independently, so `head` is named twice: once by
-  // `head-changed`, once by `updated`'s generic field sweep.
-  assert.deepEqual(delta.classes.sort(), ['head-changed', 'updated']);
-  const detailFields = delta.details.map((row) => row.field).sort();
-  assert.deepEqual(detailFields, ['head', 'head', 'updatedAt']);
-});
-
 test('--detail explains the audit-driven classes: set diffs, base transition, comment removal', () => {
   const before = {
     ...basePr,
-    totalCommentsCount: 3,
-    baseRefName: 'main',
+    conversationComments: 3,
+    baseRef: 'main',
     assignees: ['alice'],
     reviewRequests: [],
   };
   const after = {
     ...basePr,
     updatedAt: '2026-07-01T11:00:00Z',
-    totalCommentsCount: 2,
-    baseRefName: 'release/2.0',
+    conversationComments: 2,
+    baseRef: 'release/2.0',
     assignees: ['bob'],
     reviewRequests: ['carol', 'org/platform-team'],
   };
   const d = deps([[after]], {
-    existing: { pr: { 42: prFingerprint(before) }, issue: {} },
+    existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} },
   });
   const { report } = run(
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--detail'],
@@ -815,7 +1721,7 @@ test('--detail explains the audit-driven classes: set diffs, base transition, co
     details.find((row) => row.class === 'comments-removed'),
     {
       class: 'comments-removed',
-      field: 'comments',
+      field: 'conversationComments',
       from: 3,
       to: 2,
       delta: -1,
@@ -825,7 +1731,7 @@ test('--detail explains the audit-driven classes: set diffs, base transition, co
     details.find((row) => row.class === 'base-changed'),
     {
       class: 'base-changed',
-      field: 'base',
+      field: 'baseRef',
       from: 'main',
       to: 'release/2.0',
     },
@@ -857,24 +1763,20 @@ test('--detail names the added and removed thread ids for a same-count thread sw
   // `--detail` would name nothing at all for either class.
   const before = {
     ...basePr,
-    reviewThreads: 2,
-    unresolvedReviewThreads: 1,
-    reviewThreadNodes: [
-      { id: 'RT_1', isResolved: false },
-      { id: 'RT_2', isResolved: true },
+    threads: [
+      { id: 'RT_1', resolved: false },
+      { id: 'RT_2', resolved: true },
     ],
   };
   const after = {
     ...basePr,
     updatedAt: '2026-07-01T11:00:00Z',
-    reviewThreads: 2,
-    unresolvedReviewThreads: 1,
-    reviewThreadNodes: [
-      { id: 'RT_1', isResolved: true },
-      { id: 'RT_2', isResolved: false },
+    threads: [
+      { id: 'RT_1', resolved: true },
+      { id: 'RT_2', resolved: false },
     ],
   };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const { code, report } = run(
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--detail'],
     d,
@@ -885,10 +1787,10 @@ test('--detail names the added and removed thread ids for a same-count thread sw
   assert.ok(delta.classes.includes('unresolved-threads-resolved'));
 
   const addedRow = delta.details.find(
-    (row) => row.class === 'unresolved-threads-added' && row.field === 'threadStates',
+    (row) => row.class === 'unresolved-threads-added' && row.field === 'threads',
   );
   const resolvedRow = delta.details.find(
-    (row) => row.class === 'unresolved-threads-resolved' && row.field === 'threadStates',
+    (row) => row.class === 'unresolved-threads-resolved' && row.field === 'threads',
   );
   assert.ok(addedRow, 'unresolved-threads-added must name the swap even though the count held');
   assert.ok(
@@ -904,34 +1806,76 @@ test('--detail names the added and removed thread ids for a same-count thread sw
   assert.ok(!delta.details.some((row) => row.field === 'unresolvedReviewThreads'));
 });
 
-test('--detail does not leak threadDigest/threadStates into generic updated rows (P2-2)', () => {
-  // Head SHA and thread states change in the same tick: threadDigest/
-  // threadStates differ between from/to, but they are detail-only mirrors --
-  // their meaningful expression is the dedicated threadStates row on
-  // unresolved-threads-*, not a generic `updated` field row (which the
+test('--detail does not leak threads into generic updated rows (P2-2)', () => {
+  // Head SHA and thread states change in the same tick: both are specific
+  // classes (head-changed decoupled from updated per R6; unresolved-threads-*
+  // always specific), so `updated` never fires here at all -- and `threads`'
+  // meaningful expression is the dedicated `threads` row on
+  // unresolved-threads-*, never a generic `updated` field row (which the
   // exported contract does not declare for the `updated` class).
   const before = {
     ...basePr,
-    headRefOid: 'sha1',
-    reviewThreads: 2,
-    unresolvedReviewThreads: 1,
-    reviewThreadNodes: [
-      { id: 'RT_1', isResolved: false },
-      { id: 'RT_2', isResolved: true },
+    headSha: 'sha1',
+    threads: [
+      { id: 'RT_1', resolved: false },
+      { id: 'RT_2', resolved: true },
     ],
   };
   const after = {
     ...basePr,
     updatedAt: '2026-07-01T11:00:00Z',
-    headRefOid: 'sha2',
-    reviewThreads: 2,
-    unresolvedReviewThreads: 1,
-    reviewThreadNodes: [
-      { id: 'RT_1', isResolved: true },
-      { id: 'RT_2', isResolved: false },
+    headSha: 'sha2',
+    threads: [
+      { id: 'RT_1', resolved: true },
+      { id: 'RT_2', resolved: false },
     ],
   };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--detail'],
+    d,
+  );
+  assert.equal(code, 10);
+  const delta = report.deltas[0];
+  assert.ok(!delta.classes.includes('updated'));
+  assert.ok(delta.classes.includes('head-changed'));
+
+  const updatedFields = delta.details
+    .filter((row) => row.class === 'updated')
+    .map((row) => row.field);
+  assert.deepEqual(updatedFields, []);
+  assert.ok(!updatedFields.includes('threads'));
+
+  // Every emitted key must fall within the declared contract for its class.
+  for (const row of delta.details) {
+    const allowed = DELTA_DETAIL_FIELDS_BY_CLASS[row.class];
+    assert.ok(allowed, `no field map for class "${row.class}"`);
+    if (!['presence', 'unknown'].includes(row.field)) {
+      assert.ok(
+        allowed.includes(row.field),
+        `field "${row.field}" not declared for class "${row.class}"`,
+      );
+    }
+  }
+});
+
+test('an updated delta with a same-count recentComments rotation does not emit an undeclared detail field', () => {
+  // recentComments is a bounded rolling window: one comment can drop off
+  // while another enters, leaving conversationComments unchanged but the
+  // window's contents different. That rotation alone must not surface as an
+  // `updated` detail field -- recentComments is deliberately excluded from
+  // changedFingerprintFields (see lib/cli.mjs) and is not declared in
+  // DELTA_DETAIL_FIELDS_BY_CLASS.updated.
+  const before = {
+    ...basePr,
+    recentComments: [{ id: 'C1', author: 'alice' }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    recentComments: [{ id: 'C2', author: 'bob' }],
+  };
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const { code, report } = run(
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--detail'],
     d,
@@ -939,15 +1883,11 @@ test('--detail does not leak threadDigest/threadStates into generic updated rows
   assert.equal(code, 10);
   const delta = report.deltas[0];
   assert.ok(delta.classes.includes('updated'));
-  assert.ok(delta.classes.includes('head-changed'));
-
   const updatedFields = delta.details
     .filter((row) => row.class === 'updated')
     .map((row) => row.field);
-  assert.ok(!updatedFields.includes('threadDigest'));
-  assert.ok(!updatedFields.includes('threadStates'));
+  assert.ok(!updatedFields.includes('recentComments'));
 
-  // Every emitted key must fall within the declared contract for its class.
   for (const row of delta.details) {
     const allowed = DELTA_DETAIL_FIELDS_BY_CLASS[row.class];
     assert.ok(allowed, `no field map for class "${row.class}"`);
@@ -963,47 +1903,47 @@ test('--detail does not leak threadDigest/threadStates into generic updated rows
 test('--detail names the exact checks and reviews that changed when the snapshot carries summaries', () => {
   const before = {
     ...basePr,
-    statusCheckRollup: [
-      { name: 'build', status: 'COMPLETED', conclusion: 'FAILURE' },
-      { name: 'docs', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    checks: [
+      { name: 'build', kind: 'check', status: 'completed', conclusion: 'failure' },
+      { name: 'docs', kind: 'check', status: 'completed', conclusion: 'success' },
     ],
-    reviewDecision: 'CHANGES_REQUESTED',
-    latestReviews: [
+    reviewDecision: 'changes_requested',
+    reviews: [
       {
         id: 'r1',
         submittedAt: '2026-07-01T09:00:00Z',
-        author: { login: 'alice' },
-        state: 'CHANGES_REQUESTED',
-        commit: { oid: 'c1' },
+        author: 'alice',
+        state: 'changes_requested',
+        commit: 'c1',
       },
     ],
   };
   const after = {
     ...basePr,
     updatedAt: '2026-07-01T11:00:00Z',
-    statusCheckRollup: [
-      { name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' },
-      { name: 'lint', status: 'IN_PROGRESS', conclusion: '' },
+    checks: [
+      { name: 'build', kind: 'check', status: 'completed', conclusion: 'success' },
+      { name: 'lint', kind: 'check', status: 'in_progress', conclusion: '' },
     ],
-    reviewDecision: 'APPROVED',
-    latestReviews: [
+    reviewDecision: 'approved',
+    reviews: [
       {
         id: 'r2',
         submittedAt: '2026-07-01T10:30:00Z',
-        author: { login: 'alice' },
-        state: 'APPROVED',
-        commit: { oid: 'c2' },
+        author: 'alice',
+        state: 'approved',
+        commit: 'c2',
       },
       {
         id: 'r3',
         submittedAt: '2026-07-01T10:31:00Z',
-        author: { login: 'bob' },
-        state: 'COMMENTED',
-        commit: { oid: 'c2' },
+        author: 'bob',
+        state: 'commented',
+        commit: 'c2',
       },
     ],
   };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const { code, report } = run(
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--detail'],
     d,
@@ -1013,35 +1953,58 @@ test('--detail names the exact checks and reviews that changed when the snapshot
 
   const ci = details.find((row) => row.class === 'ci-changed');
   assert.equal(ci.opaque, undefined);
-  assert.deepEqual(ci.added, [{ name: 'lint', status: 'IN_PROGRESS', conclusion: '' }]);
-  assert.deepEqual(ci.removed, [{ name: 'docs', status: 'COMPLETED', conclusion: 'SUCCESS' }]);
+  assert.deepEqual(ci.added, [
+    { name: 'lint', kind: 'check', status: 'in_progress', conclusion: '' },
+  ]);
+  assert.deepEqual(ci.removed, [
+    { name: 'docs', kind: 'check', status: 'completed', conclusion: 'success' },
+  ]);
   assert.deepEqual(ci.changed, [
     {
       name: 'build',
-      from: { status: 'COMPLETED', conclusion: 'FAILURE' },
-      to: { status: 'COMPLETED', conclusion: 'SUCCESS' },
+      from: { kind: 'check', status: 'completed', conclusion: 'failure' },
+      to: { kind: 'check', status: 'completed', conclusion: 'success' },
     },
   ]);
 
+  // Reviews are keyed by `id` (always present in schema v2, unlike author,
+  // which collides whenever the same person reviews more than once): a new
+  // review from the same author on approval is a distinct id, not an
+  // in-place "changed" row.
   const reviews = details.find((row) => row.field === 'reviews');
   assert.equal(reviews.opaque, undefined);
   assert.deepEqual(reviews.added, [
-    { author: 'bob', state: 'COMMENTED', submittedAt: '2026-07-01T10:31:00Z', commit: 'c2' },
-  ]);
-  assert.deepEqual(reviews.removed, []);
-  assert.deepEqual(reviews.changed, [
     {
+      id: 'r2',
       author: 'alice',
-      from: { state: 'CHANGES_REQUESTED', submittedAt: '2026-07-01T09:00:00Z', commit: 'c1' },
-      to: { state: 'APPROVED', submittedAt: '2026-07-01T10:30:00Z', commit: 'c2' },
+      state: 'approved',
+      submittedAt: '2026-07-01T10:30:00Z',
+      commit: 'c2',
+    },
+    {
+      id: 'r3',
+      author: 'bob',
+      state: 'commented',
+      submittedAt: '2026-07-01T10:31:00Z',
+      commit: 'c2',
     },
   ]);
-  const decision = details.find((row) => row.field === 'review');
+  assert.deepEqual(reviews.removed, [
+    {
+      id: 'r1',
+      author: 'alice',
+      state: 'changes_requested',
+      submittedAt: '2026-07-01T09:00:00Z',
+      commit: 'c1',
+    },
+  ]);
+  assert.deepEqual(reviews.changed, []);
+  const decision = details.find((row) => row.field === 'reviewDecision');
   assert.deepEqual(decision, {
     class: 'review-changed',
-    field: 'review',
-    from: 'CHANGES_REQUESTED',
-    to: 'APPROVED',
+    field: 'reviewDecision',
+    from: 'changes_requested',
+    to: 'approved',
   });
 });
 
@@ -1052,20 +2015,20 @@ test('--detail falls back to opaque when duplicate check names would collapse th
   // name the breakdown instead.
   const before = {
     ...basePr,
-    statusCheckRollup: [
-      { name: 'build', status: 'COMPLETED', conclusion: 'FAILURE' },
-      { name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    checks: [
+      { name: 'build', kind: 'check', status: 'completed', conclusion: 'failure' },
+      { name: 'build', kind: 'check', status: 'completed', conclusion: 'success' },
     ],
   };
   const after = {
     ...basePr,
     updatedAt: '2026-07-01T11:00:00Z',
-    statusCheckRollup: [
-      { name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' },
-      { name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    checks: [
+      { name: 'build', kind: 'check', status: 'completed', conclusion: 'success' },
+      { name: 'lint', kind: 'check', status: 'completed', conclusion: 'success' },
     ],
   };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const { report } = run(
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--detail'],
     d,
@@ -1075,19 +2038,6 @@ test('--detail falls back to opaque when duplicate check names would collapse th
   assert.equal(ci.added, undefined);
   assert.equal(ci.removed, undefined);
   assert.equal(ci.changed, undefined);
-});
-
-test('pre-summary snapshots upgrade without phantom deltas and persist summaries', () => {
-  const { ciChecks: _ci, reviewSummary: _reviews, ...legacy } = prFingerprint(basePr);
-  const d = deps([[basePr]], { existing: { pr: { 42: legacy }, issue: {} } });
-  const { code, report } = run(
-    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'],
-    d,
-  );
-  assert.equal(code, 0);
-  assert.deepEqual(report.deltas, []);
-  assert.deepEqual(d.stored.pr['42'].ciChecks, []);
-  assert.deepEqual(d.stored.pr['42'].reviewSummary, []);
 });
 
 const SUMMARIES_ARGS = [
@@ -1103,13 +2053,13 @@ const SUMMARIES_ARGS = [
 test('--summaries acceptance: posting a successful status makes summary.ciRollup green', () => {
   // A PR with zero checks, re-observed after a successful commit status lands on
   // the head: a ci-changed delta whose semantic summary reports the CI as green.
-  const before = { ...basePr, statusCheckRollup: [] };
+  const before = { ...basePr, checks: [] };
   const after = {
     ...basePr,
     updatedAt: '2026-07-01T11:00:00Z',
-    statusCheckRollup: [{ context: 'ci/deploy', state: 'SUCCESS' }],
+    checks: [{ name: 'ci/deploy', kind: 'status', status: 'success', conclusion: 'success' }],
   };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const { code, report } = run(SUMMARIES_ARGS, d);
   assert.equal(code, 10);
   const delta = report.deltas[0];
@@ -1123,21 +2073,56 @@ test('--summaries acceptance: posting a successful status makes summary.ciRollup
     isDraft: false,
     unresolvedReviewThreads: 0,
     headSha: 'sha1',
+    failedChecks: [],
   });
+});
+
+test('--summaries acceptance: a new PR with a failing check carries failedChecks[0].runId without --detail', () => {
+  // F4: summary.failedChecks must be populated for a PR that is already red on
+  // first observation (a `new` delta, not a `ci-changed` transition), and
+  // without --detail -- a merge gate should not need structured details to
+  // read the failing check's run id.
+  const pr = {
+    ...basePr,
+    checks: [
+      { name: 'build', kind: 'check', status: 'completed', conclusion: 'success' },
+      {
+        name: 'lint',
+        kind: 'check',
+        status: 'completed',
+        conclusion: 'failure',
+        detailsUrl: 'https://github.com/o/r/actions/runs/111222333/job/444555666',
+      },
+    ],
+  };
+  const d = deps([[pr]], { existing: { pr: {}, issue: {} } });
+  const { code, report } = run(SUMMARIES_ARGS, d);
+  assert.equal(code, 10);
+  const delta = report.deltas.find((x) => x.number === 42);
+  assert.ok(delta.classes.includes('new'), 'first observation of a tracked PR is a new delta');
+  assert.deepEqual(delta.summary.failedChecks, [
+    {
+      name: 'lint',
+      runId: '111222333',
+      jobId: '444555666',
+      detailsUrl: 'https://github.com/o/r/actions/runs/111222333/job/444555666',
+    },
+  ]);
+  assert.equal(delta.details, undefined, 'the acceptance case explicitly omits --detail');
 });
 
 test('--summaries surfaces mergeStateStatus behind for an up-to-date-required branch', () => {
   // A PR that GitHub reports mergeable yet BEHIND its base (repos requiring the
   // branch be up to date): the summary must expose that distinctly so a consumer
   // does not emit a false "ready to merge".
-  const before = { ...basePr, statusCheckRollup: [] };
+  const before = { ...basePr, checks: [] };
   const after = {
     ...basePr,
     updatedAt: '2026-07-01T11:00:00Z',
-    mergeStateStatus: 'BEHIND',
-    statusCheckRollup: [{ context: 'ci/deploy', state: 'SUCCESS' }],
+    mergeStateStatus: 'behind',
+    checks: [{ name: 'ci/deploy', kind: 'status', status: 'success', conclusion: 'success' }],
   };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const { code, report } = run(SUMMARIES_ARGS, d);
   assert.equal(code, 10);
   assert.equal(report.deltas[0].summary.mergeStateStatus, 'behind');
@@ -1147,9 +2132,9 @@ test('a mergeStateStatus-only transition fires an updated delta end-to-end', () 
   // Base branch advanced: the same PR goes CLEAN -> BEHIND with nothing else
   // changed. gh-delta must emit a delta (exit 10) carrying the new summary, or a
   // consumer never re-evaluates merge readiness.
-  const before = { ...basePr, mergeStateStatus: 'CLEAN' };
-  const after = { ...basePr, mergeStateStatus: 'BEHIND' };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const before = { ...basePr, mergeStateStatus: 'clean' };
+  const after = { ...basePr, mergeStateStatus: 'behind' };
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const { code, report } = run(SUMMARIES_ARGS, d);
   assert.equal(code, 10);
   assert.deepEqual(report.deltas[0].classes, ['updated']);
@@ -1173,7 +2158,7 @@ test('--baseline-emit-state off: baseline stays exit 0 with empty deltas', () =>
     d,
   );
   assert.equal(code, 0);
-  assert.equal(report.baseline, true);
+  assert.equal(report.results[0].baseline, true);
   assert.deepEqual(report.deltas, []);
 });
 
@@ -1181,12 +2166,12 @@ test('--baseline-emit-state on: baseline exits 10 with baseline:true and non-emp
   const d = deps([[basePr]]);
   const { code, report } = run(BASELINE_EMIT_ARGS, d);
   assert.equal(code, 10);
-  assert.equal(report.baseline, true);
+  assert.equal(report.results[0].baseline, true);
   assert.equal(report.deltas.length, 1);
   const delta = report.deltas[0];
   assert.deepEqual(delta.classes, ['baseline-state']);
   assert.equal(delta.from, null);
-  assert.equal(delta.to.state, 'OPEN');
+  assert.equal(delta.to.state, 'open');
   assert.match(delta.id, /^[0-9a-f]{64}$/);
 });
 
@@ -1221,9 +2206,12 @@ test('--help-json advertises --baseline-emit-state', () => {
 });
 
 test('--summaries acceptance: a PR that lost its checks reports ciRollup none, not green', () => {
-  const before = { ...basePr, statusCheckRollup: [{ context: 'ci/deploy', state: 'SUCCESS' }] };
-  const after = { ...basePr, updatedAt: '2026-07-01T11:00:00Z', statusCheckRollup: [] };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const before = {
+    ...basePr,
+    checks: [{ name: 'ci/deploy', kind: 'status', status: 'success', conclusion: 'success' }],
+  };
+  const after = { ...basePr, updatedAt: '2026-07-01T11:00:00Z', checks: [] };
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const { code, report } = run(SUMMARIES_ARGS, d);
   assert.equal(code, 10);
   const delta = report.deltas[0];
@@ -1231,25 +2219,23 @@ test('--summaries acceptance: a PR that lost its checks reports ciRollup none, n
   assert.equal(delta.summary.ciRollup, 'none');
 });
 
-test('--summaries is purely additive: delta.id and every other field are byte-identical', () => {
-  const before = { ...basePr, statusCheckRollup: [] };
+test('--summaries is a deprecated no-op: delta.summary is byte-identical with or without it', () => {
+  const before = { ...basePr, checks: [] };
   const after = {
     ...basePr,
     updatedAt: '2026-07-01T11:00:00Z',
-    statusCheckRollup: [{ context: 'ci/deploy', state: 'SUCCESS' }],
+    checks: [{ name: 'ci/deploy', kind: 'status', status: 'success', conclusion: 'success' }],
   };
-  const seed = () => ({ pr: { 42: prFingerprint(before) }, issue: {} });
+  const seed = () => ({ pr: { 42: item(prFingerprint(before)) }, issue: {} });
   const baseArgs = ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'];
   const withFlag = run([...baseArgs, '--summaries'], deps([[after]], { existing: seed() })).report
     .deltas[0];
   const without = run(baseArgs, deps([[after]], { existing: seed() })).report.deltas[0];
-  // The opaque fingerprints already sit in `to`; the only difference the flag makes
-  // is the extra sibling `summary` key. Same content-addressed id, same everything else.
+  // summary/changed are always-on now (schema v2): the flag makes no
+  // difference at all, not even an additive one.
   assert.equal(withFlag.id, without.id);
-  assert.equal('summary' in without, false, 'without the flag there is no summary field');
-  const { summary, ...withFlagRest } = withFlag;
-  assert.ok(summary, 'the flag adds a summary');
-  assert.deepEqual(withFlagRest, without);
+  assert.ok(without.summary, 'summary is present regardless of the flag');
+  assert.deepEqual(withFlag, without);
 });
 
 const FILTER_ARGS = ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'];
@@ -1257,46 +2243,42 @@ const FILTER_ARGS = ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/
 test('--ignore-authors suppresses fully covered bot comments but advances the snapshot', () => {
   const before = {
     ...basePr,
-    totalCommentsCount: 1,
     conversationComments: 1,
-    commentNodes: [{ id: 'C0', author: 'human' }],
+    recentComments: [{ id: 'C0', author: 'human' }],
   };
   const after = {
     ...before,
     updatedAt: '2026-07-01T11:00:00Z',
-    totalCommentsCount: 2,
     conversationComments: 2,
-    commentNodes: [
+    recentComments: [
       { id: 'C0', author: 'human' },
       { id: 'C1', author: 'GitHub-Actions[bot]' },
     ],
   };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const result = run([...FILTER_ARGS, '--ignore-authors', 'github-actions[bot]'], d);
   assert.equal(result.code, 0);
   assert.deepEqual(result.report.deltas, []);
   assert.equal(result.report.filteredDeltas, 1);
-  assert.equal(d.stored.pr['42'].comments, 2);
+  assert.equal(d.stored.pr['42'].fingerprint.conversationComments, 2);
 });
 
 test('--ignore-authors fails open and --detail is opaque for an unusable new comment row', () => {
   const before = {
     ...basePr,
-    totalCommentsCount: 1,
     conversationComments: 1,
-    commentNodes: [{ id: 'C0', author: 'human' }],
+    recentComments: [{ id: 'C0', author: 'human' }],
   };
   const after = {
     ...before,
     updatedAt: '2026-07-01T11:00:00Z',
-    totalCommentsCount: 2,
     conversationComments: 2,
-    commentNodes: [
+    recentComments: [
       { id: 'C0', author: 'human' },
       { id: null, author: null },
     ],
   };
-  const existing = { pr: { 42: prFingerprint(before) }, issue: {} };
+  const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
   const filtered = run(
     [...FILTER_ARGS, '--ignore-authors', 'human'],
     deps([[after]], { existing }),
@@ -1311,48 +2293,266 @@ test('--ignore-authors fails open and --detail is opaque for an unusable new com
   assert.equal(comments.added, undefined);
 });
 
-test('--ignore-authors and --detail fail open when PR aggregate comments include non-conversation rows', () => {
+// F1 note: this used to guard against the aggregate `comments` counter
+// (conversation + review combined) tripping `new-comments` on a
+// non-conversation (review thread reply) rise, which made the old
+// commentAuthorsIgnored's cross-check opaque. The comment-model split makes
+// that scenario structurally impossible now: a review-only rise moves only
+// reviewComments and fires review-comments-added, never new-comments.
+test('a review-only comment rise (conversationComments unchanged) never fires new-comments', () => {
   const before = {
     ...basePr,
-    totalCommentsCount: 4,
     conversationComments: 1,
-    commentNodes: [{ id: 'C0', author: 'human' }],
+    reviewComments: 0,
+    recentComments: [{ id: 'C0', author: 'human' }],
   };
   const after = {
     ...before,
     updatedAt: '2026-07-01T11:00:00Z',
-    totalCommentsCount: 5,
     conversationComments: 1,
-    commentNodes: [{ id: 'C0', author: 'github-actions[bot]' }],
+    reviewComments: 1,
+    recentComments: [{ id: 'C0', author: 'human' }],
   };
-  const existing = { pr: { 42: prFingerprint(before) }, issue: {} };
-  const filtered = run(
-    [...FILTER_ARGS, '--ignore-authors', 'github-actions[bot]'],
-    deps([[after]], { existing }),
+  const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
+  const result = run(FILTER_ARGS, deps([[after]], { existing }));
+  assert.equal(result.code, 10);
+  assert.ok(result.report.deltas[0].classes.includes('review-comments-added'));
+  assert.ok(!result.report.deltas[0].classes.includes('new-comments'));
+});
+
+// --ignore-authors + --enrich thread-replies: the double opt-in pre-publish exception ---
+
+function threadReplyFixture(threadCommentsBefore, threadCommentsAfter) {
+  const before = {
+    ...basePr,
+    reviewComments: threadCommentsBefore,
+    threads: [{ id: 'T1', resolved: false, comments: threadCommentsBefore }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    reviewComments: threadCommentsAfter,
+    threads: [{ id: 'T1', resolved: false, comments: threadCommentsAfter }],
+  };
+  return { before, after };
+}
+
+test('--ignore-authors suppresses review-comments-added when --enrich thread-replies supplies the reply authors', () => {
+  const { before, after } = threadReplyFixture(1, 3);
+  const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
+  const d = deps([[after]], { existing });
+  const calls = [];
+  const logged = [];
+  d.appendDeltaLog = (_file, record) => {
+    logged.push(record);
+    return { fromSeq: 1, toSeq: record.deltas.length, appended: record.deltas.length };
+  };
+  d.fetchThreadReplies = (entries) => {
+    calls.push(entries);
+    return {
+      rows: [
+        {
+          id: 'T1',
+          replies: [
+            { id: 'C1', author: 'bot', createdAt: 'now', body: 'x' },
+            { id: 'C2', author: 'bot', createdAt: 'now', body: 'y' },
+          ],
+        },
+      ],
+      rateLimit: RATE_LIMIT,
+    };
+  };
+  const result = run(
+    [...FILTER_ARGS, '--ignore-authors', 'bot', '--enrich', 'thread-replies', '--log'],
+    d,
   );
-  assert.equal(filtered.code, 10);
-  assert.ok(filtered.report.deltas[0].classes.includes('new-comments'));
-  const detailed = run([...FILTER_ARGS, '--detail'], deps([[after]], { existing })).report
-    .deltas[0];
-  const comments = detailed.details.find((row) => row.class === 'new-comments');
-  assert.equal(comments.opaque, true);
-  assert.equal(comments.added, undefined);
+  assert.equal(result.code, 0);
+  assert.deepEqual(result.report.deltas, []);
+  assert.deepEqual(calls, [[{ id: 'T1', increment: 2, total: 3 }]]);
+  // The suppressed delta never reaches the durable log: filtering happens
+  // before appendDeltaLog is called.
+  assert.deepEqual(
+    logged.flatMap((r) => r.deltas),
+    [],
+  );
+});
+
+test('--ignore-authors warns explicitly (fail open) for review-comments-added without --enrich thread-replies', () => {
+  const { before, after } = threadReplyFixture(1, 3);
+  const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
+  const result = run([...FILTER_ARGS, '--ignore-authors', 'bot'], deps([[after]], { existing }));
+  assert.equal(result.code, 10);
+  assert.ok(result.report.deltas[0].classes.includes('review-comments-added'));
+  assert.ok(
+    result.warnings.some((w) => /thread-repl/i.test(w.label) || /thread-repl/i.test(w.reason)),
+  );
+});
+
+test('--ignore-authors + --enrich thread-replies warns (does not silently suppress) when review-comments-added comes entirely from a brand-new thread', () => {
+  const before = { ...basePr, reviewComments: 0, threads: [] };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    reviewComments: 3,
+    threads: [{ id: 'T-new', resolved: false, comments: 3 }],
+  };
+  const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
+  const d = deps([[after]], { existing });
+  d.fetchThreadReplies = () => {
+    throw new Error('must not be called: no threads have a prior baseline to diff');
+  };
+  const result = run([...FILTER_ARGS, '--ignore-authors', 'bot', '--enrich', 'thread-replies'], d);
+  assert.equal(result.code, 10);
+  assert.ok(result.report.deltas[0].classes.includes('review-comments-added'));
+  assert.ok(result.warnings.some((w) => /attributable/i.test(w.reason)));
+});
+
+test('--number scope excludes a non-selected PR before the --ignore-authors thread-reply fetch, not after', () => {
+  const { before: before42, after: after42 } = threadReplyFixture(1, 1);
+  const { before: before99, after: after99 } = threadReplyFixture(1, 3);
+  const existing = {
+    pr: { 42: item(prFingerprint(before42)), 99: item(prFingerprint(before99)) },
+    issue: {},
+  };
+  const d = deps(
+    [
+      [
+        { ...after42, number: 42 },
+        { ...after99, number: 99 },
+      ],
+    ],
+    { existing },
+  );
+  d.fetchThreadReplies = () => {
+    throw new Error('must not be called: PR #99 is outside the --number 42 selection');
+  };
+  const result = run(
+    [...FILTER_ARGS, '--number', '42', '--ignore-authors', 'bot', '--enrich', 'thread-replies'],
+    d,
+  );
+  assert.equal(result.code, 10);
+  assert.deepEqual(
+    result.report.deltas.map((delta) => delta.number),
+    [42],
+  );
+  assert.ok(!result.report.deltas[0].classes.includes('review-comments-added'));
+  assert.deepEqual(
+    result.warnings.filter((w) => /thread-repl/i.test(w.label)),
+    [],
+  );
+});
+
+test('--ignore-authors + --enrich thread-replies warns and does not suppress review-comments-added when a brand-new thread only partly explains the rise', () => {
+  // T1 is established and rose by 1 (attributable, all-bot). T2 is brand new
+  // this tick with 2 comments from a human -- threadReplyIncrements excludes
+  // it (no prior baseline), so the fetched rows only ever cover T1's +1 out
+  // of the observed +3 reviewComments rise. Suppressing on T1 alone would
+  // silently drop a delta a human review reply is hiding inside.
+  const before = {
+    ...basePr,
+    reviewComments: 1,
+    threads: [{ id: 'T1', resolved: false, comments: 1 }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    reviewComments: 4,
+    threads: [
+      { id: 'T1', resolved: false, comments: 2 },
+      { id: 'T2', resolved: false, comments: 2 },
+    ],
+  };
+  const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
+  const d = deps([[after]], { existing });
+  d.fetchThreadReplies = (entries) => {
+    assert.deepEqual(entries, [{ id: 'T1', increment: 1, total: 2 }]);
+    return {
+      rows: [{ id: 'T1', replies: [{ id: 'C1', author: 'bot', createdAt: 'now', body: 'x' }] }],
+      rateLimit: RATE_LIMIT,
+    };
+  };
+  const result = run([...FILTER_ARGS, '--ignore-authors', 'bot', '--enrich', 'thread-replies'], d);
+  assert.equal(result.code, 10);
+  assert.ok(result.report.deltas[0].classes.includes('review-comments-added'));
+  assert.ok(result.warnings.some((w) => /attributable/i.test(w.reason)));
+});
+
+test('--ignore-authors fails open on review-changed when reviewDecision itself moved, even if a changed review row is ignored', () => {
+  const before = {
+    ...basePr,
+    reviewDecision: 'review_required',
+    reviews: [],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    reviewDecision: 'approved',
+    reviews: [{ id: 'R1', author: 'bot', state: 'approved', submittedAt: 'now', commit: 'a' }],
+  };
+  const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
+  const result = run([...FILTER_ARGS, '--ignore-authors', 'bot'], deps([[after]], { existing }));
+  assert.equal(result.code, 10);
+  assert.ok(result.report.deltas[0].classes.includes('review-changed'));
+});
+
+test('--ignore-authors fails open on review-changed with no attributable review row', () => {
+  // reviewDecision moves while the reviews[] array is byte-identical (e.g. a
+  // branch-protection recompute) -- changedOrNewReviews finds nothing to
+  // attribute, so review-changed must survive regardless of --ignore-authors.
+  const reviews = [
+    { id: 'R1', author: 'alice', state: 'approved', submittedAt: 'now', commit: 'a' },
+  ];
+  const before = { ...basePr, reviewDecision: 'review_required', reviews };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    reviewDecision: 'approved',
+    reviews,
+  };
+  const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
+  const result = run([...FILTER_ARGS, '--ignore-authors', 'alice'], deps([[after]], { existing }));
+  assert.equal(result.code, 10);
+  assert.ok(result.report.deltas[0].classes.includes('review-changed'));
+});
+
+test('quota-safety regression: a failing publish with the double opt-in spends only the pre-publish thread-replies call', () => {
+  const { before, after } = threadReplyFixture(1, 3);
+  const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
+  const d = deps([[after]], { existing });
+  let preFetchCalls = 0;
+  let postFetchCalls = 0;
+  d.fetchThreadReplies = () => {
+    preFetchCalls++;
+    return {
+      rows: [{ id: 'T1', replies: [{ id: 'C1', author: 'human', createdAt: 'now', body: 'x' }] }],
+      rateLimit: RATE_LIMIT,
+    };
+  };
+  d.fetchEnrichment = () => {
+    postFetchCalls++;
+    return { rows: [], rateLimit: RATE_LIMIT };
+  };
+  d.writeSnapshotAtomic = () => {
+    throw new Error('disk full');
+  };
+  const result = run([...FILTER_ARGS, '--ignore-authors', 'bot', '--enrich', 'thread-replies'], d);
+  assert.equal(result.code, 1);
+  assert.equal(preFetchCalls, 1);
+  assert.equal(postFetchCalls, 0);
 });
 
 test('class filters run before ignored authors and filteredDeltas excludes surviving class removal', () => {
   const before = {
     ...basePr,
-    totalCommentsCount: 1,
     conversationComments: 1,
-    commentNodes: [{ id: 'C0', author: 'human' }],
+    recentComments: [{ id: 'C0', author: 'human' }],
   };
   const after = {
     ...before,
     updatedAt: '2026-07-01T11:00:00Z',
-    headRefOid: 'sha2',
-    totalCommentsCount: 2,
+    headSha: 'sha2',
     conversationComments: 2,
-    commentNodes: [
+    recentComments: [
       { id: 'C0', author: 'human' },
       { id: 'C1', author: 'github-actions[bot]' },
     ],
@@ -1367,83 +2567,90 @@ test('class filters run before ignored authors and filteredDeltas excludes survi
       '--ignore-authors',
       'github-actions[bot]',
     ],
-    deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } }),
+    deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } }),
   );
   assert.equal(result.code, 10);
-  assert.deepEqual(result.report.deltas[0].classes, ['head-changed', 'updated']);
+  // new-comments is stripped by --ignore-authors (the only newly inferred
+  // comment is bot-authored); head-changed no longer drags in a forced
+  // `updated` pairing, so it is the sole survivor.
+  assert.deepEqual(result.report.deltas[0].classes, ['head-changed']);
   assert.equal(result.report.filteredDeltas, 0);
 });
 
-test('--detail gates actionable check, review, and comment identity metadata', () => {
+test('--detail explains check, review, and comment identity metadata carried in the fingerprint', () => {
+  // Schema v2: checks/reviews/recentComments/conversationComments are
+  // ordinary `fingerprint` fields now (no more hideInternalDetails gate), so
+  // they are always present in `to`/`from`, with or without --detail. What
+  // --detail adds is the structured, named breakdown in `details`.
   const before = {
     ...basePr,
-    statusCheckRollup: [
+    checks: [
       {
-        __typename: 'CheckRun',
         name: 'build',
-        status: 'COMPLETED',
-        conclusion: 'SUCCESS',
+        kind: 'check',
+        status: 'completed',
+        conclusion: 'success',
         detailsUrl: 'https://ci/old',
       },
     ],
-    latestReviews: [
+    reviews: [
       {
         id: 'R1',
         submittedAt: '2026-07-01T09:00:00Z',
-        author: { login: 'alice' },
-        state: 'APPROVED',
-        commit: { oid: 'a' },
+        author: 'alice',
+        state: 'approved',
+        commit: 'a',
       },
     ],
-    totalCommentsCount: 1,
     conversationComments: 1,
-    commentNodes: [{ id: 'C0', author: 'human' }],
+    recentComments: [{ id: 'C0', author: 'human' }],
   };
   const after = {
     ...before,
     updatedAt: '2026-07-01T11:00:00Z',
-    statusCheckRollup: [
+    checks: [
       {
-        __typename: 'CheckRun',
         name: 'build',
-        status: 'COMPLETED',
-        conclusion: 'FAILURE',
+        kind: 'check',
+        status: 'completed',
+        conclusion: 'failure',
         detailsUrl: 'https://ci/build',
       },
     ],
-    latestReviews: [
+    reviews: [
       {
         id: 'R2',
         submittedAt: '2026-07-01T10:00:00Z',
-        author: { login: 'alice' },
-        state: 'CHANGES_REQUESTED',
-        commit: { oid: 'b' },
+        author: 'alice',
+        state: 'changes_requested',
+        commit: 'b',
       },
     ],
-    totalCommentsCount: 2,
     conversationComments: 2,
-    commentNodes: [
+    recentComments: [
       { id: 'C0', author: 'human' },
       { id: 'C1', author: 'bot' },
     ],
   };
-  const existing = { pr: { 42: prFingerprint(before) }, issue: {} };
+  const existing = { pr: { 42: item(prFingerprint(before)) }, issue: {} };
   const plain = run(FILTER_ARGS, deps([[after]], { existing })).report.deltas[0];
-  assert.equal(JSON.stringify(plain).includes('https://ci/build'), false);
-  assert.equal(JSON.stringify(plain).includes('R2'), false);
-  assert.equal(JSON.stringify(plain).includes('C1'), false);
+  assert.equal(JSON.stringify(plain).includes('https://ci/build'), true);
+  assert.equal(JSON.stringify(plain).includes('R2'), true);
+  assert.equal(JSON.stringify(plain).includes('C1'), true);
   const detailed = run([...FILTER_ARGS, '--detail'], deps([[after]], { existing })).report
     .deltas[0];
   assert.equal(
-    detailed.details.find((row) => row.field === 'ci').changed[0].to.detailsUrl,
+    detailed.details.find((row) => row.field === 'checks').changed[0].to.detailsUrl,
     'https://ci/build',
   );
-  assert.equal(detailed.details.find((row) => row.field === 'reviews').changed[0].to.id, 'R2');
+  // Reviews are keyed by id (always present): R1 -> R2 on the same PR is a
+  // distinct review, so it surfaces as added/removed, not an in-place change.
+  assert.equal(detailed.details.find((row) => row.field === 'reviews').added[0].id, 'R2');
   assert.deepEqual(
     detailed.details.find((row) => row.class === 'new-comments'),
     {
       class: 'new-comments',
-      field: 'comments',
+      field: 'conversationComments',
       from: 1,
       to: 2,
       delta: 1,
@@ -1465,34 +2672,34 @@ test('--ignore-authors rejects empty members before repository derivation', () =
 test('--only-classes with no matching delta suppresses attention without changing the snapshot', () => {
   // Removing the only-class branch would incorrectly wake consumers for a
   // ci-changed delta that no requested class admits.
-  const before = { ...basePr, statusCheckRollup: [] };
+  const before = { ...basePr, checks: [] };
   const after = {
     ...before,
     updatedAt: '2026-07-01T11:00:00Z',
-    statusCheckRollup: [{ context: 'ci/test', state: 'SUCCESS' }],
+    checks: [{ name: 'ci/test', kind: 'status', status: 'success', conclusion: 'success' }],
   };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const { code, report } = run([...FILTER_ARGS, '--only-classes', 'review-changed'], d);
   assert.equal(code, 0);
   assert.deepEqual(report.deltas, []);
   assert.equal(report.filteredDeltas, 1);
-  assert.equal(d.stored.pr['42'].updatedAt, after.updatedAt);
+  assert.equal(d.stored.pr['42'].fingerprint.updatedAt, after.updatedAt);
 });
 
 test('--only-classes keeps matching deltas and still exits 10', () => {
   // Dropping the positive branch would hide a requested ci transition among
   // unrelated update churn.
-  const ciBefore = { ...basePr, statusCheckRollup: [] };
+  const ciBefore = { ...basePr, checks: [] };
   const ciAfter = {
     ...ciBefore,
     updatedAt: '2026-07-01T11:00:00Z',
-    statusCheckRollup: [{ context: 'ci/test', state: 'SUCCESS' }],
+    checks: [{ name: 'ci/test', kind: 'status', status: 'success', conclusion: 'success' }],
   };
   const updateBefore = { ...basePr, number: 43, title: 'other PR' };
   const updateAfter = { ...updateBefore, updatedAt: '2026-07-01T11:00:00Z' };
   const d = deps([[ciAfter, updateAfter]], {
     existing: {
-      pr: { 42: prFingerprint(ciBefore), 43: prFingerprint(updateBefore) },
+      pr: { 42: item(prFingerprint(ciBefore)), 43: item(prFingerprint(updateBefore)) },
       issue: {},
     },
   });
@@ -1506,15 +2713,16 @@ test('--only-classes keeps matching deltas and still exits 10', () => {
 test('--ignore-classes removes a class but retains a multi-class delta, and drops empty deltas', () => {
   // A filter that deletes the whole multi-class delta loses an actionable head
   // change; one that retains an empty class list emits an invalid delta.
-  const headBefore = { ...basePr };
+  const headBefore = { ...basePr, isDraft: true };
   const headAfter = {
     ...headBefore,
     updatedAt: '2026-07-01T11:00:00Z',
-    headRefOid: 'sha2',
+    headSha: 'sha2',
+    isDraft: false,
   };
   const retained = run(
-    [...FILTER_ARGS, '--ignore-classes', 'updated'],
-    deps([[headAfter]], { existing: { pr: { 42: prFingerprint(headBefore) }, issue: {} } }),
+    [...FILTER_ARGS, '--ignore-classes', 'draft-ready'],
+    deps([[headAfter]], { existing: { pr: { 42: item(prFingerprint(headBefore)) }, issue: {} } }),
   );
   assert.equal(retained.code, 10);
   assert.deepEqual(retained.report.deltas[0].classes, ['head-changed']);
@@ -1524,7 +2732,9 @@ test('--ignore-classes removes a class but retains a multi-class delta, and drop
   const updateAfter = { ...updateBefore, updatedAt: '2026-07-01T11:00:00Z' };
   const dropped = run(
     [...FILTER_ARGS, '--ignore-classes', 'updated'],
-    deps([[updateAfter]], { existing: { pr: { 42: prFingerprint(updateBefore) }, issue: {} } }),
+    deps([[updateAfter]], {
+      existing: { pr: { 42: item(prFingerprint(updateBefore)) }, issue: {} },
+    }),
   );
   assert.equal(dropped.code, 0);
   assert.deepEqual(dropped.report.deltas, []);
@@ -1545,26 +2755,26 @@ test('unknown attention-filter classes are config errors that name the invalid v
 test('--settled drops pending and unknown PRs, keeps ciRollup none, and implies summaries', () => {
   // Treating no CI checks as pending would suppress a settled PR forever; not
   // deriving summaries would let pending/unknown work through unnoticed.
-  const pendingBefore = { ...basePr, number: 42, mergeable: 'MERGEABLE' };
+  const pendingBefore = { ...basePr, number: 42, mergeable: 'mergeable' };
   const pendingAfter = {
     ...pendingBefore,
     updatedAt: '2026-07-01T11:00:00Z',
-    statusCheckRollup: [{ context: 'ci/test', state: 'PENDING' }],
+    checks: [{ name: 'ci/test', kind: 'status', status: 'pending', conclusion: 'pending' }],
   };
-  const unknownBefore = { ...basePr, number: 43, mergeable: 'MERGEABLE' };
+  const unknownBefore = { ...basePr, number: 43, mergeable: 'mergeable' };
   const unknownAfter = {
     ...unknownBefore,
     updatedAt: '2026-07-01T11:00:00Z',
-    mergeable: 'UNKNOWN',
+    mergeable: 'unknown',
   };
-  const noneBefore = { ...basePr, number: 44, mergeable: 'MERGEABLE' };
+  const noneBefore = { ...basePr, number: 44, mergeable: 'mergeable' };
   const noneAfter = { ...noneBefore, updatedAt: '2026-07-01T11:00:00Z' };
   const d = deps([[pendingAfter, unknownAfter, noneAfter]], {
     existing: {
       pr: {
-        42: prFingerprint(pendingBefore),
-        43: prFingerprint(unknownBefore),
-        44: prFingerprint(noneBefore),
+        42: item(prFingerprint(pendingBefore)),
+        43: item(prFingerprint(unknownBefore)),
+        44: item(prFingerprint(noneBefore)),
       },
       issue: {},
     },
@@ -1581,32 +2791,32 @@ test('--settled drops pending and unknown PRs, keeps ciRollup none, and implies 
 
 test('combined attention filters apply only before ignore, making ignore the final class veto', () => {
   // Reversing the order would drop this delta after ci-changed is vetoed,
-  // instead of retaining its independent head/update classes.
-  const before = { ...basePr, statusCheckRollup: [] };
+  // instead of retaining its independent head-changed class.
+  const before = { ...basePr, checks: [] };
   const after = {
     ...before,
     updatedAt: '2026-07-01T11:00:00Z',
-    headRefOid: 'sha2',
-    statusCheckRollup: [{ context: 'ci/test', state: 'SUCCESS' }],
+    headSha: 'sha2',
+    checks: [{ name: 'ci/test', kind: 'status', status: 'success', conclusion: 'success' }],
   };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const { code, report } = run(
     [...FILTER_ARGS, '--only-classes', 'ci-changed', '--ignore-classes', 'ci-changed'],
     d,
   );
   assert.equal(code, 10);
-  assert.deepEqual(report.deltas[0].classes, ['head-changed', 'updated']);
+  assert.deepEqual(report.deltas[0].classes, ['head-changed']);
   assert.equal(report.filteredDeltas, 0);
 });
 
 test('attention filters leave the persisted snapshot byte-identical and outpost sends survivors only', async () => {
   // Moving filtering before persistence would replay suppressed changes later;
   // sending the unfiltered report would still wake the downstream consumer.
-  const ciBefore = { ...basePr, statusCheckRollup: [] };
+  const ciBefore = { ...basePr, checks: [] };
   const ciAfter = {
     ...ciBefore,
     updatedAt: '2026-07-01T11:00:00Z',
-    statusCheckRollup: [{ context: 'ci/test', state: 'SUCCESS' }],
+    checks: [{ name: 'ci/test', kind: 'status', status: 'success', conclusion: 'success' }],
   };
   const updateBefore = { ...basePr, number: 43, title: 'other PR' };
   const updateAfter = { ...updateBefore, updatedAt: '2026-07-01T11:00:00Z' };
@@ -1622,8 +2832,8 @@ test('attention filters leave the persisted snapshot byte-identical and outpost 
     stateFile,
   ];
   const dependencySet = (prs) => ({
-    fetchPRs: () => prs,
-    fetchIssues: () => [],
+    fetchPRs: () => ({ rows: prs, rateLimit: RATE_LIMIT }),
+    fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
     now: () => '2026-07-01T12:00:00Z',
   });
   try {
@@ -1656,7 +2866,7 @@ test('attention filters leave the persisted snapshot byte-identical and outpost 
       [43],
     );
     assert.equal(posts.length, 1);
-    assert.equal(posts[0].number, 43);
+    assert.equal(posts[0].delta.number, 43);
     assert.equal(readFileSync(filteredState, 'utf8'), readFileSync(unfilteredState, 'utf8'));
   } finally {
     rmSync(stateDir, { recursive: true, force: true });
@@ -1686,6 +2896,7 @@ test('--help-json documents the summary schema well enough to build a validator'
     'isDraft',
     'unresolvedReviewThreads',
     'headSha',
+    'failedChecks',
   ]);
   assert.deepEqual(help.output.deltaSummaryEnums.ciRollup, ['green', 'failed', 'pending', 'none']);
   assert.deepEqual(help.output.deltaSummaryEnums.mergeable, [
@@ -1809,10 +3020,14 @@ test('missing --monitor-id defaults to a stable per-machine host id', () => {
 });
 
 test('monitor id precedence is flag then environment then the generated default', () => {
+  // Each `env` here replaces `d.env` wholesale, overriding the module-level
+  // GH_DELTA_NO_REGISTRY guard above -- re-include it explicitly so this
+  // resolved detector tick doesn't write a real breadcrumb into the
+  // developer's ~/.local/state/gh-delta/registry.
   for (const [argv, env, expected] of [
-    [['--monitor-id', 'flag'], { GH_DELTA_MONITOR_ID: 'env' }, 'flag'],
-    [[], { GH_DELTA_MONITOR_ID: 'env' }, 'env'],
-    [[], {}, 'generated'],
+    [['--monitor-id', 'flag'], { GH_DELTA_MONITOR_ID: 'env', GH_DELTA_NO_REGISTRY: '1' }, 'flag'],
+    [[], { GH_DELTA_MONITOR_ID: 'env', GH_DELTA_NO_REGISTRY: '1' }, 'env'],
+    [[], { GH_DELTA_NO_REGISTRY: '1' }, 'generated'],
   ]) {
     const d = deps([[]]);
     d.env = env;
@@ -1850,8 +3065,8 @@ test('missing state flags default to a per-user tmpdir-derived snapshot', () => 
   assert.equal(code, 0);
   assert.ok(d.readPath.startsWith(join(tmpdir(), 'gh-delta-')), d.readPath);
   assert.ok(d.readPath.endsWith(`${'/'}repo-o%2Fr__monitor-main__pr-issue.json`));
-  assert.equal(report.stateFile, d.readPath);
-  assert.equal(report.baseline, true);
+  assert.equal(report.results[0].stateFile, d.readPath);
+  assert.equal(report.results[0].baseline, true);
 });
 
 test('explicit state flags still resolve verbatim and populate report.stateFile', () => {
@@ -1860,13 +3075,13 @@ test('explicit state flags still resolve verbatim and populate report.stateFile'
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'],
     d,
   );
-  assert.equal(report.stateFile, '/tmp/x.json');
+  assert.equal(report.results[0].stateFile, '/tmp/x.json');
   const d2 = deps([[]]);
   const { report: report2 } = run(
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-dir', '/tmp/state', '--entities', 'pr'],
     d2,
   );
-  assert.equal(report2.stateFile, '/tmp/state/repo-o%2Fr__monitor-main__pr.json');
+  assert.equal(report2.results[0].stateFile, '/tmp/state/repo-o%2Fr__monitor-main__pr.json');
 });
 
 test('invalid --entities returns code 2 before fetching', () => {
@@ -1916,19 +3131,9 @@ test('unknown arguments return structured code 2 error', () => {
 test('--entities pr preserves existing issue snapshot entries', () => {
   const existing = {
     pr: {
-      42: {
-        state: 'OPEN',
-        updatedAt: '2026-07-01T10:00:00Z',
-        isDraft: false,
-        ci: 'da39a3ee5e6b',
-        review: 'REVIEW_REQUIRED',
-        reviews: 'da39a3ee5e6b',
-        mergeable: 'UNKNOWN',
-        comments: 0,
-        head: 'sha1',
-      },
+      42: item(openFp),
     },
-    issue: { 7: { state: 'OPEN', updatedAt: '2026-07-01T10:00:00Z', labels: [], comments: 0 } },
+    issue: { 7: { state: 'open', updatedAt: '2026-07-01T10:00:00Z', labels: [], comments: 0 } },
   };
   const d = deps([[basePr]], { existing });
   const { code } = run(
@@ -1945,8 +3150,8 @@ test('corrupt snapshot read failure returns code 2 and does NOT write', () => {
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'],
     {
       ...NOOP_LOCK_DEPS,
-      fetchPRs: () => [basePr],
-      fetchIssues: () => [],
+      fetchPRs: () => ({ rows: [basePr], rateLimit: RATE_LIMIT }),
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
       readSnapshot: () => {
         throw new Error('invalid snapshot JSON at /tmp/x.json');
       },
@@ -1958,7 +3163,7 @@ test('corrupt snapshot read failure returns code 2 and does NOT write', () => {
   );
   assert.equal(code, 2);
   assert.equal(writes, 0);
-  assert.match(report.error, /invalid snapshot JSON/);
+  assert.match(report.results[0].error.message, /invalid snapshot JSON/);
 });
 
 test('invalid snapshot horizon returns code 2 before fetching', () => {
@@ -1970,9 +3175,9 @@ test('invalid snapshot horizon returns code 2 before fetching', () => {
       ...NOOP_LOCK_DEPS,
       fetchPRs: () => {
         fetched = true;
-        return [];
+        return { rows: [], rateLimit: RATE_LIMIT };
       },
-      fetchIssues: () => [],
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
       readSnapshot: () => ({ pr: {}, issue: {}, meta: { horizon: 'not-a-date' } }),
       writeSnapshotAtomic: () => {
         writes++;
@@ -1981,8 +3186,8 @@ test('invalid snapshot horizon returns code 2 before fetching', () => {
     },
   );
   assert.equal(code, 2);
-  assert.equal(report.kind, 'snapshot');
-  assert.match(report.error, /invalid snapshot horizon/);
+  assert.equal(report.results[0].error.kind, 'snapshot');
+  assert.match(report.results[0].error.message, /invalid snapshot horizon/);
   assert.equal(fetched, false);
   assert.equal(writes, 0);
 });
@@ -2037,26 +3242,15 @@ test('existing snapshot is read before GitHub fetches', () => {
   assert.equal(code, 2);
   assert.equal(read, true);
   assert.equal(fetched, false);
-  assert.match(report.error, /invalid snapshot/);
+  assert.match(report.results[0].error.message, /invalid snapshot/);
 });
 
 test('gh-delta sends outpost payloads with monitor id after the snapshot write', async () => {
   const { runWithOutpost } = await import('../lib/cli.mjs');
-  const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
+  const d = deps([[{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: {
       pr: {
-        42: {
-          state: 'OPEN',
-          updatedAt: '2026-07-01T10:00:00Z',
-          isDraft: false,
-          ci: 'da39a3ee5e6b',
-          review: 'REVIEW_REQUIRED',
-          reviews: 'da39a3ee5e6b',
-          mergeable: 'UNKNOWN',
-          comments: 0,
-          commentsOverflow: false,
-          head: 'sha1',
-        },
+        42: item(openFp),
       },
       issue: {},
     },
@@ -2087,8 +3281,7 @@ test('gh-delta sends outpost payloads with monitor id after the snapshot write',
   assert.equal(posts[0].url, 'https://example.com/gh-delta');
   assert.equal(posts[0].body.type, 'gh-delta.delta');
   assert.equal(posts[0].body.monitorId, 'main');
-  assert.equal(posts[0].body.branch, undefined);
-  assert.equal(posts[0].body.eventId, 'gh-delta.delta.v1:o/r:main:pr:42:merged');
+  assert.equal(posts[0].body.delta.branch, undefined);
   assert.equal(
     posts[0].body.deliveryId,
     'gh-delta.delivery.v1:o/r:main:pr:42:merged:2026-07-01T12:00:00Z',
@@ -2096,21 +3289,10 @@ test('gh-delta sends outpost payloads with monitor id after the snapshot write',
 });
 
 test('--format text prints operator output from the main gh-delta binary', async () => {
-  const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
+  const d = deps([[{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: {
       pr: {
-        42: {
-          state: 'OPEN',
-          updatedAt: '2026-07-01T10:00:00Z',
-          isDraft: false,
-          ci: 'da39a3ee5e6b',
-          review: 'REVIEW_REQUIRED',
-          reviews: 'da39a3ee5e6b',
-          mergeable: 'UNKNOWN',
-          comments: 0,
-          commentsOverflow: false,
-          head: 'sha1',
-        },
+        42: item(openFp),
       },
       issue: {},
     },
@@ -2139,7 +3321,7 @@ test('--format json prints the detector report JSON from the main gh-delta binar
   assert.equal(code, 0);
   const report = JSON.parse(output);
   assert.equal(report.monitorId, 'main');
-  assert.equal(report.baseline, true);
+  assert.equal(report.results[0].baseline, true);
 });
 
 test('duplicate --format flags use the same last-value rule for parsing and rendering', async () => {
@@ -2159,7 +3341,7 @@ test('duplicate --format flags use the same last-value rule for parsing and rend
     ],
     d,
   );
-  assert.equal(JSON.parse(textThenJson.output).baseline, true);
+  assert.equal(JSON.parse(textThenJson.output).results[0].baseline, true);
 
   const d2 = deps([[]]);
   const jsonThenText = await runCommand(
@@ -2187,10 +3369,12 @@ test('--help-json usage includes detail flags and documents entities grammar', (
   assert.match(help.usage, /\[--detail\]/);
   assert.ok(help.options.some((option) => option.name === '--summary-line'));
   assert.ok(help.output.deltaFields.includes('summaryLine'));
-  assert.ok(help.output.deltaFields.includes('line'));
+  assert.equal(help.output.deltaFields.includes('line'), false);
+  assert.ok(help.output.deltaFields.includes('context'));
+  assert.ok(help.output.deltaFields.includes('changed'));
   assert.ok(help.output.deltaFields.includes('details'));
   assert.ok(help.output.deltaDetailFields.includes('opaque'));
-  assert.deepEqual(help.output.deltaDetailFieldsByClass['new-comments'], ['comments']);
+  assert.deepEqual(help.output.deltaDetailFieldsByClass['new-comments'], ['conversationComments']);
   assert.deepEqual(help.output.deltaDetailFieldsByClass.relabeled, ['labels']);
   const entities = help.options.find((option) => option.name === '--entities');
   assert.equal(
@@ -2219,7 +3403,7 @@ test('gh-delta rejects invalid --outpost-url before fetching GitHub', async () =
         fetches++;
         throw new Error('should not fetch');
       },
-      fetchIssues: () => [],
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
       readSnapshot: () => ({ pr: {}, issue: {} }),
       writeSnapshotAtomic: () => {
         throw new Error('should not write');
@@ -2259,56 +3443,63 @@ test('config validation precedes repo derivation: an invalid --outpost-url short
   assert.match(report.error, /--outpost-url must use http: or https:/);
 });
 
-test('outpost eventId is order-independent across class permutations', async () => {
+test('outpost deliveryId is order-independent across class permutations', async () => {
   const { buildOutpostPayload } = await import('../lib/outpost.mjs');
-  const report = { repo: 'o/r', monitorId: 'main', at: '2026-07-01T12:00:00Z' };
+  const report = { repo: 'o/r', monitorId: 'main', detectedAt: '2026-07-01T12:00:00Z' };
   const a = buildOutpostPayload({
     report,
-    delta: { entity: 'pr', number: 42, title: 'x', classes: ['review-changed', 'ci-changed'] },
+    delta: {
+      entity: 'pr',
+      number: 42,
+      context: { title: 'x' },
+      classes: ['review-changed', 'ci-changed'],
+    },
   });
   const b = buildOutpostPayload({
     report,
-    delta: { entity: 'pr', number: 42, title: 'x', classes: ['ci-changed', 'review-changed'] },
+    delta: {
+      entity: 'pr',
+      number: 42,
+      context: { title: 'x' },
+      classes: ['ci-changed', 'review-changed'],
+    },
   });
-  assert.equal(a.eventId, b.eventId);
   assert.equal(a.deliveryId, b.deliveryId);
-  assert.equal(a.eventId, 'gh-delta.delta.v1:o/r:main:pr:42:ci-changed+review-changed');
   assert.equal(
     a.deliveryId,
     'gh-delta.delivery.v1:o/r:main:pr:42:ci-changed+review-changed:2026-07-01T12:00:00Z',
   );
 });
 
-test('outpost eventId is stable across detector timestamps while deliveryId changes', async () => {
+test('outpost deliveryId changes across detector timestamps for the same delta', async () => {
   const { buildOutpostPayload } = await import('../lib/outpost.mjs');
-  const delta = { entity: 'pr', number: 42, title: 'x', classes: ['merged'] };
+  const delta = { entity: 'pr', number: 42, context: { title: 'x' }, classes: ['merged'] };
   const first = buildOutpostPayload({
-    report: { repo: 'o/r', monitorId: 'main', at: '2026-07-01T12:00:00Z' },
+    report: { repo: 'o/r', monitorId: 'main', detectedAt: '2026-07-01T12:00:00Z' },
     delta,
   });
   const second = buildOutpostPayload({
-    report: { repo: 'o/r', monitorId: 'main', at: '2026-07-01T12:00:01Z' },
+    report: { repo: 'o/r', monitorId: 'main', detectedAt: '2026-07-01T12:00:01Z' },
     delta,
   });
 
-  assert.equal(first.eventId, second.eventId);
   assert.notEqual(first.deliveryId, second.deliveryId);
 });
 
-test('outpost eventId repeats across different observed states while id does not (regression: id is the dedupe key, not eventId)', async () => {
+test('outpost delta.id changes across different observed states while deliveryId does not (regression: delta.id is the dedupe key, not deliveryId)', async () => {
   const { buildOutpostPayload } = await import('../lib/outpost.mjs');
-  const report = { repo: 'o/r', monitorId: 'main', at: '2026-07-01T12:00:00Z' };
+  const report = { repo: 'o/r', monitorId: 'main', detectedAt: '2026-07-01T12:00:00Z' };
   // Same PR, same class set (ci-changed), two successive observed states —
-  // e.g. CI went red, then green. A receiver that dedupes by eventId would
-  // silently drop the second one; this is exactly the bug being fixed.
+  // e.g. CI went red, then green. A receiver that dedupes by deliveryId would
+  // silently drop the second one; delta.id is the one field safe to dedupe by.
   const first = buildOutpostPayload({
     report,
     delta: {
       entity: 'pr',
       number: 42,
-      title: 'x',
+      context: { title: 'x' },
       classes: ['ci-changed'],
-      to: { state: 'OPEN', ciRollup: 'red' },
+      to: item({ state: 'open', ciRollup: 'red' }),
     },
   });
   const second = buildOutpostPayload({
@@ -2316,92 +3507,118 @@ test('outpost eventId repeats across different observed states while id does not
     delta: {
       entity: 'pr',
       number: 42,
-      title: 'x',
+      context: { title: 'x' },
       classes: ['ci-changed'],
-      to: { state: 'OPEN', ciRollup: 'green' },
+      to: item({ state: 'open', ciRollup: 'green' }),
     },
   });
-  assert.equal(first.eventId, second.eventId);
-  assert.notEqual(first.id, second.id);
+  assert.equal(first.deliveryId, second.deliveryId);
+  assert.notEqual(first.delta.id, second.delta.id);
 });
 
-test('outpost id is stable across runs and across monitorId values for the same observed change', async () => {
+test('outpost delta.id is stable across runs and across monitorId values for the same observed change, while deliveryId is not', async () => {
   const { buildOutpostPayload } = await import('../lib/outpost.mjs');
   const delta = {
     entity: 'pr',
     number: 42,
-    title: 'x',
+    context: { title: 'x' },
     classes: ['merged'],
-    to: { state: 'MERGED' },
+    to: item({ state: 'merged' }),
   };
   const a = buildOutpostPayload({
-    report: { repo: 'o/r', monitorId: 'main', at: '2026-07-01T12:00:00Z' },
+    report: { repo: 'o/r', monitorId: 'main', detectedAt: '2026-07-01T12:00:00Z' },
     delta,
   });
   const b = buildOutpostPayload({
-    report: { repo: 'o/r', monitorId: 'main', at: '2026-08-01T00:00:00Z' },
+    report: { repo: 'o/r', monitorId: 'main', detectedAt: '2026-08-01T00:00:00Z' },
     delta,
   });
   const c = buildOutpostPayload({
-    report: { repo: 'o/r', monitorId: 'other-monitor', at: '2026-07-01T12:00:00Z' },
+    report: { repo: 'o/r', monitorId: 'other-monitor', detectedAt: '2026-07-01T12:00:00Z' },
     delta,
   });
-  assert.equal(a.id, b.id);
-  assert.equal(a.id, c.id);
-  // eventId and deliveryId both include monitorId, so they diverge where id doesn't.
-  assert.notEqual(a.eventId, c.eventId);
+  assert.equal(a.delta.id, b.delta.id);
+  assert.equal(a.delta.id, c.delta.id);
+  // deliveryId includes monitorId, so it diverges where delta.id doesn't.
+  assert.notEqual(a.deliveryId, c.deliveryId);
 });
 
-test('outpost payload has exactly the documented key set (shape/byte-stability guard)', async () => {
+test('two monitors observing the same change produce the same delta.id but a different deliveryId', async () => {
   const { buildOutpostPayload } = await import('../lib/outpost.mjs');
+  const delta = {
+    id: 'f'.repeat(64),
+    repo: 'o/r',
+    entity: 'pr',
+    number: 42,
+    context: { title: 'x' },
+    classes: ['merged'],
+    to: item({ state: 'merged' }),
+  };
+  const a = buildOutpostPayload({
+    report: { monitorId: 'monitor-a', detectedAt: '2026-07-01T12:00:00Z' },
+    delta,
+  });
+  const b = buildOutpostPayload({
+    report: { monitorId: 'monitor-b', detectedAt: '2026-07-01T12:00:00Z' },
+    delta,
+  });
+  assert.equal(a.delta.id, b.delta.id);
+  assert.notEqual(a.deliveryId, b.deliveryId);
+});
+
+test('outpost payload has exactly the documented top-level key set, and embeds the report delta verbatim (no root-level field duplication)', async () => {
+  const { buildOutpostPayload } = await import('../lib/outpost.mjs');
+  // Already CLI-shaped (repo/summary/changed stamped, `to` stripped to the
+  // bare fingerprint) -- the normal case, matching what a real report.deltas
+  // entry looks like. See the un-normalized detectDeltas() case below for the
+  // documented direct-embedding path.
+  const delta = {
+    id: 'a'.repeat(64),
+    repo: 'o/r',
+    entity: 'pr',
+    number: 42,
+    context: { title: 'x', headRefName: 'feature' },
+    classes: ['merged'],
+    seq: 7,
+    summary: { state: 'merged' },
+    changed: {},
+    from: null,
+    to: { state: 'merged', labels: [] },
+  };
   const payload = buildOutpostPayload({
-    report: { repo: 'o/r', monitorId: 'main', at: '2026-07-01T12:00:00Z' },
-    delta: {
-      entity: 'pr',
-      number: 42,
-      title: 'x',
-      classes: ['merged'],
-      headRefName: 'feature',
-      to: { state: 'MERGED', labels: [] },
-    },
+    report: { repo: 'o/r', monitorId: 'main', detectedAt: '2026-07-01T12:00:00Z' },
+    delta,
   });
   assert.deepEqual(
     Object.keys(payload).sort(),
-    [
-      'classes',
-      'delta',
-      'deliveryId',
-      'detectedAt',
-      'entity',
-      'eventId',
-      'headRefName',
-      'id',
-      'labels',
-      'line',
-      'links',
-      'monitorId',
-      'number',
-      'repo',
-      'schemaVersion',
-      'state',
-      'title',
-      'type',
-    ].sort(),
+    ['type', 'schemaVersion', 'deliveryId', 'seq', 'monitorId', 'detectedAt', 'delta'].sort(),
   );
+  assert.deepEqual(payload.delta, delta, 'the embedded delta must be the report delta, unmodified');
+  assert.equal(payload.seq, 7);
 });
 
-test('outpost mirrors optional transient enrichment without adding it to legacy payloads', async () => {
+test('outpost payload seq is null (not omitted) when the delta carries no journal record', async () => {
+  const { buildOutpostPayload } = await import('../lib/outpost.mjs');
+  const payload = buildOutpostPayload({
+    report: { repo: 'o/r', monitorId: 'main', detectedAt: '2026-07-01T12:00:00Z' },
+    delta: { entity: 'issue', number: 1, context: { title: 'x' }, classes: ['new-comments'] },
+  });
+  assert.equal(payload.seq, null);
+  assert.equal(Object.hasOwn(payload, 'seq'), true);
+});
+
+test('outpost mirrors optional transient enrichment on the embedded delta, verbatim', async () => {
   const { buildOutpostPayload } = await import('../lib/outpost.mjs');
   const base = {
-    report: { repo: 'o/r', monitorId: 'main', at: 'now' },
-    delta: { entity: 'issue', number: 1, title: 'x', classes: ['new-comments'] },
+    report: { repo: 'o/r', monitorId: 'main', detectedAt: 'now' },
+    delta: { entity: 'issue', number: 1, context: { title: 'x' }, classes: ['new-comments'] },
   };
-  assert.equal(Object.hasOwn(buildOutpostPayload(base), 'enrichment'), false);
+  assert.equal(Object.hasOwn(buildOutpostPayload(base).delta, 'enrichment'), false);
   const enrichment = {
     comments: [{ id: 'C1', author: 'a', createdAt: 'now', body: 'hi', mentions: [] }],
   };
   assert.deepEqual(
-    buildOutpostPayload({ ...base, delta: { ...base.delta, enrichment } }).enrichment,
+    buildOutpostPayload({ ...base, delta: { ...base.delta, enrichment } }).delta.enrichment,
     enrichment,
   );
 });
@@ -2409,34 +3626,32 @@ test('outpost mirrors optional transient enrichment without adding it to legacy 
 test('--enrich decorates surviving deltas only after snapshot publication and leaves the durable log canonical', () => {
   const before = {
     ...basePr,
-    latestReviews: [],
-    totalCommentsCount: 1,
+    reviews: [],
     conversationComments: 1,
-    commentNodes: [{ id: 'C1', author: 'old' }],
-    reviewThreadNodes: [{ id: 'T1', isResolved: true }],
+    recentComments: [{ id: 'C1', author: 'old' }],
+    threads: [{ id: 'T1', resolved: true }],
   };
   const after = {
     ...before,
     updatedAt: '2026-07-01T11:00:00Z',
-    reviewDecision: 'CHANGES_REQUESTED',
-    latestReviews: [
+    reviewDecision: 'changes_requested',
+    reviews: [
       {
         id: 'R1',
-        state: 'CHANGES_REQUESTED',
+        state: 'changes_requested',
         submittedAt: 'now',
-        author: { login: 'a' },
-        commit: { oid: 'b' },
+        author: 'a',
+        commit: 'b',
       },
     ],
-    totalCommentsCount: 2,
     conversationComments: 2,
-    commentNodes: [
+    recentComments: [
       { id: 'C1', author: 'old' },
       { id: 'C2', author: 'new' },
     ],
-    reviewThreadNodes: [{ id: 'T1', isResolved: false }],
+    threads: [{ id: 'T1', resolved: false }],
   };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const order = [];
   d.writeSnapshotAtomic = (_path, value) => {
     order.push('snapshot');
@@ -2445,37 +3660,48 @@ test('--enrich decorates surviving deltas only after snapshot publication and le
   d.appendDeltaLog = (_path, value) => {
     order.push('log');
     d.logged = value;
+    return { fromSeq: 1, toSeq: value.deltas.length, appended: value.deltas.length };
   };
   d.fetchEnrichment = (kind, ids) => {
     order.push(kind);
     assert.equal(order[0], 'log');
     assert.equal(order[1], 'snapshot');
     if (kind === 'review')
-      return [
+      return {
+        rows: [
+          {
+            id: ids[0],
+            author: 'a',
+            state: 'changes_requested',
+            submittedAt: 'now',
+            commit: 'b',
+            body: 'fix',
+          },
+        ],
+        rateLimit: RATE_LIMIT,
+      };
+    if (kind === 'comments')
+      return {
+        rows: [{ id: ids[0], author: 'b', createdAt: 'now', body: '@alice' }],
+        rateLimit: RATE_LIMIT,
+      };
+    return {
+      rows: [
         {
           id: ids[0],
-          author: 'a',
-          state: 'CHANGES_REQUESTED',
-          submittedAt: 'now',
-          commit: 'b',
-          body: 'fix',
+          firstComment: {
+            id: 'TC',
+            author: 'c',
+            createdAt: 'now',
+            path: 'x',
+            line: 2,
+            originalLine: 1,
+            body: 'body',
+          },
         },
-      ];
-    if (kind === 'comments') return [{ id: ids[0], author: 'b', createdAt: 'now', body: '@alice' }];
-    return [
-      {
-        id: ids[0],
-        firstComment: {
-          id: 'TC',
-          author: 'c',
-          createdAt: 'now',
-          path: 'x',
-          line: 2,
-          originalLine: 1,
-          body: 'body',
-        },
-      },
-    ];
+      ],
+      rateLimit: RATE_LIMIT,
+    };
   };
   const result = run(
     [
@@ -2503,6 +3729,72 @@ test('--enrich decorates surviving deltas only after snapshot publication and le
   assert.match(result.report.deltas[0].enrichment.comments[0].mentions[0], /alice/);
 });
 
+test("with --log and --enrich, the delivered outpost payload seq matches that delta's journal record (R4 seq binding)", async () => {
+  const { runWithOutpost } = await import('../lib/cli.mjs');
+  const before = { ...basePr, reviews: [] };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    reviewDecision: 'changes_requested',
+    reviews: [
+      { id: 'R1', state: 'changes_requested', submittedAt: 'now', author: 'a', commit: 'b' },
+    ],
+  };
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
+  // A non-trivial fromSeq (not 1) proves the payload's seq is the delta's own
+  // journal record number, not an off-by-one or a hardcoded first-record guess.
+  d.appendDeltaLog = (_path, value) => ({
+    fromSeq: 5,
+    toSeq: 5 + value.deltas.length - 1,
+    appended: value.deltas.length,
+  });
+  d.fetchEnrichment = (_kind, ids) => ({
+    rows: [
+      {
+        id: ids[0],
+        author: 'a',
+        state: 'changes_requested',
+        submittedAt: 'now',
+        commit: 'b',
+        body: 'fix',
+      },
+    ],
+    rateLimit: RATE_LIMIT,
+  });
+  const posts = [];
+  d.outpostFetch = async (_url, options) => {
+    posts.push(JSON.parse(options.body));
+    return { ok: true, status: 202 };
+  };
+
+  const result = await runWithOutpost(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/x.json',
+      '--log',
+      '--enrich',
+      'review',
+      '--outpost-url',
+      'https://example.com/gh-delta',
+    ],
+    d,
+  );
+
+  assert.equal(result.code, 10);
+  assert.equal(result.report.deltas[0].seq, 5);
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].seq, 5);
+  // The delivered delta must be the ENRICHED one, even though the seq comes
+  // from the pre-enrichment journal write -- the two are sourced from the
+  // same object at different points in the pipeline, not from a snapshot
+  // taken at the same time.
+  assert.ok(posts[0].delta.enrichment?.review);
+});
+
 test('--enrich invalid selection is rejected before repository derivation', () => {
   let derived = false;
   const result = run(['--enrich', 'review,', '--state-file', '/tmp/x.json'], {
@@ -2515,6 +3807,61 @@ test('--enrich invalid selection is rejected before repository derivation', () =
   assert.equal(result.code, 2);
   assert.equal(derived, false);
   assert.match(result.report.error, /--enrich/);
+});
+
+test('every delta carries author and url from snapshot context without any flags (F2)', () => {
+  const before = { ...basePr, author: 'octocat', url: 'https://github.com/o/r/pull/42' };
+  const after = { ...before, updatedAt: '2026-07-01T11:00:00Z', conversationComments: 1 };
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
+  const result = run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
+  assert.equal(result.code, 10);
+  assert.equal(result.report.deltas[0].context.author, 'octocat');
+  assert.equal(result.report.deltas[0].context.url, 'https://github.com/o/r/pull/42');
+});
+
+test('--enrich body fetches the body of a new PR in one nodes() call and attaches mentions', () => {
+  const newPr = { ...basePr, id: 'PR_node42', author: 'octocat' };
+  // A non-baseline tick (existing snapshot present, just missing this number)
+  // so the new PR classifies as `new`, not a silently seeded baseline.
+  const d = deps([[newPr]], { existing: { pr: {}, issue: {} } });
+  const calls = [];
+  d.fetchEnrichment = (kind, ids) => {
+    calls.push({ kind, ids });
+    return {
+      rows: [{ id: ids[0], body: 'please review @alice' }],
+      rateLimit: RATE_LIMIT,
+    };
+  };
+  const result = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--enrich', 'body'],
+    d,
+  );
+  assert.equal(result.code, 10);
+  assert.deepEqual(result.report.deltas[0].classes, ['new']);
+  assert.deepEqual(calls, [{ kind: 'body', ids: ['PR_node42'] }]);
+  assert.deepEqual(result.report.deltas[0].enrichment.body, {
+    body: 'please review @alice',
+    mentions: ['alice'],
+  });
+});
+
+test('--enrich body makes zero calls for a new-comments-only delta', () => {
+  const before = { ...basePr, id: 'PR_node42' };
+  const after = { ...before, updatedAt: '2026-07-01T11:00:00Z', conversationComments: 1 };
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
+  let calls = 0;
+  d.fetchEnrichment = () => {
+    calls++;
+    return { rows: [], rateLimit: RATE_LIMIT };
+  };
+  const result = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--enrich', 'body'],
+    d,
+  );
+  assert.equal(result.code, 10);
+  assert.deepEqual(result.report.deltas[0].classes, ['new-comments']);
+  assert.equal(calls, 0);
+  assert.equal(result.report.deltas[0].enrichment, undefined);
 });
 
 test('--help wins over unknown flags and invalid outpost URLs', () => {
@@ -2533,21 +3880,11 @@ test('duplicate --outpost-url uses last-wins like every other flag', async () =>
   const { runWithOutpost } = await import('../lib/cli.mjs');
   const existing = {
     pr: {
-      42: {
-        state: 'OPEN',
-        updatedAt: '2026-07-01T10:00:00Z',
-        isDraft: false,
-        ci: 'da39a3ee5e6b',
-        review: 'REVIEW_REQUIRED',
-        reviews: 'da39a3ee5e6b',
-        mergeable: 'UNKNOWN',
-        comments: 0,
-        head: 'sha1',
-      },
+      42: item(openFp),
     },
     issue: {},
   };
-  const d = deps([[{ ...basePr, totalCommentsCount: 2, updatedAt: '2026-07-01T11:00:00Z' }]], {
+  const d = deps([[{ ...basePr, conversationComments: 2, updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing,
   });
   const posts = [];
@@ -2593,40 +3930,40 @@ test('error kinds map to exit codes: config/snapshot=2, github/io/busy=1', () =>
     },
   });
   assert.equal(snapshot.code, 2);
-  assert.equal(snapshot.report.kind, 'snapshot');
+  assert.equal(snapshot.report.results[0].error.kind, 'snapshot');
   const github = run(base, {
     ...noFetch,
     readSnapshot: () => null,
     fetchPRs: () => {
       throw new Error('gh: rate limited');
     },
-    fetchIssues: () => [],
+    fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
   });
   assert.equal(github.code, 1);
-  assert.equal(github.report.kind, 'github');
+  assert.equal(github.report.results[0].error.kind, 'github');
   const io = run(base, {
     ...noFetch,
     readSnapshot: () => null,
-    fetchPRs: () => [],
-    fetchIssues: () => [],
+    fetchPRs: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+    fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
     writeSnapshotAtomic: () => {
       throw new Error('ENOSPC');
     },
   });
   assert.equal(io.code, 1);
-  assert.equal(io.report.kind, 'io');
+  assert.equal(io.report.results[0].error.kind, 'io');
   let fetched = false;
   const busy = run(base, {
     ...noFetch,
     acquireLock: () => ({ ok: false, reason: 'held' }),
     fetchPRs: () => {
       fetched = true;
-      return [];
+      return { rows: [], rateLimit: RATE_LIMIT };
     },
-    fetchIssues: () => [],
+    fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
   });
   assert.equal(busy.code, 1);
-  assert.equal(busy.report.kind, 'busy');
+  assert.equal(busy.report.results[0].error.kind, 'busy');
   assert.equal(fetched, false); // busy is raised before any GitHub call
 });
 
@@ -2659,20 +3996,10 @@ test('sendOutposts stops after the configured max payload count', async () => {
 });
 
 test('outpost warnings land inside the JSON report, not on stderr', async () => {
-  const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
+  const d = deps([[{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: {
       pr: {
-        42: {
-          state: 'OPEN',
-          updatedAt: '2026-07-01T10:00:00Z',
-          isDraft: false,
-          ci: 'da39a3ee5e6b',
-          review: 'REVIEW_REQUIRED',
-          reviews: 'da39a3ee5e6b',
-          mergeable: 'UNKNOWN',
-          comments: 0,
-          head: 'sha1',
-        },
+        42: item(openFp),
       },
       issue: {},
     },
@@ -2796,11 +4123,11 @@ test('--rate-limit-floor gates fetch after snapshot read and reports a low quota
       },
       fetchPRs: () => {
         order.push('fetch');
-        return [];
+        return { rows: [], rateLimit: RATE_LIMIT };
       },
       fetchIssues: () => {
         order.push('fetch');
-        return [];
+        return { rows: [], rateLimit: RATE_LIMIT };
       },
       writeSnapshotAtomic: () => {
         writes++;
@@ -2813,9 +4140,11 @@ test('--rate-limit-floor gates fetch after snapshot read and reports a low quota
     },
   );
   assert.equal(result.code, 1);
-  assert.equal(result.report.kind, 'rate-limit');
-  assert.equal(result.report.resetAt, '2026-07-01T13:00:00.000Z');
-  assert.match(result.report.error, /remaining 3.*floor 4/);
+  assert.equal(result.report.results[0].error.kind, 'rate-limit');
+  assert.equal(result.report.results[0].error.resetAt, '2026-07-01T13:00:00.000Z');
+  assert.equal(result.report.results[0].error.remaining, 3);
+  assert.equal(Object.hasOwn(result.report.results[0].error, 'cost'), false);
+  assert.match(result.report.results[0].error.message, /remaining 3.*floor 4/);
   assert.deepEqual(order, ['read', 'rate']);
   assert.equal(writes, 0);
   assert.equal(registered.status, 'failure');
@@ -2846,15 +4175,88 @@ test('--rate-limit-floor allows equality and forwards timeout before the observa
       },
       fetchPRs: () => {
         order.push(['fetch']);
-        return [];
+        return { rows: [], rateLimit: RATE_LIMIT };
       },
-      fetchIssues: () => [],
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
       writeSnapshotAtomic: () => {},
       now: () => '2026-07-01T12:00:00Z',
     },
   );
   assert.equal(result.code, 0);
   assert.deepEqual(order, [['rate', 321], ['fetch']]);
+});
+
+test('a tick spanning two entity families accumulates cost and keeps the last remaining/resetAt', () => {
+  const d = {
+    ...NOOP_LOCK_DEPS,
+    fetchPRs: () => ({
+      rows: [],
+      rateLimit: { cost: 4, remaining: 100, resetAt: '2026-07-01T13:00:00.000Z' },
+    }),
+    fetchIssues: () => ({
+      rows: [],
+      rateLimit: { cost: 2, remaining: 98, resetAt: '2026-07-01T13:00:01.000Z' },
+    }),
+    readSnapshot: () => null,
+    writeSnapshotAtomic: () => {},
+    now: () => '2026-07-01T12:00:00Z',
+  };
+  const result = run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
+  assert.equal(result.code, 0);
+  // F3's accumulator, surfaced by R3 as results[].rateLimit.
+  assert.deepEqual(result.report.results[0].rateLimit, {
+    cost: 6,
+    remaining: 98,
+    resetAt: '2026-07-01T13:00:01.000Z',
+  });
+});
+
+test('enrichment cost accumulates into the same tick-level rateLimit as the observation fetches', () => {
+  const before = {
+    ...basePr,
+    conversationComments: 1,
+    recentComments: [{ id: 'C1', author: 'old' }],
+  };
+  const after = {
+    ...before,
+    updatedAt: '2026-07-01T11:00:00Z',
+    conversationComments: 2,
+    recentComments: [
+      { id: 'C1', author: 'old' },
+      { id: 'C2', author: 'new' },
+    ],
+  };
+  const d = deps([[after]], {
+    existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} },
+  });
+  d.fetchPRs = () => ({
+    rows: [after],
+    rateLimit: { cost: 4, remaining: 100, resetAt: '2026-07-01T13:00:00.000Z' },
+  });
+  d.fetchEnrichment = () => ({
+    rows: [{ id: 'C2', author: 'a', createdAt: 'now', body: 'hi' }],
+    rateLimit: { cost: 1, remaining: 99, resetAt: '2026-07-01T13:00:01.000Z' },
+  });
+  const result = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/x.json',
+      '--enrich',
+      'comments',
+    ],
+    d,
+  );
+  assert.equal(result.code, 10);
+  // 4 (PR fetch) + 1 (default issue fetch from deps()) + 1 (enrichment).
+  assert.deepEqual(result.report.results[0].rateLimit, {
+    cost: 6,
+    remaining: 99,
+    resetAt: '2026-07-01T13:00:01.000Z',
+  });
 });
 
 test('omitting --rate-limit-floor makes no rate-limit call', () => {
@@ -2874,9 +4276,9 @@ test('--gh-timeout-ms threads into fetchers and defaults to 60000', () => {
     ...NOOP_LOCK_DEPS,
     fetchPRs: (_repo, opts) => {
       receivedTimeoutMs = opts.timeoutMs;
-      return [];
+      return { rows: [], rateLimit: RATE_LIMIT };
     },
-    fetchIssues: () => [],
+    fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
     readSnapshot: () => null,
     writeSnapshotAtomic: () => {},
     now: () => '2026-07-01T12:00:00Z',
@@ -2926,9 +4328,9 @@ test('the CLI threads the snapshot horizon into fetchers and stamps a new one', 
     ...NOOP_LOCK_DEPS,
     fetchPRs: (_repo, opts) => {
       receivedCutoff = opts.horizonCutoff;
-      return [];
+      return { rows: [], rateLimit: RATE_LIMIT };
     },
-    fetchIssues: () => [],
+    fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
     readSnapshot: () => ({ pr: {}, issue: {}, meta: { horizon: '2026-07-01T11:00:00.000Z' } }),
     writeSnapshotAtomic: (_p, data) => {
       d.written = data;
@@ -2944,25 +4346,14 @@ test('the CLI threads the snapshot horizon into fetchers and stamps a new one', 
 test('--detail reports the current missing tick for still-missing', () => {
   const d = {
     ...NOOP_LOCK_DEPS,
-    fetchPRs: () => [],
-    fetchIssues: () => [],
+    fetchPRs: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+    fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
     readSnapshot: () => ({
       pr: {
-        42: {
-          state: 'OPEN',
-          updatedAt: '2026-07-01T10:00:00Z',
-          isDraft: false,
-          ci: 'da39a3ee5e6b',
-          review: 'REVIEW_REQUIRED',
-          reviews: 'da39a3ee5e6b',
-          mergeable: 'UNKNOWN',
-          comments: 0,
-          head: 'sha1',
-          missing: true,
-          missingTicks: 1,
-        },
+        42: item(openFp, { missingTicks: 1 }),
       },
       issue: {},
+      meta: DEFAULT_OLD_META,
     }),
     writeSnapshotAtomic: (_p, data) => {
       d.written = data;
@@ -2989,22 +4380,12 @@ test('--detail reports the current missing tick for still-missing', () => {
   assert.equal(report.deltas[0].details[0].missingTicks, 2);
 });
 
-test('mixed-case --repo shares one snapshot and one eventId space', async () => {
+test('mixed-case --repo shares one snapshot and one deliveryId space', async () => {
   const { runWithOutpost } = await import('../lib/cli.mjs');
-  const d = deps([[{ ...basePr, state: 'MERGED', updatedAt: '2026-07-01T11:00:00Z' }]], {
+  const d = deps([[{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }]], {
     existing: {
       pr: {
-        42: {
-          state: 'OPEN',
-          updatedAt: '2026-07-01T10:00:00Z',
-          isDraft: false,
-          ci: 'da39a3ee5e6b',
-          review: 'REVIEW_REQUIRED',
-          reviews: 'da39a3ee5e6b',
-          mergeable: 'UNKNOWN',
-          comments: 0,
-          head: 'sha1',
-        },
+        42: item(openFp),
       },
       issue: {},
     },
@@ -3028,10 +4409,13 @@ test('mixed-case --repo shares one snapshot and one eventId space', async () => 
     d,
   );
   assert.equal(code, 10);
-  assert.equal(report.repo, 'o/r');
+  assert.deepEqual(report.repos, ['o/r']);
   assert.equal(d.readPath, '/tmp/state/repo-o%2Fr__monitor-main__pr-issue.json');
-  assert.equal(posts[0].eventId, 'gh-delta.delta.v1:o/r:main:pr:42:merged');
-  assert.match(posts[0].links.html, /^https:\/\/github\.com\/o\/r\/pull\/42$/);
+  assert.equal(
+    posts[0].deliveryId,
+    'gh-delta.delivery.v1:o/r:main:pr:42:merged:2026-07-01T12:00:00Z',
+  );
+  assert.equal(posts[0].delta.repo, 'o/r');
 });
 
 test('list subcommand returns a read-only inventory report with code 0', () => {
@@ -3058,7 +4442,7 @@ test('list subcommand returns a read-only inventory report with code 0', () => {
   };
   const { code, report } = run(['list', '--state-dir', '/state', '--since', '24h'], d);
   assert.equal(code, 0);
-  assert.equal(report.schemaVersion, 1);
+  assert.equal(report.schemaVersion, 2);
   assert.equal(report.command, 'list');
   assert.equal(report.stateDir, '/state');
   assert.equal(report.since, '24h');
@@ -3155,7 +4539,7 @@ test('list --format text renders one line per monitor plus skipped files', async
   assert.match(output, /^2026-07-08T12:00:00\.000Z \| 2 monitor\(s\) \| \/state\n/);
   assert.match(
     output,
-    /o\/r \| monitor: prs-5m \| entities: pr,issue \| last run: 2026-07-08T11:00:00\.000Z \| 2 PR\(s\), 3 issue\(s\)/,
+    /o\/r \| monitor: prs-5m \| entities: pr,issue \| schema: .* \| last run: 2026-07-08T11:00:00\.000Z \| 2 PR\(s\), 3 issue\(s\)/,
   );
   assert.match(output, /o\/r \| monitor: broken \| .* \| snapshot error: invalid snapshot JSON/);
   assert.match(output, /2 unrecognized file\(s\) skipped\./);
@@ -3256,7 +4640,7 @@ test('a registry write failure never changes the run result', () => {
     d,
   );
   assert.equal(code, 0);
-  assert.equal(report.baseline, true);
+  assert.equal(report.results[0].baseline, true);
   assert.equal(d.writes, 1);
 });
 
@@ -3270,7 +4654,7 @@ test('a failed detector attempt updates the registry without changing its result
   d.registerMonitor = (entry) => registered.push(entry);
   const result = run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
   assert.equal(result.code, 1);
-  assert.equal(result.report.kind, 'github');
+  assert.equal(result.report.results[0].error.kind, 'github');
   assert.deepEqual(
     registered.map(({ status, error }) => [status, error?.kind]),
     [['failure', 'github']],
@@ -3285,7 +4669,7 @@ test('a busy detector attempt is recorded as a registry failure', () => {
   d.registerMonitor = (entry) => registered.push(entry);
   const result = run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
   assert.equal(result.code, 1);
-  assert.equal(result.report.kind, 'busy');
+  assert.equal(result.report.results[0].error.kind, 'busy');
   assert.deepEqual(
     registered.map(({ status, error }) => [status, error?.kind]),
     [['failure', 'busy']],
@@ -3295,7 +4679,12 @@ test('a busy detector attempt is recorded as a registry failure', () => {
 test('generated monitor identity collision warning is included on success and failure', () => {
   for (const fail of [false, true]) {
     const d = deps([[]]);
-    d.env = {};
+    // monitorIdentityWarnings (the mechanism under test) reads via the
+    // mocked readRegistry below regardless of GH_DELTA_NO_REGISTRY -- only
+    // the WRITE side (registerAttempt) checks that flag, and this test never
+    // asserts on a write, so disabling it here just stops a real breadcrumb
+    // landing in the developer's ~/.local/state/gh-delta/registry.
+    d.env = { GH_DELTA_NO_REGISTRY: '1' };
     d.defaultMonitor = () => 'host-current';
     d.machineId = 'machine-a';
     d.readRegistry = () => ({
@@ -3313,26 +4702,36 @@ test('generated monitor identity collision warning is included on success and fa
 });
 
 test('monitor identity collision warning excludes inapplicable and unavailable registry cases', () => {
+  // Same reasoning as the test above: monitorIdentityWarnings reads through
+  // the mocked readRegistry regardless of GH_DELTA_NO_REGISTRY, so setting it
+  // here only stops registerAttempt's WRITE side, which nothing here asserts
+  // on, from landing a real breadcrumb in the developer's registry.
   const cases = [
-    { argv: ['--format', 'json'], env: {} },
-    { argv: ['--format', 'text', '--monitor-id', 'host-current'], env: {} },
-    { argv: ['--format', 'text'], env: { GH_DELTA_MONITOR_ID: 'host-current' } },
+    { argv: ['--format', 'json'], env: { GH_DELTA_NO_REGISTRY: '1' } },
+    {
+      argv: ['--format', 'text', '--monitor-id', 'host-current'],
+      env: { GH_DELTA_NO_REGISTRY: '1' },
+    },
     {
       argv: ['--format', 'text'],
-      env: {},
+      env: { GH_DELTA_MONITOR_ID: 'host-current', GH_DELTA_NO_REGISTRY: '1' },
+    },
+    {
+      argv: ['--format', 'text'],
+      env: { GH_DELTA_NO_REGISTRY: '1' },
       entry: { repo: 'o/r', machineId: 'machine-a', monitorId: 'host-current' },
     },
     {
       argv: ['--format', 'text'],
-      env: {},
+      env: { GH_DELTA_NO_REGISTRY: '1' },
       entry: { repo: 'x/y', machineId: 'machine-a', monitorId: 'host-other' },
     },
     {
       argv: ['--format', 'text'],
-      env: {},
+      env: { GH_DELTA_NO_REGISTRY: '1' },
       entry: { repo: 'o/r', machineId: 'machine-b', monitorId: 'host-other' },
     },
-    { argv: ['--format', 'text'], env: {}, registryError: true },
+    { argv: ['--format', 'text'], env: { GH_DELTA_NO_REGISTRY: '1' }, registryError: true },
   ];
   for (const { argv, env, entry, registryError } of cases) {
     const d = deps([[]]);
@@ -3360,11 +4759,17 @@ test('snapshots are self-describing: meta carries identity next to horizon', () 
     d,
   );
   assert.deepEqual(d.stored.meta, {
-    horizon: '2026-07-01T12:00:00Z',
+    schemaVersion: 2,
+    ghDeltaVersion: d.stored.meta.ghDeltaVersion,
     repo: 'o/r',
     monitorId: 'main',
     entities: ['pr'],
+    scope: 'poll',
+    horizon: '2026-07-01T12:00:00Z',
+    createdAt: '2026-07-01T12:00:00Z',
+    updatedAt: '2026-07-01T12:00:00Z',
   });
+  assert.match(d.stored.meta.ghDeltaVersion, /^\d+\.\d+\.\d+/);
 });
 
 test('list without --state-dir consults the run registry; --state-dir narrows to a scan', () => {
@@ -3388,8 +4793,8 @@ test('list without --state-dir consults the run registry; --state-dir narrows to
 // Minimal deps that let run() reach the report without touching disk/network.
 const baseDeps = (over = {}) => ({
   ...NOOP_LOCK_DEPS,
-  fetchPRs: () => ({}),
-  fetchIssues: () => ({}),
+  fetchPRs: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+  fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
   readSnapshot: () => null,
   writeSnapshotAtomic: () => {},
   registerMonitor: () => {},
@@ -3410,8 +4815,8 @@ test('explicit --repo never calls resolveRepo and reports repoSource:flag', () =
     }),
   );
   assert.equal(called, false);
-  assert.equal(res.report.repoSource, 'flag');
-  assert.equal(res.report.repo, 'owner/repo');
+  assert.equal(res.report.results[0].repoSource, 'flag');
+  assert.equal(res.report.results[0].repo, 'owner/repo');
 });
 
 test('absent --repo uses the derived repo and its source', () => {
@@ -3426,8 +4831,8 @@ test('absent --repo uses the derived repo and its source', () => {
       }),
     }),
   );
-  assert.equal(res.report.repo, 'acme/proj'); // validateRepo lowercased it
-  assert.equal(res.report.repoSource, 'git-remote');
+  assert.equal(res.report.results[0].repo, 'acme/proj'); // validateRepo lowercased it
+  assert.equal(res.report.results[0].repoSource, 'git-remote');
 });
 
 test('derivation declined -> config error, exit 2', () => {
@@ -3539,15 +4944,16 @@ test('schema rejects an unknown format as configuration error', () => {
   assert.match(result.report.error, /json, compact, or ndjson/);
 });
 
-test('single-repo compact output derives per-delta repo and URL from the report', async () => {
+test('single-repo compact output carries per-delta repo and context from the report', async () => {
   const before = { ...basePr, updatedAt: '2026-07-01T10:00:00Z' };
-  const after = { ...basePr, updatedAt: '2026-07-01T11:00:00Z', state: 'CLOSED' };
-  const d = deps([[after]], { existing: { pr: { 42: prFingerprint(before) }, issue: {} } });
+  const after = { ...basePr, updatedAt: '2026-07-01T11:00:00Z', state: 'closed' };
+  const d = deps([[after]], { existing: { pr: { 42: item(prFingerprint(before)) }, issue: {} } });
   const result = await runCommand(
     ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json', '--format', 'compact'],
     d,
   );
   const report = JSON.parse(result.output);
   assert.equal(report.deltas[0].repo, 'o/r');
-  assert.equal(report.deltas[0].url, 'https://github.com/o/r/pull/42');
+  assert.equal(report.deltas[0].context.title, 'add widget');
+  assert.equal(Object.hasOwn(report.deltas[0], 'url'), false);
 });

@@ -60,7 +60,10 @@ test('configuration supplies detector outpost settings to the delivery boundary'
   const result = await runWithOutpost([], {
     cwd: () => '/repo',
     homedir: () => '/home',
-    env: {},
+    // This resolves a real repo through a real detector tick below, so
+    // without GH_DELTA_NO_REGISTRY it writes a real breadcrumb into the
+    // developer's ~/.local/state/gh-delta/registry.
+    env: { GH_DELTA_NO_REGISTRY: '1' },
     configReadFileSync: (path) => {
       if (path === '/repo/.gh-delta.json')
         return JSON.stringify({
@@ -75,24 +78,44 @@ test('configuration supplies detector outpost settings to the delivery boundary'
     acquireLock: () => ({ ok: true, token: 'lock' }),
     releaseLock: () => ({ ok: true }),
     assertLockOwned: () => true,
-    readSnapshot: () => ({ pr: {}, issue: {} }),
-    writeSnapshotAtomic: () => {},
-    fetchPRs: () => [
-      {
-        number: 1,
-        title: 'x',
-        state: 'OPEN',
-        updatedAt: '2026-01-01T00:00:00Z',
-        isDraft: false,
-        statusCheckRollup: [],
-        reviewDecision: 'REVIEW_REQUIRED',
-        latestReviews: [],
-        mergeable: 'UNKNOWN',
-        comments: [],
-        headRefOid: 'a',
+    readSnapshot: () => ({
+      pr: {},
+      issue: {},
+      meta: {
+        schemaVersion: 2,
+        ghDeltaVersion: '0.0.0-test',
+        repo: 'o/r',
+        monitorId: 'main',
+        entities: ['pr', 'issue'],
+        scope: 'poll',
+        horizon: '2025-12-31T00:00:00.000Z',
+        createdAt: '2025-12-31T00:00:00.000Z',
+        updatedAt: '2025-12-31T00:00:00.000Z',
       },
-    ],
-    fetchIssues: () => [],
+    }),
+    writeSnapshotAtomic: () => {},
+    fetchPRs: () => ({
+      rows: [
+        {
+          number: 1,
+          title: 'x',
+          state: 'OPEN',
+          updatedAt: '2026-01-01T00:00:00Z',
+          isDraft: false,
+          statusCheckRollup: [],
+          reviewDecision: 'REVIEW_REQUIRED',
+          latestReviews: [],
+          mergeable: 'UNKNOWN',
+          comments: [],
+          headRefOid: 'a',
+        },
+      ],
+      rateLimit: { cost: 1, remaining: 4999, resetAt: '2026-01-01T01:00:00.000Z' },
+    }),
+    fetchIssues: () => ({
+      rows: [],
+      rateLimit: { cost: 1, remaining: 4999, resetAt: '2026-01-01T01:00:00.000Z' },
+    }),
     now: () => '2026-01-01T00:00:00Z',
     outpostFetch: async () => {
       delivered++;

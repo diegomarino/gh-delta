@@ -7,15 +7,15 @@ import { run } from '../lib/cli.mjs';
 const pr = {
   number: 42,
   title: 'quiet',
-  state: 'OPEN',
+  state: 'open',
   updatedAt: '2026-09-18T00:00:00.000Z',
   isDraft: false,
-  statusCheckRollup: [],
-  reviewDecision: null,
-  latestReviews: [],
-  mergeable: 'UNKNOWN',
-  comments: [],
-  headRefOid: 'abc',
+  checks: [],
+  reviewDecision: 'none',
+  reviews: [],
+  mergeable: 'unknown',
+  comments: 0,
+  headSha: 'abc',
 };
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -72,7 +72,7 @@ test('stale emits at the threshold once per UTC day with period-specific ids', (
       staleAfterMs: DAY,
     },
   );
-  assert.equal(changed.snapshot.pr[42].staleEmittedFor, undefined);
+  assert.equal(changed.snapshot.pr[42].meta.staleEmittedFor, null);
 });
 
 test('stale day is derived from the parsed instant in UTC', () => {
@@ -89,37 +89,48 @@ test('stale day is derived from the parsed instant in UTC', () => {
   assert.equal(result.deltas[0].staleAt, '2026-09-19');
 });
 
-test('stale opt-in converges a legacy snapshot without changing no-flag snapshots', () => {
-  const legacy = detectDeltas(null, { pr: [pr], issue: [] });
-  assert.equal(legacy.snapshot.pr[42].lastChangedAt, undefined);
-  assert.equal(legacy.snapshot.pr[42].ticksSinceChange, undefined);
-  const converged = detectDeltas(
-    legacy.snapshot,
+test('meta bookkeeping (changedAt/ticksSinceChange) is tracked every tick, with or without --stale-after', () => {
+  // Schema v2: `--stale-after` only gates whether the `stale` delta class
+  // fires; the underlying meta.changedAt/ticksSinceChange are always tracked,
+  // so a run without --stale-after still advances them normally.
+  const first = detectDeltas(null, { pr: [pr], issue: [] }, { at: '2026-09-18T00:00:00.000Z' });
+  assert.equal(first.snapshot.pr[42].meta.changedAt, '2026-09-18T00:00:00.000Z');
+  assert.equal(first.snapshot.pr[42].meta.ticksSinceChange, 0);
+  const unchanged = detectDeltas(
+    first.snapshot,
     { pr: [pr], issue: [] },
     { at: '2026-09-20T00:00:00.000Z', staleAfterMs: DAY },
   );
-  assert.equal(converged.snapshot.pr[42].lastChangedAt, '2026-09-20T00:00:00.000Z');
-  assert.equal(converged.snapshot.pr[42].ticksSinceChange, 0);
-  assert.deepEqual(converged.deltas, []);
+  // The stale threshold (1 day) is crossed, so `stale` fires and
+  // staleEmittedFor is stamped -- meta.changedAt itself does not move because
+  // nothing about the fingerprint changed.
+  assert.equal(unchanged.snapshot.pr[42].meta.changedAt, '2026-09-18T00:00:00.000Z');
+  assert.equal(unchanged.snapshot.pr[42].meta.ticksSinceChange, 1);
+  assert.deepEqual(
+    unchanged.deltas.map((d) => d.classes),
+    [['stale']],
+  );
 });
 
-test('stale rejects an invalid persisted lastChangedAt', () => {
+test('stale rejects an invalid persisted item.meta.changedAt', () => {
+  const base = detectDeltas(
+    null,
+    { pr: [pr], issue: [] },
+    { at: '2026-09-18T00:00:00.000Z' },
+  ).snapshot;
   assert.throws(
     () =>
       detectDeltas(
         {
           pr: {
-            42: {
-              ...detectDeltas(null, { pr: [pr], issue: [] }).snapshot.pr[42],
-              lastChangedAt: 'nope',
-            },
+            42: { ...base.pr[42], meta: { ...base.pr[42].meta, changedAt: 'nope' } },
           },
           issue: {},
         },
         { pr: [pr], issue: [] },
         { at: '2026-09-20T00:00:00.000Z', staleAfterMs: DAY },
       ),
-    /invalid persisted lastChangedAt/,
+    /invalid persisted changedAt/,
   );
 });
 
@@ -140,6 +151,18 @@ test('CLI --detail exposes staleAt through the stale detail contract', () => {
     { pr: [pr], issue: [] },
     { at: '2026-09-18T00:00:00.000Z', staleAfterMs: DAY },
   ).snapshot;
+  // Schema v2 snapshot-wide meta is mandatory -- see lib/snapshot.mjs.
+  seeded.meta = {
+    schemaVersion: 2,
+    ghDeltaVersion: '0.0.0-test',
+    repo: 'o/r',
+    monitorId: 'main',
+    entities: ['pr', 'issue'],
+    scope: 'poll',
+    horizon: '2026-09-18T00:00:00.000Z',
+    createdAt: '2026-09-18T00:00:00.000Z',
+    updatedAt: '2026-09-18T00:00:00.000Z',
+  };
   const result = run(
     ['--repo', 'o/r', '--state-file', '/tmp/stale.json', '--stale-after', '1h', '--detail'],
     {
@@ -148,9 +171,16 @@ test('CLI --detail exposes staleAt through the stale detail contract', () => {
       releaseLock: () => {},
       readSnapshot: () => seeded,
       writeSnapshotAtomic: () => {},
-      fetchPRs: () => [pr],
-      fetchIssues: () => [],
+      fetchPRs: () => ({
+        rows: [pr],
+        rateLimit: { cost: 1, remaining: 4999, resetAt: '2026-09-20T01:00:00.000Z' },
+      }),
+      fetchIssues: () => ({
+        rows: [],
+        rateLimit: { cost: 1, remaining: 4999, resetAt: '2026-09-20T01:00:00.000Z' },
+      }),
       now: () => '2026-09-20T00:00:00.000Z',
+      env: { GH_DELTA_NO_REGISTRY: '1' },
     },
   );
   assert.equal(result.code, 10);

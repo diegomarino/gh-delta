@@ -2,7 +2,7 @@
 
 These files are the golden fixtures for `test/contract-baseline.test.mjs`,
 which pins **byte-identity** of the zero-new-flags `gh-delta` CLI path
-(report JSON and snapshot JSON) to released v0.5.0, forever. The report
+(report JSON and snapshot JSON) to released v0.7.0 (schema v2), forever. The report
 fixtures hold the exact `output` string `lib/cli.mjs` `runCommand()` produces
 (with the `--state-file` path normalized to a `<STATE_FILE>` placeholder,
 since the test writes to a fresh temp directory each run); the snapshot

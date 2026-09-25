@@ -50,10 +50,10 @@ jobs:
           case "$code" in
             0 | 10) ;;
             1)
-              echo "::warning::gh-delta transient error (exit 1); next scheduled tick retries: $(jq -r '.error // empty' report.json)"
+              echo "::warning::gh-delta transient error (exit 1); next scheduled tick retries: $(jq -r '.error // .results[0].error.message // empty' report.json)"
               ;;
             2)
-              echo "::error::gh-delta permanent config/snapshot error (exit 2); fix the flags or delete the cached state: $(jq -r '.error // empty' report.json)"
+              echo "::error::gh-delta permanent config/snapshot error (exit 2); fix the flags or delete the cached state: $(jq -r '.error // .results[0].error.message // empty' report.json)"
               exit 1
               ;;
             *)
@@ -61,7 +61,7 @@ jobs:
               exit 1
               ;;
           esac
-          if [ "$(jq -r '.baseline // false' report.json)" = 'true' ]; then
+          if [ "$(jq -r '.results[0].baseline // false' report.json)" = 'true' ]; then
             echo "::notice::gh-delta baseline re-seeded (first run or cache eviction); deltas since the previous baseline were not observed."
           fi
 
@@ -70,7 +70,7 @@ jobs:
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
-          text=$(jq -r '"gh-delta: \(.summary) in \(.repo)\n" + (.deltas | map("• " + .line) | join("\n"))' report.json)
+          text=$(jq -r '"gh-delta: \(.summary) in \(.repos[0])\n" + (.deltas | map("• " + .summaryLine) | join("\n"))' report.json)
           jq -n --arg text "$text" '{ text: $text }' \
             | curl -sf -X POST -H 'Content-type: application/json' -d @- "$SLACK_WEBHOOK_URL"
 

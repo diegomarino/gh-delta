@@ -6,16 +6,28 @@ import { join } from 'node:path';
 import { run, runCommand } from '../lib/cli.mjs';
 import { detectDeltas } from '../lib/detect.mjs';
 
+// Schema v2 item shape: `{ fingerprint, context, meta }`.
+const item = (fingerprint = { state: 'open' }, meta = {}, context = {}) => ({
+  fingerprint,
+  context,
+  meta: {
+    seenAt: null,
+    changedAt: null,
+    ticksSinceChange: 0,
+    missingTicks: 0,
+    staleEmittedFor: null,
+    ...meta,
+  },
+});
+
 test('status reads local snapshot summaries without GitHub or writes', () => {
   const result = run(['status', '--repo', 'o/r', '--state-file', '/tmp/status.json'], {
     readSnapshot: () => ({
       pr: {
-        42: {
-          state: 'OPEN',
-          ciChecks: [],
-          lastChangedAt: '2026-09-20T00:00:00.000Z',
-          ticksSinceChange: 3,
-        },
+        42: item(
+          { state: 'open', checks: [] },
+          { changedAt: '2026-09-20T00:00:00.000Z', ticksSinceChange: 3 },
+        ),
       },
       issue: {},
     }),
@@ -27,6 +39,8 @@ test('status reads local snapshot summaries without GitHub or writes', () => {
   assert.deepEqual(result.report.items[0], {
     entity: 'pr',
     number: 42,
+    title: null,
+    author: null,
     summary: {
       ciRollup: 'none',
       reviewDecision: 'none',
@@ -36,10 +50,31 @@ test('status reads local snapshot summaries without GitHub or writes', () => {
       isDraft: false,
       unresolvedReviewThreads: 0,
       headSha: '',
+      failedChecks: [],
     },
     lastChangedAt: '2026-09-20T00:00:00.000Z',
     ticksSinceChange: 3,
   });
+});
+
+test('status renders title and author from the snapshot context (F2)', () => {
+  const result = run(['status', '--repo', 'o/r', '--state-file', '/tmp/status-context.json'], {
+    readSnapshot: () => ({
+      pr: {
+        42: item(
+          { state: 'open', checks: [] },
+          {},
+          { title: 'Add widget', author: 'octocat', url: 'https://github.com/o/r/pull/42' },
+        ),
+      },
+      issue: {},
+    }),
+    fetchPRs: () => assert.fail('status must not fetch GitHub'),
+    writeSnapshotAtomic: () => assert.fail('status must not write'),
+  });
+  assert.equal(result.code, 0);
+  assert.equal(result.report.items[0].title, 'Add widget');
+  assert.equal(result.report.items[0].author, 'octocat');
 });
 
 test('status --refresh performs one detector tick before reading the local status', () => {
@@ -55,24 +90,35 @@ test('status --refresh performs one detector tick before reading the local statu
     },
     fetchPRs: () => {
       fetches++;
-      return [
-        {
-          number: 42,
-          title: 'x',
-          state: 'OPEN',
-          updatedAt: '2026-09-21T00:00:00.000Z',
-          isDraft: false,
-          statusCheckRollup: [],
-          reviewDecision: null,
-          latestReviews: [],
-          mergeable: 'UNKNOWN',
-          comments: [],
-          headRefOid: 'a',
-        },
-      ];
+      return {
+        rows: [
+          {
+            number: 42,
+            title: 'x',
+            state: 'open',
+            updatedAt: '2026-09-21T00:00:00.000Z',
+            isDraft: false,
+            checks: [],
+            reviewDecision: 'none',
+            reviews: [],
+            mergeable: 'unknown',
+            comments: 0,
+            headSha: 'a',
+          },
+        ],
+        rateLimit: { cost: 1, remaining: 4999, resetAt: '2026-09-21T01:00:00.000Z' },
+      };
     },
-    fetchIssues: () => [],
+    fetchIssues: () => ({
+      rows: [],
+      rateLimit: { cost: 1, remaining: 4999, resetAt: '2026-09-21T01:00:00.000Z' },
+    }),
     now: () => '2026-09-21T00:00:00.000Z',
+    // `status --refresh` performs a real detector tick internally, so
+    // without this it writes a real breadcrumb into the developer's
+    // ~/.local/state/gh-delta/registry (env defaults to process.env, which
+    // does not redirect it).
+    env: { GH_DELTA_NO_REGISTRY: '1' },
   };
   const result = run(
     [
@@ -109,7 +155,7 @@ test('status --watch-dir reads the economical PR snapshot without GitHub', () =>
     readSnapshot: (path) => {
       stateFile = path;
       return {
-        pr: { 42: { state: 'OPEN', ciChecks: [] } },
+        pr: { 42: item({ state: 'open', checks: [] }) },
         issue: {},
       };
     },
@@ -119,7 +165,7 @@ test('status --watch-dir reads the economical PR snapshot without GitHub', () =>
   assert.equal(result.code, 0);
   assert.match(stateFile, /__watch-pr\.json$/);
   assert.deepEqual(
-    result.report.items.map((item) => item.number),
+    result.report.items.map((i) => i.number),
     [42],
   );
 });
@@ -139,10 +185,13 @@ test('status includes selected open issues and applies --number to every entity'
     ],
     {
       readSnapshot: () => ({
-        pr: { 42: { state: 'OPEN', ciChecks: [] } },
+        pr: { 42: item({ state: 'open', checks: [] }) },
         issue: {
-          7: { state: 'OPEN', lastChangedAt: '2026-09-20T00:00:00.000Z', ticksSinceChange: 2 },
-          8: { state: 'OPEN' },
+          7: item(
+            { state: 'open' },
+            { changedAt: '2026-09-20T00:00:00.000Z', ticksSinceChange: 2 },
+          ),
+          8: item({ state: 'open' }),
         },
       }),
     },
@@ -152,6 +201,8 @@ test('status includes selected open issues and applies --number to every entity'
     {
       entity: 'issue',
       number: 7,
+      title: null,
+      author: null,
       summary: null,
       lastChangedAt: '2026-09-20T00:00:00.000Z',
       ticksSinceChange: 2,
@@ -166,7 +217,10 @@ test('status text output renders each returned item truthfully', async () => {
       readSnapshot: () => ({
         pr: {},
         issue: {
-          7: { state: 'OPEN', lastChangedAt: '2026-09-20T00:00:00.000Z', ticksSinceChange: 2 },
+          7: item(
+            { state: 'open' },
+            { changedAt: '2026-09-20T00:00:00.000Z', ticksSinceChange: 2 },
+          ),
         },
       }),
     },
@@ -178,27 +232,66 @@ test('status text output renders each returned item truthfully', async () => {
   assert.match(result.output, /ticksSinceChange=2/);
 });
 
-test('status --refresh preserves stale bookkeeping for an unchanged item', () => {
+test('status text output shows title and author when the snapshot context carries them, sanitized', async () => {
+  const result = await runCommand(
+    ['status', '--repo', 'o/r', '--state-file', '/tmp/status-text.json', '--format', 'text'],
+    {
+      readSnapshot: () => ({
+        pr: {
+          42: item(
+            { state: 'open' },
+            { changedAt: '2026-09-20T00:00:00.000Z', ticksSinceChange: 0 },
+            { title: 'Fix login\x07bug', author: 'alice' },
+          ),
+        },
+        issue: {},
+      }),
+    },
+  );
+  assert.equal(result.code, 0);
+  assert.match(result.output, /PR #42 Fix login bug/);
+  assert.match(result.output, /author=alice/);
+  // GitHub-derived title text must be sanitized like every other rendered
+  // field -- the raw BEL above must not survive into the output.
+  assert.ok(!result.output.includes('\x07'));
+});
+
+test('status --refresh keeps tracking meta bookkeeping for an unchanged item, without a --stale-after flag', () => {
+  // Schema v2: meta.changedAt/ticksSinceChange/staleEmittedFor are tracked on
+  // every tick regardless of whether --stale-after is passed this run;
+  // --stale-after only gates whether the `stale` delta class fires.
   const current = {
     number: 42,
     title: 'quiet',
-    state: 'OPEN',
+    state: 'open',
     updatedAt: '2026-09-18T00:00:00.000Z',
     isDraft: false,
-    statusCheckRollup: [],
-    reviewDecision: null,
-    latestReviews: [],
-    mergeable: 'UNKNOWN',
-    comments: [],
-    headRefOid: 'abc',
+    checks: [],
+    reviewDecision: 'none',
+    reviews: [],
+    mergeable: 'unknown',
+    comments: 0,
+    headSha: 'abc',
   };
   const snapshot = detectDeltas(
     null,
     { pr: [current], issue: [] },
     { at: '2026-09-18T00:00:00.000Z', staleAfterMs: 1 },
   ).snapshot;
-  snapshot.pr[42].ticksSinceChange = 5;
-  snapshot.pr[42].staleEmittedFor = '2026-09-19';
+  snapshot.pr[42].meta.ticksSinceChange = 5;
+  snapshot.pr[42].meta.staleEmittedFor = '2026-09-19';
+  // Schema v2 snapshot-wide meta is mandatory -- see lib/snapshot.mjs.
+  snapshot.meta = {
+    schemaVersion: 2,
+    ghDeltaVersion: '0.0.0-test',
+    repo: 'o/r',
+    monitorId: 'main',
+    entities: ['pr'],
+    scope: 'poll',
+    horizon: '2026-09-18T00:00:00.000Z',
+    createdAt: '2026-09-18T00:00:00.000Z',
+    updatedAt: '2026-09-18T00:00:00.000Z',
+  };
   let written;
   const result = run(
     ['status', '--refresh', '--repo', 'o/r', '--state-file', '/tmp/status-refresh.json'],
@@ -210,15 +303,22 @@ test('status --refresh preserves stale bookkeeping for an unchanged item', () =>
       writeSnapshotAtomic: (_path, next) => {
         written = next;
       },
-      fetchPRs: () => [current],
-      fetchIssues: () => [],
+      fetchPRs: () => ({
+        rows: [current],
+        rateLimit: { cost: 1, remaining: 4999, resetAt: '2026-09-20T01:00:00.000Z' },
+      }),
+      fetchIssues: () => ({
+        rows: [],
+        rateLimit: { cost: 1, remaining: 4999, resetAt: '2026-09-20T01:00:00.000Z' },
+      }),
       now: () => '2026-09-20T00:00:00.000Z',
+      env: { GH_DELTA_NO_REGISTRY: '1' },
     },
   );
   assert.equal(result.code, 0);
-  assert.equal(written.pr[42].lastChangedAt, '2026-09-18T00:00:00.000Z');
-  assert.equal(written.pr[42].ticksSinceChange, 5);
-  assert.equal(written.pr[42].staleEmittedFor, '2026-09-19');
+  assert.equal(written.pr[42].meta.changedAt, '2026-09-18T00:00:00.000Z');
+  assert.equal(written.pr[42].meta.ticksSinceChange, 6);
+  assert.equal(written.pr[42].meta.staleEmittedFor, '2026-09-19');
 });
 
 test('status --refresh reuses the repository resolved by the detector', () => {
@@ -238,9 +338,16 @@ test('status --refresh reuses the repository resolved by the detector', () => {
       warnings: [],
     }),
     resolveLocalRepo: () => assert.fail('status must reuse the detector-resolved repository'),
-    fetchPRs: () => [],
-    fetchIssues: () => [],
+    fetchPRs: () => ({
+      rows: [],
+      rateLimit: { cost: 1, remaining: 4999, resetAt: '2026-09-20T01:00:00.000Z' },
+    }),
+    fetchIssues: () => ({
+      rows: [],
+      rateLimit: { cost: 1, remaining: 4999, resetAt: '2026-09-20T01:00:00.000Z' },
+    }),
     now: () => '2026-09-20T00:00:00.000Z',
+    env: { GH_DELTA_NO_REGISTRY: '1' },
   });
   assert.equal(result.code, 0);
   assert.equal(result.report.repo, 'enterprise/project');

@@ -245,11 +245,16 @@ queues, and actions. Keep scheduler logs or add an external queue if you need
 at-least-once action delivery.
 
 `--outpost-secret` takes the name of an environment variable, not the secret
-itself. When set, gh-delta signs each exact JSON request body with HMAC-SHA256
-in `X-GhDelta-Signature`; use the same `OUTPOST_SECRET` value at the receiver.
+itself. When set, gh-delta signs each request per the
+[Standard Webhooks](https://www.standardwebhooks.com/) spec: `webhook-id`
+(the delivery id), `webhook-timestamp` (epoch seconds), and
+`webhook-signature` (`v1,<base64 HMAC-SHA256 of "{id}.{timestamp}.{body}">`).
+Use the same `OUTPOST_SECRET` value at the receiver. Dedupe by `deliveryId`
+for processing idempotency, and by `delta.id` (the content-addressed identity
+of the observed change) to collapse duplicates reported by several monitors.
 
-The exact payload, `eventId`, `deliveryId`, and warning semantics are specified
-in [Outpost Payload](contract.md#outpost-payload-schema-v1).
+The exact payload and warning semantics are specified
+in [Outpost Payload](contract.md#outpost-payload-schema-v2).
 
 Worked receiver:
 [examples/outpost-ntfy-receiver/](https://github.com/diegomarino/gh-delta/tree/main/examples/outpost-ntfy-receiver)
@@ -279,8 +284,9 @@ local types if they need compile-time checking.
 
 Use `--format compact` for one self-contained JSON envelope, or `--format
 ndjson` for one JSON record per deterministic delta plus a final `end` record.
-They imply semantic summaries and preserve detector snapshots and delta IDs.
-Use `--detail` only when the structured detail rows are needed. Schemas are
+`delta.summary` is unconditional in both, and they preserve detector
+snapshots and delta IDs. Use `--detail` only when the structured detail rows
+are needed. Schemas are
 available locally with `gh-delta schema --format compact`.
 
 Text output consists of an ISO timestamp heartbeat line followed by one block per
@@ -321,6 +327,45 @@ ignored author, the comment delta remains.
 `gh-delta --help-json` prints machine-readable help for agents and other tooling.
 It is the right source for generated CLIs, prompts, and monitors that need the
 current command surface.
+
+## Enrichment
+
+`--full` includes the full `from`/`to` fingerprints in `compact`/`ndjson`
+output (always present in `--format json`; omitted otherwise). Use it when a
+consumer of the bounded agent formats needs the raw compared state instead of
+just `delta.changed`.
+
+`--enrich <kinds>` is an opt-in, comma-separated selection of body fetches
+(`review`, `comments`, `threads`, `body`, `thread-replies`), off by default.
+After a successful snapshot write, it fetches bodies only for matching
+emitted deltas — one extra GitHub call per matching `(delta, kind)` pair, so a
+delta whose classes match multiple selected kinds costs one call per matching
+kind, never one per observed item — and attaches the result as transient
+`delta.enrichment`
+(never written to the snapshot or a durable log, and never affecting
+detection):
+
+- `review`: `review-changed` deltas — the review body text.
+- `comments`: `new-comments` deltas — the new top-level comments.
+- `threads`: `unresolved-threads-added` deltas — the newly unresolved
+  thread's body.
+- `body`: `new`/`first-seen`/`reopened`/`baseline-state` deltas — the item's
+  own body, as `enrichment.body = { body, mentions }` (never fetched for a
+  plain `updated`).
+- `thread-replies`: `review-comments-added` deltas — each affected thread's
+  new inline replies.
+
+A failed enrichment fetch is a warning, never a detection-state change.
+
+**The one pre-publish quota exception:** ordinarily every `--enrich` fetch
+runs after the snapshot/log write. The one exception is when
+`--ignore-authors` and `--enrich thread-replies` are **both** set: gh-delta
+additionally runs one filter-scoped `thread-replies` fetch **before**
+publication, solely to verify reply authorship for the `--ignore-authors`
+filter — it does not populate `delta.enrichment` early. Setting
+`--ignore-authors` alone (without `--enrich thread-replies`) does not spend
+this pre-publish call; a `review-comments-added` delta whose reply authors
+cannot otherwise be verified instead fails open with an explicit warning.
 
 ## Troubleshooting Pointers
 

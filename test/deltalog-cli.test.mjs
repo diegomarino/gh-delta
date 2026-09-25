@@ -16,9 +16,22 @@ import { dirname, join, resolve } from 'node:path';
 import { run, runCommand } from '../lib/cli.mjs';
 import { appendDeltaLog, readCursor, readDeltaLog, setCursorAtomic } from '../lib/deltalog.mjs';
 
+// Schema v2: a snapshot item is `{ fingerprint, context, meta }`.
+const item = (fingerprint) => ({
+  fingerprint,
+  context: {},
+  meta: {
+    seenAt: null,
+    changedAt: null,
+    ticksSinceChange: 0,
+    missingTicks: 0,
+    staleEmittedFor: null,
+  },
+});
+
 const before = {
   pr: {
-    42: {
+    42: item({
       state: 'OPEN',
       updatedAt: '2026-09-20T10:00:00Z',
       isDraft: false,
@@ -27,11 +40,22 @@ const before = {
       reviews: 'a',
       mergeable: 'UNKNOWN',
       comments: 0,
-      commentsOverflow: false,
       head: 'one',
-    },
+    }),
   },
   issue: {},
+  // Schema v2 snapshot-wide meta is mandatory -- see lib/snapshot.mjs.
+  meta: {
+    schemaVersion: 2,
+    ghDeltaVersion: '0.0.0-test',
+    repo: 'o/r',
+    monitorId: 'm',
+    entities: ['pr'],
+    scope: 'poll',
+    horizon: '2026-09-20T11:00:00.000Z',
+    createdAt: '2026-09-20T11:00:00.000Z',
+    updatedAt: '2026-09-20T11:00:00.000Z',
+  },
 };
 const pr = {
   number: 42,
@@ -53,16 +77,26 @@ const lock = {
   extendLockDeadline: () => ({ ok: true }),
 };
 
+const RATE_LIMIT = { cost: 1, remaining: 4999, resetAt: '2026-09-20T13:00:00.000Z' };
+
 function producerDeps(overrides = {}) {
   const events = [];
   return {
     ...lock,
-    fetchPRs: () => [pr],
-    fetchIssues: () => [],
+    fetchPRs: () => ({ rows: [pr], rateLimit: RATE_LIMIT }),
+    fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
     readSnapshot: () => before,
     writeSnapshotAtomic: () => events.push('snapshot'),
-    appendDeltaLog: (file, payload) => events.push(['log', file, payload]),
+    appendDeltaLog: (file, payload) => {
+      events.push(['log', file, payload]);
+      return { fromSeq: 1, toSeq: payload.deltas.length, appended: payload.deltas.length };
+    },
     now: () => '2026-09-20T12:00:00.000Z',
+    // Every caller here resolves a real repo, so without this every one
+    // writes a persistent breadcrumb into the developer's REAL
+    // ~/.local/state/gh-delta/registry (env defaults to process.env, which
+    // does not redirect it) for a state file that never really existed.
+    env: { GH_DELTA_NO_REGISTRY: '1' },
     ...overrides,
     events,
   };
@@ -85,7 +119,7 @@ test('main --log appends emitted post-filter delta before snapshot and exposes l
     deps,
   );
   assert.equal(result.code, 10);
-  assert.equal(result.report.logFile, '/tmp/state.json.deltalog.ndjson');
+  assert.equal(result.report.results[0].logFile, '/tmp/state.json.deltalog.ndjson');
   assert.equal(deps.events[0][0], 'log');
   assert.equal(deps.events[1], 'snapshot');
   assert.equal(deps.events[0][2].deltas[0].id, result.report.deltas[0].id);
@@ -98,10 +132,14 @@ test('log compact retains a producer-derived suffix and read warns a cursor behi
   appendDeltaLog(log, {
     detectedAt: '2026-09-20T10:00:00.000Z',
     deltas: [{ id: 'a'.repeat(64), entity: 'pr', number: 1, title: 'old', classes: ['new'] }],
+    repo: 'o/r',
+    monitorId: 'm',
   });
   appendDeltaLog(log, {
     detectedAt: '2026-09-20T12:00:00.000Z',
     deltas: [{ id: 'b'.repeat(64), entity: 'pr', number: 2, title: 'new', classes: ['new'] }],
+    repo: 'o/r',
+    monitorId: 'm',
   });
   const compacted = run(
     [
@@ -150,6 +188,8 @@ test('duration compaction can retain zero records and warnings render in JSON an
   appendDeltaLog(log, {
     detectedAt: '2026-09-20T10:00:00.000Z',
     deltas: [{ id: 'a'.repeat(64), entity: 'pr', number: 1, title: 'old', classes: ['new'] }],
+    repo: 'o/r',
+    monitorId: 'm',
   });
   const args = [
     'log',
@@ -193,6 +233,7 @@ test('compact rejects unsafe duration before locking and reports lock contention
     acquireLock: () => ({ ok: false, reason: 'held' }),
     compactDeltaLog: () => assert.fail('busy compact must not read or mutate the log'),
     now: () => '2026-09-20T13:00:00.000Z',
+    env: { GH_DELTA_NO_REGISTRY: '1' },
   });
   assert.equal(busy.code, 1);
   assert.equal(busy.report.kind, 'busy');
@@ -204,16 +245,19 @@ test('--log resolves only opt-in log paths while preserving relative snapshot pa
     ['--repo', 'o/r', '--monitor-id', 'm', '--state-file', stateFile, '--entities', 'pr', '--log'],
     producerDeps(),
   );
-  assert.equal(byFile.report.stateFile, stateFile);
-  assert.equal(byFile.report.logFile, resolve(`${stateFile}.deltalog.ndjson`));
+  assert.equal(byFile.report.results[0].stateFile, stateFile);
+  assert.equal(byFile.report.results[0].logFile, resolve(`${stateFile}.deltalog.ndjson`));
 
   const stateDir = 'relative-state-dir';
   const byDir = run(
     ['--repo', 'o/r', '--monitor-id', 'm', '--state-dir', stateDir, '--entities', 'pr', '--log'],
     producerDeps(),
   );
-  assert.equal(byDir.report.stateFile, `${stateDir}/repo-o%2Fr__monitor-m__pr.json`);
-  assert.equal(byDir.report.logFile, resolve(`${stateDir}/log-o%2Fr__monitor-m__pr.ndjson`));
+  assert.equal(byDir.report.results[0].stateFile, `${stateDir}/repo-o%2Fr__monitor-m__pr.json`);
+  assert.equal(
+    byDir.report.results[0].logFile,
+    resolve(`${stateDir}/log-o%2Fr__monitor-m__pr.ndjson`),
+  );
 });
 
 test('actual append write and fsync finish before snapshot publication, and fsync failure blocks it', () => {
@@ -327,7 +371,7 @@ test('manifest directory fsync failure prevents snapshot publication and preserv
     }),
   );
   assert.equal(result.code, 1);
-  assert.equal(result.report.kind, 'io');
+  assert.equal(result.report.results[0].error.kind, 'io');
   assert.equal(snapshotCalls, 0);
   assert.deepEqual(readFileSync(stateFile), beforeBytes);
 });
@@ -350,7 +394,7 @@ test('snapshot failure after durable append retries the same id at a later seque
     producerDeps({ appendDeltaLog }),
   );
   assert.equal(retry.code, 10);
-  const entries = readDeltaLog(retry.report.logFile, { afterSeq: 0 }).entries;
+  const entries = readDeltaLog(retry.report.results[0].logFile, { afterSeq: 0 }).entries;
   assert.deepEqual(
     entries.map((entry) => entry.seq),
     [1, 2],
@@ -381,10 +425,18 @@ test('attention filtering stores the exact fully decorated surviving report delt
   );
   assert.equal(result.code, 10);
   const logged = deps.events.find(([kind]) => kind === 'log')[2].deltas;
-  assert.deepEqual(logged, result.report.deltas);
+  // The durable log record is written pre-seq-stamp (R4): it is a shallow
+  // copy of the same deltas taken before `seq` (the journal record number)
+  // is attached to the report-facing objects, so the two diverge on that one
+  // field by design -- compare everything else, then seq separately.
+  assert.deepEqual(
+    logged.map(({ seq: _seq, ...rest }) => rest),
+    result.report.deltas.map(({ seq: _seq, ...rest }) => rest),
+  );
+  assert.equal(logged[0].seq, undefined);
+  assert.equal(result.report.deltas[0].seq, 1);
   assert.ok(logged[0].summary);
   assert.ok(logged[0].summaryLine);
-  assert.ok(logged[0].line);
   assert.ok(logged[0].details.length > 0);
 });
 
@@ -395,13 +447,13 @@ test('no --log leaves the log seam unopened and report omits logFile', () => {
     deps,
   );
   assert.equal(result.code, 10);
-  assert.equal(result.report.logFile, undefined);
+  assert.equal(result.report.results[0].logFile, undefined);
 });
 
 test('a zero-delta --log tick reports logFile but never opens the append seam', () => {
   const deps = producerDeps({
-    fetchPRs: () => [],
-    readSnapshot: () => ({ pr: {}, issue: {} }),
+    fetchPRs: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+    readSnapshot: () => ({ pr: {}, issue: {}, meta: before.meta }),
     appendDeltaLog: () => assert.fail('empty ticks must not open the delta log'),
   });
   const result = run(
@@ -419,7 +471,7 @@ test('a zero-delta --log tick reports logFile but never opens the append seam', 
     deps,
   );
   assert.equal(result.code, 0);
-  assert.equal(result.report.logFile, '/tmp/empty.json.deltalog.ndjson');
+  assert.equal(result.report.results[0].logFile, '/tmp/empty.json.deltalog.ndjson');
   assert.deepEqual(deps.events, ['snapshot']);
 });
 
@@ -444,7 +496,7 @@ test('producer append failure is io and leaves snapshot publication untouched', 
     deps,
   );
   assert.equal(result.code, 1);
-  assert.equal(result.report.kind, 'io');
+  assert.equal(result.report.results[0].error.kind, 'io');
   assert.deepEqual(deps.events, []);
 });
 
@@ -474,7 +526,7 @@ test('lock loss from the append fence maps to busy and skips snapshot publicatio
     deps,
   );
   assert.equal(result.code, 1);
-  assert.equal(result.report.kind, 'busy');
+  assert.equal(result.report.results[0].error.kind, 'busy');
   assert.deepEqual(deps.events, []);
 });
 
@@ -488,6 +540,8 @@ test('read re-delivers without advance, filters by number, and advance records t
       { id: 'a'.repeat(64), entity: 'pr', number: 42, title: 'a', classes: ['new'] },
       { id: 'b'.repeat(64), entity: 'pr', number: 7, title: 'b', classes: ['ci-changed'] },
     ],
+    repo: 'o/r',
+    monitorId: 'm',
   });
   setCursorAtomic(cursor, { cursorVersion: 1, logFile: log, seq: 0 });
   const first = run(['read', '--cursor', cursor, '--number', '42'], {
@@ -523,6 +577,8 @@ test('same-cursor advance contender is busy before read, delivery, or rewind', (
       { id: 'a'.repeat(64), entity: 'pr', number: 42, title: 'a', classes: ['new'] },
       { id: 'b'.repeat(64), entity: 'pr', number: 7, title: 'b', classes: ['ci-changed'] },
     ],
+    repo: 'o/r',
+    monitorId: 'm',
   });
   setCursorAtomic(cursor, { cursorVersion: 1, logFile: log, seq: 0 });
   let nested;
@@ -559,6 +615,8 @@ test('cursor set contends with an advancing reader and non-advancing reads stay 
   appendDeltaLog(log, {
     detectedAt: '2026-09-20T12:00:00.000Z',
     deltas: [{ id: 'a'.repeat(64), entity: 'pr', number: 42, title: 'a', classes: ['new'] }],
+    repo: 'o/r',
+    monitorId: 'm',
   });
   setCursorAtomic(cursor, { cursorVersion: 1, logFile: log, seq: 0 });
   let nested;
@@ -588,6 +646,8 @@ test('advance lock loss before cursor replacement is busy, preserves bytes, and 
   appendDeltaLog(log, {
     detectedAt: '2026-09-20T12:00:00.000Z',
     deltas: [{ id: 'a'.repeat(64), entity: 'pr', number: 42, title: 'a', classes: ['new'] }],
+    repo: 'o/r',
+    monitorId: 'm',
   });
   setCursorAtomic(cursor, { cursorVersion: 1, logFile: log, seq: 0 });
   const beforeBytes = readFileSync(cursor);
@@ -615,6 +675,8 @@ test('cursor set bootstraps, accepts replay, and rejects above the complete log 
   appendDeltaLog(log, {
     detectedAt: '2026-09-20T12:00:00.000Z',
     deltas: [{ id: 'a'.repeat(64), entity: 'pr', number: 42, title: 'a', classes: ['new'] }],
+    repo: 'o/r',
+    monitorId: 'm',
   });
   assert.equal(
     run(['cursor', 'set', cursor, '1', '--log-file', log], {

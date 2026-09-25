@@ -7,13 +7,13 @@ phone, with the GitHub page one tap away.
 
 ```
 gh-delta tick (cron, CI, systemd — anything)      exit 10
-   │  one POST per delta (payload schema v1)
+   │  one POST per delta ({type, schemaVersion, deliveryId, seq, monitorId, detectedAt, delta})
    ▼
 receiver.mjs :8787
-   ├─ verify raw-body HMAC (OUTPOST_SECRET), if configured
+   ├─ verify Standard Webhooks signature (OUTPOST_SECRET), if configured
    ├─ validate type + schemaVersion
    ├─ optional class filter (NTFY_CLASSES)
-   ├─ dedupe by id, scoped to the most recent id per item (size-capped seen-events.jsonl)
+   ├─ dedupe by delta.id, scoped to the most recent id per item (size-capped seen-events.jsonl)
    ▼
 ntfy.sh/<topic> ──> phone: "owner/repo PR #42 — merged"
 ```
@@ -48,12 +48,14 @@ The receiver accepts request bodies up to 64 KiB. Larger requests return HTTP
 You have two ways to secure a non-localhost deployment — pick at least one:
 
 1. **Shared secret (`OUTPOST_SECRET`).** Set `OUTPOST_SECRET` to a random
-   value. The receiver accepts only `X-GhDelta-Signature:
-sha256=<lowercase-hex-hmac>` over the raw request body, validates its exact
-   scheme and length, then compares it with `crypto.timingSafeEqual` before it
-   parses, dedupes, records, or forwards the payload. The stock sender reads
-   the same environment value by name; the secret never appears in a URL or
-   command argument.
+   value. The receiver verifies each request per the
+   [Standard Webhooks](https://www.standardwebhooks.com/) spec: `webhook-id`
+   (the delivery id), `webhook-timestamp` (epoch seconds, rejected if more
+   than 5 minutes from now — replay protection), and `webhook-signature`
+   (`v1,<base64 HMAC-SHA256 of "{id}.{timestamp}.{rawBody}">`), compared with
+   `crypto.timingSafeEqual` before it parses, dedupes, records, or forwards
+   the payload. The stock sender reads the same environment value by name;
+   the secret never appears in a URL or command argument.
 
    ```bash
    # Export the secret first so BOTH the receiver and the sender below see it.
@@ -95,31 +97,31 @@ harmless duplicate pings right after the upgrade, never a missed one.
 
 ## Design notes
 
-- **Dedupe is the receiver's contractual job, and `id` is the key — scoped to
-  the most recent id per item.** Delivery is at-most-once with no retries,
-  and concurrent or re-run ticks can legitimately re-send the same observed
-  change — `id` (content-addressed, built from the observed state) is the
-  dedupe key. But `id` identifies the **state**, not "this occurrence": an
-  item that returns to a state it was in before (CI red, then green, then red
-  again with nothing else changed) legitimately repeats an earlier `id`, so
-  the receiver tracks only the **last `id` forwarded per `(entity, number)`**
-  and suppresses a payload only when it matches that last id — a recurrence
-  after an intervening different state has a different "last id" and is
-  correctly forwarded, while two monitors reporting the same observed change
-  (which share an `id`, since it excludes `monitorId`) still collapse when
-  they arrive adjacently. `eventId` identifies a _series_ ("this monitor saw
-  this item reach this class set") and is stable by design across different
-  observed states, so it must never be used to discard a payload — see the
-  [payload schema](../../docs/contract.md#outpost-payload-schema-v1). `deliveryId`
-  names one send attempt and is even narrower than `eventId`.
-- **Filter before you record.** `id` also excludes `classes` whenever there's
-  an observed `to` state, so two monitors with different snapshot histories
-  can reach the same final state through different transitions and emit the
-  _same_ `id` with _different_ class sets. The receiver therefore applies
-  `NTFY_CLASSES` first and only records an `id` for a payload that actually
-  passes the filter and gets forwarded — recording a filtered-out payload's
-  id would let it silently suppress a later, allowed payload that happens to
-  share that id.
+- **Dedupe is the receiver's contractual job, and `delta.id` is the key —
+  scoped to the most recent id per item.** Delivery is at-most-once with no
+  retries, and concurrent or re-run ticks can legitimately re-send the same
+  observed change — `delta.id` (content-addressed, built from the observed
+  state) is the dedupe key. But `delta.id` identifies the **state**, not
+  "this occurrence": an item that returns to a state it was in before (CI
+  red, then green, then red again with nothing else changed) legitimately
+  repeats an earlier id, so the receiver tracks only the **last id forwarded
+  per `(entity, number)`** and suppresses a payload only when it matches that
+  last id — a recurrence after an intervening different state has a
+  different "last id" and is correctly forwarded, while two monitors
+  reporting the same observed change (which share a `delta.id`, since it
+  excludes `monitorId`) still collapse when they arrive adjacently.
+  `deliveryId` names one send attempt (useful for processing idempotency on
+  transport retries) and is stable-per-attempt only — it must never be used
+  to discard a payload; see the
+  [payload schema](../../docs/contract.md#outpost-payload-schema-v2).
+- **Filter before you record.** `delta.id` also excludes `classes` whenever
+  there's an observed `to` state, so two monitors with different snapshot
+  histories can reach the same final state through different transitions and
+  emit the _same_ id with _different_ class sets. The receiver therefore
+  applies `NTFY_CLASSES` first and only records an id for a payload that
+  actually passes the filter and gets forwarded — recording a filtered-out
+  payload's id would let it silently suppress a later, allowed payload that
+  happens to share that id.
 - **Gaps are possible by design**: a failed POST is a warning in the
   detector's report, never a retry. Don't build "did I miss something?" logic
   here — the snapshot already advanced; the next delta will come.

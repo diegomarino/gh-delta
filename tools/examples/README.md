@@ -35,10 +35,10 @@ rsvg-convert -z 2 docs/img/text-output.svg -o /tmp/preview.png
 ## Notes
 
 - **Faithfulness:** every terminal line is produced by the same code paths the
-  CLI uses, so the artifacts match a live run byte-for-byte. The fixture
-  fingerprints predate the persisted `ciChecks`/`reviewSummary` summaries, so
-  their `ci`/`reviews` details render the `opaque: true` fallback — the output
-  of a first tick over a pre-summary snapshot.
+  CLI uses, so the artifacts match a live run byte-for-byte. `fixtures.mjs`
+  exercises the named schema v2 breakdowns directly — `checks`,
+  `reviewDecision`, `reviews`, and `reviewRequests` — never an opaque digest
+  fallback.
 - **Determinism:** timing jitter comes from a seeded LCG, so regenerating an
   unchanged fixture yields an identical cast — a stable git diff.
 - **Animated SVG preview:** svg-term's original moving frame reel makes Chrome

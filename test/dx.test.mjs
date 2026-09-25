@@ -17,15 +17,23 @@ test('init writes durable project config only after a successful baseline and gi
       writeFileSync: (_path, contents) => {
         written = JSON.parse(contents);
       },
+      // Schema v2: `tick()` is the real detector `run()`, whose report carries
+      // baseline/stateFile per-repo under `results[]`, never at the top level.
       tick: () => ({
         code: 0,
-        report: { stateFile: '/work/.gh-delta/state.json', baseline: true },
+        report: { results: [{ stateFile: '/work/.gh-delta/state.json', baseline: true }] },
       }),
     },
   );
   assert.equal(result.code, 0);
   assert.deepEqual(written, { repo: 'o/r', 'state-dir': '/work/.gh-delta', 'monitor-id': 'main' });
   assert.match(result.report.nextCommand, /^gh-delta$/);
+  // Regression: initializeMonitor once read the pre-R3 top-level
+  // report.stateFile/report.baseline, which the v2 detector report never
+  // populates -- init's own report silently echoed stateFile: undefined and
+  // baseline: false on every real run, however the baseline actually went.
+  assert.equal(result.report.stateFile, '/work/.gh-delta/state.json');
+  assert.equal(result.report.baseline, true);
 });
 
 test('init config write is exclusive and fsynced before close', () => {
@@ -201,7 +209,14 @@ test('doctor collision scope is the same repo and machine, not merely another mo
 });
 
 test('explain uses the persisted delta fingerprints and never needs GitHub', () => {
-  const delta = { id: 'a'.repeat(64), from: { state: 'OPEN' }, to: { state: 'CLOSED' } };
+  // Schema v2: `from`/`to` on a delta are the bare compared fingerprint, not
+  // the full snapshot item -- context/meta live only inside the snapshot map,
+  // never duplicated under a delta's from/to.
+  const delta = {
+    id: 'a'.repeat(64),
+    from: { state: 'OPEN' },
+    to: { state: 'CLOSED' },
+  };
   const result = explainDelta(delta.id, [delta]);
   assert.equal(result.code, 0);
   assert.deepEqual(result.report.changed, { state: { from: 'OPEN', to: 'CLOSED' } });

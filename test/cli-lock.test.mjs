@@ -134,7 +134,7 @@ test('a busy acquisition exits 1/kind busy and never calls GitHub or writes', ()
     acquireLock: () => ({ ok: false, reason: 'held' }),
   });
   assert.equal(result.code, 1);
-  assert.equal(result.report.kind, 'busy');
+  assert.equal(result.report.results[0].error.kind, 'busy');
   assert.equal(fetched, false);
   assert.equal(wrote, false);
 });
@@ -182,8 +182,8 @@ test('losing the lock mid-fetch fails at the pre-write fence and writes nothing'
     lockNow: () => 0,
   });
   assert.equal(result.code, 1);
-  assert.equal(result.report.kind, 'busy');
-  assert.match(result.report.error, /lock lost before snapshot write/);
+  assert.equal(result.report.results[0].error.kind, 'busy');
+  assert.match(result.report.results[0].error.message, /lock lost before snapshot write/);
   // The run must not have overwritten the thief's snapshot.
   assert.equal(d.writes, 1);
   assert.equal(d.stored.meta.horizon, 'thief');
@@ -204,7 +204,7 @@ test('a thrown error mid-run still releases the lock (try/finally)', () => {
     lockNow: () => 0,
   });
   assert.equal(result.code, 1);
-  assert.equal(result.report.kind, 'github');
+  assert.equal(result.report.results[0].error.kind, 'github');
   // The lock must have been released, not left dangling.
   assert.equal(fs.files.has(path), false);
 });
@@ -249,9 +249,9 @@ test('a first run against a nonexistent explicit --state-dir creates it and seed
       },
     );
     assert.equal(result.code, 0);
-    assert.equal(result.report.baseline, true);
+    assert.equal(result.report.results[0].baseline, true);
     assert.equal(existsSync(stateDir), true);
-    assert.equal(existsSync(result.report.stateFile), true);
+    assert.equal(existsSync(result.report.results[0].stateFile), true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -285,8 +285,8 @@ test('ownership lost strictly between the early fence and the snapshot rename st
     });
     assert.equal(assertCalls, 2, 'both the early fence and the late verifyBeforeCommit must run');
     assert.equal(result.code, 1);
-    assert.equal(result.report.kind, 'busy');
-    assert.match(result.report.error, /lock lost before snapshot write/);
+    assert.equal(result.report.results[0].error.kind, 'busy');
+    assert.match(result.report.results[0].error.message, /lock lost before snapshot write/);
     assert.equal(existsSync(stateFile), false, 'nothing must be published once ownership is lost');
   } finally {
     rmSync(dir, { recursive: true, force: true });

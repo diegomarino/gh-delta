@@ -13,6 +13,36 @@ import {
   defaultStateDir,
 } from '../lib/snapshot.mjs';
 
+// Schema v2 item shape: `{ fingerprint, context, meta }` -- see
+// docs/contract.md "Snapshot Semantics" and lib/detect.mjs.
+const item = (fingerprint = { state: 'OPEN' }, context = {}, meta = {}) => ({
+  fingerprint,
+  context,
+  meta: {
+    seenAt: null,
+    changedAt: null,
+    ticksSinceChange: 0,
+    missingTicks: 0,
+    staleEmittedFor: null,
+    ...meta,
+  },
+});
+
+// Schema v2 snapshot-wide meta is mandatory and exactly this field set -- see
+// lib/snapshot.mjs's validateSnapshotMeta.
+const meta = (overrides = {}) => ({
+  schemaVersion: 2,
+  ghDeltaVersion: '0.0.0-test',
+  repo: 'owner/repo',
+  monitorId: 'm',
+  entities: ['pr', 'issue'],
+  scope: 'poll',
+  horizon: '2026-07-01T12:00:00.000Z',
+  createdAt: '2026-07-01T12:00:00.000Z',
+  updatedAt: '2026-07-01T12:00:00.000Z',
+  ...overrides,
+});
+
 test('economical snapshot paths are distinct for derived and explicit state', () => {
   const ordinary = snapshotPath('owner/repo', 'main', 'pr-issue', '/tmp/state');
   const economical = economicalSnapshotPath('owner/repo', 'main', 'pr-issue', '/tmp/state');
@@ -60,21 +90,44 @@ test('readSnapshot throws for valid JSON with invalid snapshot shape', () => {
   assert.throws(() => readSnapshot(p), /invalid snapshot shape/);
 });
 
-test('readSnapshot accepts only plain pr and issue maps', () => {
+test('readSnapshot accepts only plain pr and issue maps of three-section items', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-'));
   const p = join(dir, 'snap.json');
-  writeFileSync(p, JSON.stringify({ pr: { 42: { state: 'OPEN' } }, issue: {} }));
-  assert.deepEqual(readSnapshot(p), { pr: { 42: { state: 'OPEN' } }, issue: {} });
+  const data = { pr: { 42: item() }, issue: {}, meta: meta() };
+  writeFileSync(p, JSON.stringify(data));
+  assert.deepEqual(readSnapshot(p), data);
 
   const bad = join(dir, 'bad.json');
-  writeFileSync(bad, JSON.stringify({ pr: [], issue: {} }));
+  writeFileSync(bad, JSON.stringify({ pr: [], issue: {}, meta: meta() }));
   assert.throws(() => readSnapshot(bad), /invalid snapshot shape/);
+});
+
+test('readSnapshot rejects a v1/legacy snapshot (missing or pre-schema-v2 meta) naming reset', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-'));
+
+  const noMeta = join(dir, 'no-meta.json');
+  writeFileSync(noMeta, JSON.stringify({ pr: { 42: item() }, issue: {} }));
+  assert.throws(() => readSnapshot(noMeta), /gh-delta reset/);
+
+  const v1Meta = join(dir, 'v1-meta.json');
+  writeFileSync(
+    v1Meta,
+    JSON.stringify({ pr: { 42: item() }, issue: {}, meta: { horizon: '2026-07-01T12:00:00Z' } }),
+  );
+  assert.throws(() => readSnapshot(v1Meta), /gh-delta reset/);
+
+  const wrongVersion = join(dir, 'wrong-version.json');
+  writeFileSync(
+    wrongVersion,
+    JSON.stringify({ pr: { 42: item() }, issue: {}, meta: meta({ schemaVersion: 1 }) }),
+  );
+  assert.throws(() => readSnapshot(wrongVersion), /gh-delta reset/);
 });
 
 test('writeSnapshotAtomic round-trips and leaves no temp file', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-'));
   const p = join(dir, 'snap.json');
-  const data = { pr: { 42: { state: 'OPEN' } }, issue: {} };
+  const data = { pr: { 42: item() }, issue: {}, meta: meta() };
   writeSnapshotAtomic(p, data);
   assert.deepEqual(JSON.parse(readFileSync(p, 'utf8')), data);
   assert.deepEqual(readSnapshot(p), data);
@@ -91,16 +144,24 @@ test('writeSnapshotAtomic uses a unique temporary path per write', () => {
       calls.push(['rename', from, to]);
     },
   };
-  writeSnapshotAtomic('/tmp/snap.json', { pr: {}, issue: {} }, { fs, uniqueSuffix: () => 'a' });
-  writeSnapshotAtomic('/tmp/snap.json', { pr: {}, issue: {} }, { fs, uniqueSuffix: () => 'b' });
+  writeSnapshotAtomic(
+    '/tmp/snap.json',
+    { pr: {}, issue: {}, meta: meta() },
+    { fs, uniqueSuffix: () => 'a' },
+  );
+  writeSnapshotAtomic(
+    '/tmp/snap.json',
+    { pr: {}, issue: {}, meta: meta() },
+    { fs, uniqueSuffix: () => 'b' },
+  );
   const writePaths = calls.filter(([kind]) => kind === 'write').map(([, path]) => path);
   assert.deepEqual(writePaths, ['/tmp/snap.json.a.tmp', '/tmp/snap.json.b.tmp']);
 });
 
-test('snapshots round-trip an optional meta.horizon', () => {
+test('snapshots round-trip the full mandatory schema-v2 meta', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-'));
   const p = join(dir, 'meta.json');
-  const data = { pr: {}, issue: {}, meta: { horizon: '2026-07-01T12:00:00.000Z' } };
+  const data = { pr: {}, issue: {}, meta: meta({ scope: 'watch-pr', entities: ['pr'] }) };
   writeSnapshotAtomic(p, data);
   assert.deepEqual(readSnapshot(p), data);
 });
@@ -109,47 +170,97 @@ test('snapshots reject an invalid meta.horizon', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-'));
   const p = join(dir, 'meta.json');
   assert.throws(
-    () => writeSnapshotAtomic(p, { pr: {}, issue: {}, meta: { horizon: 'not-a-date' } }),
+    () => writeSnapshotAtomic(p, { pr: {}, issue: {}, meta: meta({ horizon: 'not-a-date' }) }),
     /meta\.horizon must be an ISO date string/,
   );
 });
 
-test('snapshots reject an invalid persisted stale lastChangedAt but allow legacy fingerprints', () => {
+test('snapshots reject a meta missing a mandatory field or carrying an unknown one', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-'));
-  const invalid = join(dir, 'invalid-stale.json');
-  writeFileSync(
-    invalid,
-    JSON.stringify({ pr: { 42: { state: 'OPEN', lastChangedAt: 'not-a-date' } }, issue: {} }),
+  const { horizon: _horizon, ...missingHorizon } = meta();
+  assert.throws(
+    () =>
+      writeSnapshotAtomic(join(dir, 'missing.json'), { pr: {}, issue: {}, meta: missingHorizon }),
+    /meta fields must be exactly/,
   );
-  assert.throws(() => readSnapshot(invalid), /lastChangedAt must be an ISO date string/);
-  const legacy = join(dir, 'legacy.json');
-  writeFileSync(legacy, JSON.stringify({ pr: { 42: { state: 'OPEN' } }, issue: {} }));
-  assert.deepEqual(readSnapshot(legacy), { pr: { 42: { state: 'OPEN' } }, issue: {} });
+  assert.throws(
+    () =>
+      writeSnapshotAtomic(join(dir, 'extra.json'), {
+        pr: {},
+        issue: {},
+        meta: { ...meta(), extra: true },
+      }),
+    /meta fields must be exactly/,
+  );
 });
 
-test('horizonCutoff derives from meta, falls back to fingerprints, honors overlap', () => {
+test('snapshots reject an invalid meta.scope', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-'));
+  assert.throws(
+    () =>
+      writeSnapshotAtomic(join(dir, 'scope.json'), {
+        pr: {},
+        issue: {},
+        meta: meta({ scope: 'bogus' }),
+      }),
+    /meta\.scope must be one of/,
+  );
+});
+
+test('snapshots reject an invalid persisted item.meta.changedAt/seenAt', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-'));
+  const invalidChangedAt = join(dir, 'invalid-changed-at.json');
+  writeFileSync(
+    invalidChangedAt,
+    JSON.stringify({
+      pr: { 42: item({ state: 'OPEN' }, {}, { changedAt: 'not-a-date' }) },
+      issue: {},
+      meta: meta(),
+    }),
+  );
+  assert.throws(() => readSnapshot(invalidChangedAt), /meta\.changedAt must be an ISO date string/);
+
+  const invalidSeenAt = join(dir, 'invalid-seen-at.json');
+  writeFileSync(
+    invalidSeenAt,
+    JSON.stringify({
+      pr: { 42: item({ state: 'OPEN' }, {}, { seenAt: 'not-a-date' }) },
+      issue: {},
+      meta: meta(),
+    }),
+  );
+  assert.throws(() => readSnapshot(invalidSeenAt), /meta\.seenAt must be an ISO date string/);
+
+  const valid = join(dir, 'valid.json');
+  const data = {
+    pr: { 42: item({ state: 'OPEN' }, {}, { changedAt: '2026-07-01T10:00:00.000Z' }) },
+    issue: {},
+    meta: meta(),
+  };
+  writeFileSync(valid, JSON.stringify(data));
+  assert.deepEqual(readSnapshot(valid), data);
+});
+
+test('horizonCutoff derives from meta.horizon and honors overlap', () => {
   assert.equal(horizonCutoff(null), null);
   assert.equal(
-    horizonCutoff({ pr: {}, issue: {}, meta: { horizon: '2026-07-01T12:05:00.000Z' } }),
+    horizonCutoff({ pr: {}, issue: {}, meta: meta({ horizon: '2026-07-01T12:05:00.000Z' }) }),
     '2026-07-01T12:00:00.000Z', // default 5-minute overlap
   );
-  assert.equal(
-    horizonCutoff({
-      pr: { 42: { state: 'OPEN', updatedAt: '2026-07-01T10:05:00.000Z' } },
-      issue: {},
-    }),
-    '2026-07-01T10:00:00.000Z', // legacy: max fingerprint updatedAt
-  );
-  assert.equal(horizonCutoff({ pr: {}, issue: {} }), null); // empty legacy: open-only tick
 });
 
-test('horizonCutoff rejects invalid legacy fingerprint dates', () => {
+test('horizonCutoff rejects a missing or invalid meta.horizon (no item-fingerprint fallback)', () => {
+  assert.throws(() => horizonCutoff({ pr: {}, issue: {} }), /invalid snapshot horizon/);
   assert.throws(
     () =>
       horizonCutoff({
-        pr: { 42: { state: 'OPEN', updatedAt: 'not-a-date' } },
+        pr: { 42: item({ state: 'OPEN', updatedAt: '2026-07-01T10:05:00.000Z' }) },
         issue: {},
       }),
+    /invalid snapshot horizon/,
+  );
+  assert.throws(
+    () => horizonCutoff({ pr: {}, issue: {}, meta: meta({ horizon: 'not-a-date' }) }),
     /invalid snapshot horizon/,
   );
 });
@@ -183,10 +294,14 @@ test('writeSnapshotAtomic forwards dirMode to mkdir', () => {
   };
   writeSnapshotAtomic(
     '/tmp/snap.json',
-    { pr: {}, issue: {} },
+    { pr: {}, issue: {}, meta: meta() },
     { fs, uniqueSuffix: () => 'a', dirMode: 0o700 },
   );
-  writeSnapshotAtomic('/tmp/snap.json', { pr: {}, issue: {} }, { fs, uniqueSuffix: () => 'b' });
+  writeSnapshotAtomic(
+    '/tmp/snap.json',
+    { pr: {}, issue: {}, meta: meta() },
+    { fs, uniqueSuffix: () => 'b' },
+  );
   assert.equal(opts[0].mode, 0o700);
   assert.equal('mode' in opts[1], false);
 });
@@ -194,8 +309,39 @@ test('writeSnapshotAtomic forwards dirMode to mkdir', () => {
 test('writeSnapshotAtomic validates shape before writing', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-'));
   assert.throws(
-    () => writeSnapshotAtomic(join(dir, 'bad.json'), { pr: [], issue: {} }),
+    () => writeSnapshotAtomic(join(dir, 'bad.json'), { pr: [], issue: {}, meta: meta() }),
     /invalid snapshot shape/,
+  );
+});
+
+test('writeSnapshotAtomic rejects an item missing any of the three sections', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-'));
+  for (const missing of ['fingerprint', 'context', 'meta']) {
+    const full = item();
+    delete full[missing];
+    assert.throws(
+      () =>
+        writeSnapshotAtomic(join(dir, `${missing}.json`), {
+          pr: { 42: full },
+          issue: {},
+          meta: meta(),
+        }),
+      new RegExp(`pr\\.42\\.${missing} must be an object`),
+    );
+  }
+});
+
+test('writeSnapshotAtomic rejects unknown top-level keys in an item', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-'));
+  const withExtra = { ...item(), missing: true };
+  assert.throws(
+    () =>
+      writeSnapshotAtomic(join(dir, 'extra.json'), {
+        pr: { 42: withExtra },
+        issue: {},
+        meta: meta(),
+      }),
+    /pr\.42 has unknown key\(s\): missing/,
   );
 });
 
@@ -211,7 +357,11 @@ test('writeSnapshotAtomic removes the temp file when rename fails', () => {
   };
   assert.throws(
     () =>
-      writeSnapshotAtomic('/tmp/snap.json', { pr: {}, issue: {} }, { fs, uniqueSuffix: () => 'a' }),
+      writeSnapshotAtomic(
+        '/tmp/snap.json',
+        { pr: {}, issue: {}, meta: meta() },
+        { fs, uniqueSuffix: () => 'a' },
+      ),
     /EXDEV/,
   );
   assert.deepEqual(calls, [

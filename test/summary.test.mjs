@@ -2,23 +2,20 @@
 // payloads (test/fixtures/summaries/*.json, recorded from live PRs on 2026-07-11)
 // through the exact fetchPRs -> normalizePr -> prFingerprint -> prSummary pipeline
 // the CLI uses. Recording from real repos -- rather than hand-building rollup rows
-// -- is deliberate: a constructed fixture that omitted the {status:'IN_PROGRESS',
-// conclusion:null} shape is exactly the trap that let a bad "green" slip past a
+// -- is deliberate: a constructed fixture that omitted the {status:'in_progress',
+// conclusion:''} shape is exactly the trap that let a bad "green" slip past a
 // downstream consumer.
+//
+// Schema v2 (R2) lowercases every enum at the lib/gh.mjs fetch boundary and
+// drops the opaque ci/reviews digests: `checks` is the sole, legible,
+// compared representation, and deriveCiRollup trusts it is already lowercase
+// -- no upper()/case-mapping tables survive here.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fetchPRs } from '../lib/gh.mjs';
-import { prFingerprint, canonicalizeCiRollup } from '../lib/fingerprint.mjs';
-import {
-  deriveCiRollup,
-  normalizeReviewDecision,
-  normalizeMergeable,
-  normalizeMergeStateStatus,
-  normalizePrState,
-  prSummary,
-  deltaSummary,
-} from '../lib/summary.mjs';
+import { prFingerprint } from '../lib/fingerprint.mjs';
+import { deriveCiRollup, prSummary, deltaSummary } from '../lib/summary.mjs';
 
 // Load a captured page fixture and run it through the real fetch/normalize path,
 // returning the single normalized PR row exactly as the CLI would see it.
@@ -27,7 +24,7 @@ function fixtureRow(name) {
     new URL(`./fixtures/summaries/pr-ci-${name}.json`, import.meta.url),
     'utf8',
   );
-  const rows = fetchPRs('o/r', { exec: () => bytes, horizonCutoff: null });
+  const { rows } = fetchPRs('o/r', { exec: () => bytes, horizonCutoff: null });
   assert.equal(rows.length, 1, `fixture ${name} must contain exactly one PR`);
   return rows[0];
 }
@@ -43,19 +40,19 @@ test('deriveCiRollup: zero checks is none, never green', () => {
 test('deriveCiRollup: all-success checks are green', () => {
   assert.equal(
     deriveCiRollup([
-      { name: 'a', status: 'COMPLETED', conclusion: 'SUCCESS' },
-      { name: 'b', status: 'COMPLETED', conclusion: 'SUCCESS' },
+      { name: 'a', status: 'completed', conclusion: 'success' },
+      { name: 'b', status: 'completed', conclusion: 'success' },
     ]),
     'green',
   );
 });
 
-test('deriveCiRollup: NEUTRAL and SKIPPED are non-blocking (green)', () => {
+test('deriveCiRollup: neutral and skipped are non-blocking (green)', () => {
   assert.equal(
     deriveCiRollup([
-      { name: 'a', status: 'COMPLETED', conclusion: 'SUCCESS' },
-      { name: 'b', status: 'COMPLETED', conclusion: 'NEUTRAL' },
-      { name: 'c', status: 'COMPLETED', conclusion: 'SKIPPED' },
+      { name: 'a', status: 'completed', conclusion: 'success' },
+      { name: 'b', status: 'completed', conclusion: 'neutral' },
+      { name: 'c', status: 'completed', conclusion: 'skipped' },
     ]),
     'green',
   );
@@ -66,20 +63,20 @@ test('deriveCiRollup: an in-progress CheckRun with empty conclusion is pending',
   // see '' (no token) and wrongly return green. Keying on `status` too fixes it.
   assert.equal(
     deriveCiRollup([
-      { name: 'a', status: 'COMPLETED', conclusion: 'SUCCESS' },
-      { name: 'b', status: 'IN_PROGRESS', conclusion: '' },
+      { name: 'a', status: 'completed', conclusion: 'success' },
+      { name: 'b', status: 'in_progress', conclusion: '' },
     ]),
     'pending',
   );
 });
 
-test('deriveCiRollup: StatusContext PENDING/EXPECTED are pending', () => {
+test('deriveCiRollup: StatusContext pending/expected are pending', () => {
   assert.equal(
-    deriveCiRollup([{ name: 'ci', status: 'PENDING', conclusion: 'PENDING' }]),
+    deriveCiRollup([{ name: 'ci', status: 'pending', conclusion: 'pending' }]),
     'pending',
   );
   assert.equal(
-    deriveCiRollup([{ name: 'ci', status: 'EXPECTED', conclusion: 'EXPECTED' }]),
+    deriveCiRollup([{ name: 'ci', status: 'expected', conclusion: 'expected' }]),
     'pending',
   );
 });
@@ -87,60 +84,30 @@ test('deriveCiRollup: StatusContext PENDING/EXPECTED are pending', () => {
 test('deriveCiRollup: a failure dominates pending and success (fail-closed)', () => {
   assert.equal(
     deriveCiRollup([
-      { name: 'a', status: 'COMPLETED', conclusion: 'SUCCESS' },
-      { name: 'b', status: 'IN_PROGRESS', conclusion: '' },
-      { name: 'c', status: 'COMPLETED', conclusion: 'FAILURE' },
+      { name: 'a', status: 'completed', conclusion: 'success' },
+      { name: 'b', status: 'in_progress', conclusion: '' },
+      { name: 'c', status: 'completed', conclusion: 'failure' },
     ]),
     'failed',
   );
 });
 
-test('deriveCiRollup: StatusContext ERROR and CheckRun ACTION_REQUIRED are failed', () => {
-  assert.equal(deriveCiRollup([{ name: 'ci', status: 'ERROR', conclusion: 'ERROR' }]), 'failed');
+test('deriveCiRollup: StatusContext error and CheckRun action_required are failed', () => {
+  assert.equal(deriveCiRollup([{ name: 'ci', status: 'error', conclusion: 'error' }]), 'failed');
   assert.equal(
-    deriveCiRollup([{ name: 'ci', status: 'COMPLETED', conclusion: 'ACTION_REQUIRED' }]),
+    deriveCiRollup([{ name: 'ci', status: 'completed', conclusion: 'action_required' }]),
     'failed',
   );
 });
 
-// --- enum normalizers --------------------------------------------------------
-
-test('normalizeReviewDecision maps the GraphQL enum and empty to none', () => {
-  assert.equal(normalizeReviewDecision('APPROVED'), 'approved');
-  assert.equal(normalizeReviewDecision('CHANGES_REQUESTED'), 'changes_requested');
-  assert.equal(normalizeReviewDecision('REVIEW_REQUIRED'), 'review_required');
-  assert.equal(normalizeReviewDecision(''), 'none');
-  assert.equal(normalizeReviewDecision(null), 'none');
-  assert.equal(normalizeReviewDecision(undefined), 'none');
-});
-
-test('normalizeMergeable keeps UNKNOWN honest', () => {
-  assert.equal(normalizeMergeable('MERGEABLE'), 'mergeable');
-  assert.equal(normalizeMergeable('CONFLICTING'), 'conflicting');
-  assert.equal(normalizeMergeable('UNKNOWN'), 'unknown');
-  assert.equal(normalizeMergeable(''), 'unknown');
-  assert.equal(normalizeMergeable(undefined), 'unknown');
-});
-
-test('normalizeMergeStateStatus maps the GraphQL enum and defaults to unknown', () => {
-  assert.equal(normalizeMergeStateStatus('BEHIND'), 'behind');
-  assert.equal(normalizeMergeStateStatus('BLOCKED'), 'blocked');
-  assert.equal(normalizeMergeStateStatus('CLEAN'), 'clean');
-  assert.equal(normalizeMergeStateStatus('DIRTY'), 'dirty');
-  assert.equal(normalizeMergeStateStatus('DRAFT'), 'draft');
-  assert.equal(normalizeMergeStateStatus('HAS_HOOKS'), 'has_hooks');
-  assert.equal(normalizeMergeStateStatus('UNSTABLE'), 'unstable');
-  assert.equal(normalizeMergeStateStatus('UNKNOWN'), 'unknown');
-  assert.equal(normalizeMergeStateStatus(''), 'unknown');
-  assert.equal(normalizeMergeStateStatus(null), 'unknown');
-  assert.equal(normalizeMergeStateStatus(undefined), 'unknown');
-  assert.equal(normalizeMergeStateStatus('SOMETHING_NEW'), 'unknown');
-});
-
-test('normalizePrState lowercases the three PR states', () => {
-  assert.equal(normalizePrState('OPEN'), 'open');
-  assert.equal(normalizePrState('CLOSED'), 'closed');
-  assert.equal(normalizePrState('MERGED'), 'merged');
+test('deriveCiRollup: no uppercase input is recognized (case mapping lives upstream at lib/gh.mjs, not here)', () => {
+  // R2 deleted the upper()/case-mapping tables: this layer trusts the
+  // fingerprint is already lowercase. Feeding it raw GraphQL-cased tokens must
+  // NOT be silently rescued -- that would mask a normalization bug upstream.
+  assert.equal(
+    deriveCiRollup([{ name: 'a', status: 'COMPLETED', conclusion: 'FAILURE' }]),
+    'green',
+  );
 });
 
 // --- prSummary shape ---------------------------------------------------------
@@ -150,16 +117,16 @@ test('prSummary returns null for a missing observed state', () => {
   assert.equal(prSummary(undefined), null);
 });
 
-test('prSummary normalizes types and names headSha unambiguously', () => {
+test('prSummary reads already-normalized fields and names headSha unambiguously', () => {
   const summary = prSummary({
-    state: 'OPEN',
+    state: 'open',
     isDraft: false,
-    ciChecks: [{ name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' }],
-    review: 'APPROVED',
-    mergeable: 'MERGEABLE',
-    mergeStateStatus: 'CLEAN',
-    unresolvedReviewThreads: 0,
-    head: 'a'.repeat(40),
+    checks: [{ name: 'build', kind: 'check', status: 'completed', conclusion: 'success' }],
+    reviewDecision: 'approved',
+    mergeable: 'mergeable',
+    mergeStateStatus: 'clean',
+    threads: [],
+    headSha: 'a'.repeat(40),
   });
   assert.deepEqual(summary, {
     ciRollup: 'green',
@@ -170,26 +137,99 @@ test('prSummary normalizes types and names headSha unambiguously', () => {
     isDraft: false,
     unresolvedReviewThreads: 0,
     headSha: 'a'.repeat(40),
+    failedChecks: [],
   });
   assert.equal(typeof summary.isDraft, 'boolean');
 });
 
-test('deltaSummary applies only to PR deltas with an observed to-state', () => {
-  const to = { state: 'OPEN', ciChecks: [], review: '', mergeable: 'MERGEABLE' };
+test('prSummary defaults reviewDecision/mergeable/mergeStateStatus to their none/unknown sentinels', () => {
+  const summary = prSummary({ state: 'open' });
+  assert.equal(summary.reviewDecision, 'none');
+  assert.equal(summary.mergeable, 'unknown');
+  assert.equal(summary.mergeStateStatus, 'unknown');
+  assert.equal(summary.headSha, '');
+  assert.equal(summary.unresolvedReviewThreads, 0);
+});
+
+test('prSummary counts unresolvedReviewThreads from threads[], not a stored counter', () => {
+  const summary = prSummary({
+    state: 'open',
+    threads: [
+      { id: 'T_A', resolved: false },
+      { id: 'T_B', resolved: true },
+      { id: 'T_C', resolved: false },
+    ],
+  });
+  assert.equal(summary.unresolvedReviewThreads, 2);
+});
+
+test('prSummary.failedChecks lists only the failing checks, carrying runId/jobId when parsed', () => {
+  const summary = prSummary({
+    state: 'open',
+    checks: [
+      { name: 'build', kind: 'check', status: 'completed', conclusion: 'success' },
+      {
+        name: 'lint',
+        kind: 'check',
+        status: 'completed',
+        conclusion: 'failure',
+        detailsUrl: 'https://github.com/o/r/actions/runs/1/job/2',
+        runId: '1',
+        jobId: '2',
+      },
+      {
+        name: 'ci/legacy',
+        kind: 'status',
+        status: 'error',
+        conclusion: 'error',
+        detailsUrl: 'https://ci.example.com/build/9',
+      },
+    ],
+  });
+  assert.deepEqual(summary.failedChecks, [
+    {
+      name: 'lint',
+      runId: '1',
+      jobId: '2',
+      detailsUrl: 'https://github.com/o/r/actions/runs/1/job/2',
+    },
+    { name: 'ci/legacy', detailsUrl: 'https://ci.example.com/build/9' },
+  ]);
+  assert.equal('runId' in summary.failedChecks[1], false, 'unparsed row omits runId, not null');
+});
+
+test('prSummary.failedChecks is empty for a PR with no checks or no failing checks', () => {
+  assert.deepEqual(prSummary({ state: 'open' }).failedChecks, []);
+  assert.deepEqual(
+    prSummary({
+      state: 'open',
+      checks: [{ name: 'build', kind: 'check', status: 'completed', conclusion: 'success' }],
+    }).failedChecks,
+    [],
+  );
+});
+
+test('deltaSummary dispatches by entity and requires an observed to-state', () => {
+  // `to` is a snapshot item (`{ fingerprint, context, meta }`); deltaSummary
+  // reads only `to.fingerprint`.
+  const to = {
+    fingerprint: { state: 'open', checks: [], reviewDecision: 'none', mergeable: 'mergeable' },
+    context: {},
+    meta: {},
+  };
   assert.equal(deltaSummary({ entity: 'pr', to }).ciRollup, 'none');
-  assert.equal(deltaSummary({ entity: 'issue', to }), null);
+  assert.deepEqual(deltaSummary({ entity: 'issue', to }), { state: 'open' });
   assert.equal(deltaSummary({ entity: 'pr', to: null }), null);
+  assert.equal(deltaSummary({ entity: 'issue', to: null }), null);
   assert.equal(deltaSummary(null), null);
 });
 
 // --- integration against REAL captured payloads ------------------------------
 
-test('real fixture: a PR with zero checks yields ciRollup none (the empty-rollup digest proves it)', () => {
+test('real fixture: a PR with zero checks yields ciRollup none (the empty rollup proves it)', () => {
   const row = fixtureRow('none');
   const fp = prFingerprint(row);
-  assert.deepEqual(fp.ciChecks, [], 'the captured PR genuinely has no checks');
-  // 'da39a3ee5e6b' is the frozen digest of an empty rollup (see fingerprint.test).
-  assert.equal(canonicalizeCiRollup(row.statusCheckRollup), 'da39a3ee5e6b');
+  assert.deepEqual(fp.checks, [], 'the captured PR genuinely has no checks');
   assert.equal(prSummary(fp).ciRollup, 'none');
 });
 
@@ -201,11 +241,11 @@ test('real fixture: an older recording without mergeStateStatus yields unknown (
   assert.equal(prSummary(fp).mergeStateStatus, 'unknown');
 });
 
-test('real fixture: an all-SUCCESS PR yields ciRollup green', () => {
+test('real fixture: an all-success PR yields ciRollup green', () => {
   const fp = prFingerprint(fixtureRow('green'));
-  assert.ok(fp.ciChecks.length >= 1, 'the captured PR has real checks');
+  assert.ok(fp.checks.length >= 1, 'the captured PR has real checks');
   assert.ok(
-    fp.ciChecks.every((c) => c.conclusion === 'SUCCESS'),
+    fp.checks.every((c) => c.conclusion === 'success'),
     'the captured green PR is genuinely all-success',
   );
   assert.equal(prSummary(fp).ciRollup, 'green');
@@ -215,8 +255,8 @@ test('real fixture: a PR with an in-progress CheckRun yields ciRollup pending', 
   const row = fixtureRow('pending');
   // Guard the fixture's realness: it must actually contain the in-progress,
   // empty-conclusion CheckRun shape this branch exists to classify.
-  const hasInProgress = row.statusCheckRollup.some(
-    (c) => c.status === 'IN_PROGRESS' && (c.conclusion === null || c.conclusion === undefined),
+  const hasInProgress = row.checks.some(
+    (c) => c.status === 'in_progress' && (c.conclusion === '' || c.conclusion == null),
   );
   assert.ok(hasInProgress, 'fixture must carry a real in-progress CheckRun');
   assert.equal(prSummary(prFingerprint(row)).ciRollup, 'pending');
@@ -226,9 +266,9 @@ test('real fixture: a PR with a failing check yields ciRollup failed', () => {
   const row = fixtureRow('failed');
   const fp = prFingerprint(row);
   assert.ok(
-    fp.ciChecks.some((c) => c.conclusion === 'FAILURE'),
+    fp.checks.some((c) => c.conclusion === 'failure'),
     'fixture must carry a real failing check',
   );
-  // And it also carries SKIPPED/SUCCESS rows -- proof the failure dominates them.
+  // And it also carries skipped/success rows -- proof the failure dominates them.
   assert.equal(prSummary(fp).ciRollup, 'failed');
 });

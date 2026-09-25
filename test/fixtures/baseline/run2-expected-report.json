@@ -1,50 +1,64 @@
 {
-  "schemaVersion": 1,
-  "baseline": false,
-  "repo": "acme/widgets",
-  "repoSource": "flag",
+  "schemaVersion": 2,
+  "detectedAt": "2026-01-01T01:00:00Z",
   "monitorId": "contract-baseline",
   "entities": [
     "pr",
     "issue"
   ],
-  "stateFile": "<STATE_FILE>",
-  "at": "2026-01-01T01:00:00Z",
+  "repos": [
+    "acme/widgets"
+  ],
+  "results": [
+    {
+      "repo": "acme/widgets",
+      "baseline": false,
+      "repoSource": "flag",
+      "stateFile": "<STATE_FILE>",
+      "rateLimit": null
+    }
+  ],
   "deltas": [
     {
-      "id": "faf95b91087b9869312d6348d6ed06eb10e6376374cee306b7e4ceb93e2fbb11",
+      "id": "a5fe008387d0aedc1f5b55f5bf8970e89566e354f3d67575cfb0c7c7ceca506c",
+      "repo": "acme/widgets",
       "entity": "pr",
       "number": 1,
-      "title": "Add widget factory",
-      "headRefName": "feature/widget-factory",
+      "context": {
+        "id": "PR_1",
+        "title": "Add widget factory",
+        "url": "https://github.com/acme/widgets/pull/1",
+        "author": "alice",
+        "createdAt": "2025-11-01T09:00:00Z",
+        "headRefName": "feature/widget-factory"
+      },
       "classes": [
         "new-comments",
         "relabeled"
       ],
       "from": {
-        "state": "OPEN",
+        "state": "open",
         "updatedAt": "2025-12-01T10:00:00Z",
         "isDraft": false,
-        "ci": "53d176557e2f",
-        "ciChecks": [
+        "headSha": "aaaaaaa1",
+        "baseRef": "main",
+        "mergeable": "mergeable",
+        "mergeStateStatus": "clean",
+        "reviewDecision": "review_required",
+        "checks": [
           {
             "name": "build",
-            "status": "COMPLETED",
-            "conclusion": "SUCCESS"
+            "kind": "check",
+            "status": "completed",
+            "conclusion": "success",
+            "detailsUrl": null
           }
         ],
-        "review": "REVIEW_REQUIRED",
-        "reviews": "da39a3ee5e6b",
-        "reviewSummary": [],
-        "mergeable": "MERGEABLE",
-        "mergeStateStatus": "CLEAN",
-        "comments": 2,
-        "reviewThreads": 0,
-        "unresolvedReviewThreads": 0,
-        "threadDigest": "da39a3ee5e6b",
-        "threadStates": [],
-        "head": "aaaaaaa1",
-        "base": "main",
+        "reviews": [],
+        "threads": [],
+        "conversationComments": 2,
+        "reviewComments": 0,
+        "recentComments": [],
         "labels": [
           "enhancement"
         ],
@@ -56,29 +70,28 @@
         ]
       },
       "to": {
-        "state": "OPEN",
+        "state": "open",
         "updatedAt": "2026-01-01T00:30:00Z",
         "isDraft": false,
-        "ci": "53d176557e2f",
-        "ciChecks": [
+        "headSha": "aaaaaaa1",
+        "baseRef": "main",
+        "mergeable": "mergeable",
+        "mergeStateStatus": "clean",
+        "reviewDecision": "review_required",
+        "checks": [
           {
             "name": "build",
-            "status": "COMPLETED",
-            "conclusion": "SUCCESS"
+            "kind": "check",
+            "status": "completed",
+            "conclusion": "success",
+            "detailsUrl": null
           }
         ],
-        "review": "REVIEW_REQUIRED",
-        "reviews": "da39a3ee5e6b",
-        "reviewSummary": [],
-        "mergeable": "MERGEABLE",
-        "mergeStateStatus": "CLEAN",
-        "comments": 5,
-        "reviewThreads": 0,
-        "unresolvedReviewThreads": 0,
-        "threadDigest": "da39a3ee5e6b",
-        "threadStates": [],
-        "head": "aaaaaaa1",
-        "base": "main",
+        "reviews": [],
+        "threads": [],
+        "conversationComments": 5,
+        "reviewComments": 0,
+        "recentComments": [],
         "labels": [
           "enhancement",
           "priority-high"
@@ -89,18 +102,51 @@
         "reviewRequests": [
           "bob"
         ]
+      },
+      "changed": {
+        "conversationComments": {
+          "from": 2,
+          "to": 5
+        },
+        "labels": {
+          "added": [
+            "priority-high"
+          ]
+        },
+        "updatedAt": {
+          "from": "2025-12-01T10:00:00Z",
+          "to": "2026-01-01T00:30:00Z"
+        }
+      },
+      "summary": {
+        "ciRollup": "green",
+        "reviewDecision": "review_required",
+        "mergeable": "mergeable",
+        "mergeStateStatus": "clean",
+        "state": "open",
+        "isDraft": false,
+        "unresolvedReviewThreads": 0,
+        "headSha": "aaaaaaa1",
+        "failedChecks": []
       }
     },
     {
-      "id": "df53663dc3af2435b16aaa763c54c38b70d451e306ac48aa4400c584cc0fcda3",
+      "id": "3ead0bbe565743b7dcaa30e028d268ce9f76f0c6bd7c760e04a014a169b1a47b",
+      "repo": "acme/widgets",
       "entity": "issue",
       "number": 10,
-      "title": "Widgets sometimes squeak",
+      "context": {
+        "id": "ISSUE_10",
+        "title": "Widgets sometimes squeak",
+        "url": "https://github.com/acme/widgets/issues/10",
+        "author": "carol",
+        "createdAt": "2025-11-15T08:00:00Z"
+      },
       "classes": [
         "closed"
       ],
       "from": {
-        "state": "OPEN",
+        "state": "open",
         "updatedAt": "2025-12-01T09:00:00Z",
         "labels": [
           "bug"
@@ -108,10 +154,11 @@
         "assignees": [
           "carol"
         ],
-        "comments": 1
+        "conversationComments": 1,
+        "recentComments": []
       },
       "to": {
-        "state": "CLOSED",
+        "state": "closed",
         "updatedAt": "2026-01-01T00:15:00Z",
         "labels": [
           "bug"
@@ -119,9 +166,25 @@
         "assignees": [
           "carol"
         ],
-        "comments": 1
+        "conversationComments": 1,
+        "recentComments": []
+      },
+      "changed": {
+        "state": {
+          "from": "open",
+          "to": "closed"
+        },
+        "updatedAt": {
+          "from": "2025-12-01T09:00:00Z",
+          "to": "2026-01-01T00:15:00Z"
+        }
+      },
+      "summary": {
+        "state": "closed"
       }
     }
   ],
+  "filteredDeltas": 0,
+  "warnings": [],
   "summary": "2 delta(s)"
 }
