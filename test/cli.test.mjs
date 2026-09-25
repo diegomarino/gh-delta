@@ -757,6 +757,136 @@ test('the same merge-and-relabel tick without --ignore-classes still cleans up t
   assert.equal(existsSync(entry), false);
 });
 
+// diffEntity's `new`/`first-seen` path never combines its class with
+// `merged`/`closed` (see lib/detect.mjs: `classes: [fp.state === 'open' ?
+// 'new' : 'first-seen']` is always a bare one-element array) -- a watched PR
+// absent from the snapshot but already terminal on its first observation
+// (e.g. it merges between `watch add` and the first poll) can NEVER carry a
+// surviving transition class, with or without any filter in play. Requiring
+// one, as the previous round did, stranded the watch entry forever: the
+// snapshot records the terminal fingerprint, so no later tick fires any
+// delta at all for it. `first-seen`/`baseline-state`/`new` are OBSERVATION
+// classes (delta.firstObserved === true) -- "first time seeing this item" --
+// which says nothing about a transition an attention filter could mean to
+// protect, unlike a real `merged`/`closed` transition class, which
+// classifyPr/classifyIssue only ever attach when an actual state change was
+// observed (see the `if (oldFp.state !== fp.state)` guard there).
+test('a watched PR absent from the snapshot but already merged on first observation is cleaned up (no leaked watch entry)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-first-seen-merged-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const alreadyMerged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
+  // PR 42 is absent from the existing snapshot's pr map (present but empty),
+  // so this is NOT a baseline run -- diffEntity takes the first-seen path.
+  const d = deps([[alreadyMerged]], { existing: { pr: {}, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: [alreadyMerged], rateLimit: RATE_LIMIT });
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', state, '--watch-dir', watch],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.deepEqual(report.deltas[0].classes, ['first-seen']);
+  assert.equal(report.deltas[0].firstObserved, true);
+  assert.equal(existsSync(entry), false, 'the watch entry must not be stranded forever');
+});
+
+// The `--until closed` equivalent of the above: a watched PR absent from the
+// snapshot but already closed (not merged) on first observation.
+test('a watched PR absent from the snapshot but already closed on first observation is cleaned up under --until closed', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-first-seen-closed-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"closed","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const alreadyClosed = { ...basePr, state: 'closed', updatedAt: '2026-07-01T11:00:00Z' };
+  const d = deps([[alreadyClosed]], { existing: { pr: {}, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: [alreadyClosed], rateLimit: RATE_LIMIT });
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', state, '--watch-dir', watch],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.deepEqual(report.deltas[0].classes, ['first-seen']);
+  assert.equal(existsSync(entry), false);
+});
+
+// A first-seen delta is an observation, not a transition -- an attention
+// filter targeting it is a report-shaping preference, never a "do not clean
+// up" instruction the way `--ignore-classes merged` legitimately is for a
+// real transition (see the two tests above this block). Filtering
+// `first-seen` itself drops the WHOLE delta before the cleanup loop ever
+// sees it (applyAttentionFilters discards a delta once every class is
+// stripped), so cleanup does not fire on this tick either way -- this test
+// pins that this is a report-visibility side effect, not a silent
+// resurrection of the fixed leak, and is a pre-existing characteristic of
+// "attention filtering also gates which deltas the cleanup loop ever sees"
+// that predates all three rounds on this predicate (see the note in the
+// commit message about it being out of scope here).
+test('--ignore-classes first-seen drops the delta entirely, so cleanup does not fire this tick either', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-ignore-first-seen-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const alreadyMerged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
+  const d = deps([[alreadyMerged]], { existing: { pr: {}, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: [alreadyMerged], rateLimit: RATE_LIMIT });
+  const { code, report } = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      state,
+      '--watch-dir',
+      watch,
+      '--ignore-classes',
+      'first-seen',
+    ],
+    d,
+  );
+  assert.equal(code, 0);
+  assert.deepEqual(report.deltas, []);
+  assert.equal(existsSync(entry), true);
+});
+
+// `baseline-state` (--baseline-emit-state) can never be terminal by
+// construction: baselineStateDeltas filters to `d.to.fingerprint.state ===
+// 'open'` only (lib/detect.mjs), so there is no reachable watch-cleanup
+// scenario to test end-to-end for it -- this pins that structural invariant
+// directly instead of asserting a real-code-path scenario that cannot occur.
+test('baseline-emit-state deltas can never carry a terminal state (structural invariant backing the observation-class reasoning)', () => {
+  const d = deps([[{ ...basePr, state: 'merged' }]]);
+  const { report } = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/gd-baseline-state-terminal.json',
+      '--baseline-emit-state',
+    ],
+    d,
+  );
+  assert.deepEqual(report.deltas, [], 'a terminal item is silently seeded, never baseline-state');
+});
+
 test('watch text commands render watch-specific output, never detector deltas', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-watch-text-'));
   for (const argv of [
