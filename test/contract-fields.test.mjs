@@ -576,7 +576,11 @@ async function buildFixtures() {
     meta: regMeta({ repo: 'registry/a', monitorId: 'monitor-a', entities: ['pr'] }),
   });
   const aWatchDir = mkdtempSync(join(tmpdir(), 'gh-delta-contract-fields-reg-watchdir-'));
-  registerMonitor({
+  // Capture the REAL entry object registerMonitor writes (and returns) --
+  // REGISTRY_ENTRY_FIELDS' coverage below reads straight from this, not a
+  // hand-built projection of it (see that deriver's comment for why: a
+  // projection can stay green on exactly the drift it exists to catch).
+  const { entry: registryEntryA } = registerMonitor({
     repo: 'registry/a',
     monitorId: 'monitor-a',
     entities: ['pr'],
@@ -588,7 +592,7 @@ async function buildFixtures() {
   });
 
   // Monitor B: registered, but its snapshot has since vanished -> `stale: true`.
-  registerMonitor({
+  const { entry: registryEntryB } = registerMonitor({
     repo: 'registry/b',
     monitorId: 'monitor-b',
     entities: ['pr'],
@@ -675,6 +679,8 @@ async function buildFixtures() {
     listResult,
     listRegistryOnlyResult,
     registryMonitors,
+    registryEntryA,
+    registryEntryB,
     agentCompactHappy,
     agentCompactHappy3,
     agentCompactError,
@@ -770,40 +776,21 @@ const COVERAGE = {
     assert.ok(monitors.length > 0, 'at least one real monitor entry must exist');
     return new Set(monitors.flatMap((m) => Object.keys(m)));
   },
-  REGISTRY_ENTRY_FIELDS: (f) => {
-    // The registry entry itself is not directly returned by any CLI command
-    // (it is an internal breadcrumb file `list` reads) -- but a `list` scan
-    // over the SAME registry, for monitors whose watch/scope-carrying
-    // registrations this fixture built, surfaces the union of every field
-    // registerMonitor ever writes once merged into a monitor entry (see
-    // lib/list.mjs's mergeRegistry, which carries registered.watchDir/
-    // scope/lastAttemptAt/lastOkAt/lastError straight through). registryVersion
-    // and machineId are the two registry-only fields `list` never surfaces
-    // as-is (list's own shape has neither), documented explicitly below
-    // rather than silently required from `list`'s output.
-    const monitors = [
-      ...f.listResult.report.monitors,
-      ...f.listRegistryOnlyResult.report.monitors,
-      ...f.registryMonitors,
-    ];
-    const fromList = new Set(
-      monitors.flatMap((m) =>
-        [
-          'repo',
-          'monitorId',
-          'entities',
-          'scope',
-          'stateFile',
-          'watchDir',
-          'lastRun',
-          'lastAttemptAt',
-          'lastOkAt',
-          'lastError',
-        ].filter((key) => Object.hasOwn(m, key)),
-      ),
-    );
-    return new Set([...fromList, 'registryVersion', 'machineId']);
-  },
+  // The registry entry itself is not returned by any CLI command (it is an
+  // internal breadcrumb file `list` reads) -- but registerMonitor's own
+  // return value (`{path, entry}`) IS the exact object it just wrote to
+  // disk, no re-derivation needed. Reading real entries this way (not a
+  // hand-picked field-name list run through Object.hasOwn, and not literals
+  // for the fields `list` never surfaces as-is) means a field registerMonitor
+  // stops emitting disappears from the observed set exactly like a field it
+  // never emitted in the first place -- both are real drift, and this guard
+  // now cannot tell the two apart from "the catalog is simply wrong", which
+  // is the point. registryEntryA alone (status 'ok', scope 'watch-pr',
+  // watchDir set) already carries every field the catalog documents; B is
+  // included anyway so the union reflects two real, differently-shaped
+  // writes rather than one.
+  REGISTRY_ENTRY_FIELDS: (f) =>
+    new Set([...Object.keys(f.registryEntryA), ...Object.keys(f.registryEntryB)]),
   AGENT_COMPACT_REPORT_FIELDS: (f) =>
     new Set([...Object.keys(f.agentCompactHappy), ...Object.keys(f.agentCompactError)]),
   AGENT_COMPACT_DELTA_FIELDS: (f) =>
