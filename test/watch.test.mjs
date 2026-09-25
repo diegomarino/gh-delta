@@ -11,7 +11,9 @@ import {
   removeWatch,
   removeWatchUnchanged,
   watchDirPath,
+  withTerminalMarkLocks,
 } from '../lib/watch.mjs';
+import { LOCK_EXPIRY_SLACK_MS } from '../lib/lock.mjs';
 
 // The canonical shape as `addWatch` creates it: {entity, number, until,
 // addedAt}. `ignoredTerminalAt` (see markTerminalIgnored below) is an
@@ -103,6 +105,38 @@ test('canonical validation still rejects an unknown extra key or a malformed ign
     '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-01-01T00:00:00.000Z","ignoredTerminalAt":"not-a-date"}\n',
   );
   assert.throws(() => readWatch(dir), /invalid watch entry/);
+});
+
+// Round 10: withTerminalMarkLocks's lease must be sized by `leaseMs` alone
+// -- a duration meaning "how long may this entry legitimately stay locked"
+// -- never by anything resembling a network timeout, since the critical
+// section it protects (a mark write, then a full snapshot publish) is pure
+// disk I/O. Pin the actual computed expiry directly against the lock file
+// on disk, not just against behavior, so a future regression that
+// reintroduces a --gh-timeout-ms-flavored value here fails immediately
+// rather than only under a slow-filesystem race that is hard to reproduce.
+test('withTerminalMarkLocks sizes the entry lock lease from leaseMs alone', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-lease-'));
+  const added = addWatch(dir, 'pr:42', 'merged', { now: () => '2026-09-20T12:00:00.000Z' });
+  const before = Date.now();
+  let expiresAtMs;
+  withTerminalMarkLocks(
+    [added.path],
+    () => {
+      const lock = JSON.parse(readFileSync(`${added.path}.lock`, 'utf8'));
+      expiresAtMs = Date.parse(lock.expiresAt);
+    },
+    { leaseMs: 600000 }, // --lock-stale-ms's own 10m default
+  );
+  const impliedLeaseMs = expiresAtMs - before;
+  // Must reflect the 600000ms leaseMs (plus the shared slack constant every
+  // lock in this codebase adds), not a small network-timeout-sized value --
+  // a regression back to `ghTimeoutMs` (commonly tens of seconds) would fail
+  // this by roughly an order of magnitude, not by a rounding error.
+  assert.ok(
+    impliedLeaseMs >= 600000 && impliedLeaseMs <= 600000 + LOCK_EXPIRY_SLACK_MS + 1000,
+    `expected the lease to reflect leaseMs (600000ms) + slack, got ${impliedLeaseMs}ms`,
+  );
 });
 
 test('watch read rejects corrupt and duplicate canonical entries', () => {

@@ -1327,6 +1327,64 @@ test('a real concurrent watch add attempted during mark-and-publish fails fast, 
   );
 });
 
+// Round 10: the entry lock's lease must not be tied to --gh-timeout-ms, a
+// NETWORK timeout with nothing to do with the disk write it now protects.
+// Run with a --gh-timeout-ms tiny enough that the OLD (round 9) coupling
+// would have given the entry lock only a ~6-second lease; confirm the
+// lease actually granted, inspected mid-critical-section, still reflects
+// --lock-stale-ms's own (much larger) default -- end to end, through the
+// real CLI flags, not just the lib/watch.mjs unit test.
+test('a tiny --gh-timeout-ms does not shrink the entry lock lease', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-lease-integration-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const merged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
+  const d = deps([[]], { existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: [merged], rateLimit: RATE_LIMIT });
+  let impliedLeaseMs;
+  const before = Date.now();
+  d.writeTerminalIgnoredLocked = (path, bytes, ignoredAt) => {
+    const marked = writeTerminalIgnoredLocked(path, bytes, ignoredAt);
+    const lock = JSON.parse(readFileSync(`${path}.lock`, 'utf8'));
+    impliedLeaseMs = Date.parse(lock.expiresAt) - before;
+    return marked;
+  };
+  const { code } = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      state,
+      '--watch-dir',
+      watch,
+      '--ignore-classes',
+      'merged',
+      // A --gh-timeout-ms this small would give the entry lock only a
+      // ~6-second lease under the round-9 coupling (--gh-timeout-ms +
+      // lib/lock.mjs's 5s slack) -- far too short to survive any real
+      // snapshot write under load.
+      '--gh-timeout-ms',
+      '100',
+    ],
+    d,
+  );
+  assert.equal(code, 0);
+  // --lock-stale-ms defaults to 10 minutes; the lease must reflect that,
+  // not the 100ms/6-second network timeout.
+  assert.ok(
+    impliedLeaseMs > 500000,
+    `expected the entry lock lease to reflect --lock-stale-ms's 10m default, not --gh-timeout-ms's 100ms; got ${impliedLeaseMs}ms`,
+  );
+});
+
 // The granularity defect: --only-classes is a DELTA-level gate (a delta
 // survives WHOLE once ANY named class matches, all its other classes
 // intact -- see lib/help.mjs's own description), unlike --ignore-classes'
