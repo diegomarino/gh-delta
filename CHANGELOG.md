@@ -4,6 +4,156 @@ All notable changes to this package will be documented here.
 
 This project follows semantic versioning.
 
+## [0.7.0](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.6.1...gh-delta-v0.7.0) (2026-09-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* **watch:** watch entry JSON files may now carry an optional `ignoredTerminalAt` field. Existing entries remain valid unmodified; any tool reading watch entry files with a strict/exact-key expectation must be updated to tolerate this new optional key.
+* **compact,text:** compact/ndjson delta records now include seq and firstObserved when the underlying delta carries them (previously silently dropped); a strict consumer validating against an exact key set must account for the two new optional fields.
+* **fingerprint:** delta ids for checks rows that previously tied on name/kind/status/conclusion (distinguishable only by detailsUrl) will differ from prior 0.x output. This is a one-time churn for those rows only; existing contract-baseline fixtures were unaffected (no duplicate-tuple check rows in the recorded fixtures), so no baseline regeneration was needed.
+* **compact,ndjson:** --format compact and --format ndjson now emit `detectedAt` instead of `at` in the report/end envelope.
+* **contract:** report.schemaVersion and outpost payload schemaVersion are now 2. This is the schema-v2 epic's cumulative v1 -> v2 contract change, closing out what R1-R6 and F1-F4 built incrementally:
+    - Snapshot items and delta from/to are `{fingerprint, context, meta}`,
+      not one flat object; comparableFingerprint's 14-key drop-list and the
+      ADDITIVE_COMPARED_FIELDS upgrade-compat list are gone -- every
+      fingerprint key now participates in comparison and the delta id.
+    - Fingerprint field names/casing changed throughout: ci/reviews/head/
+      base/review/ciChecks/reviewSummary/threadDigest/threadStates/
+      commentNodes/comments/commentsOverflow are replaced by
+      checks/reviews/headSha/baseRef/reviewDecision/conversationComments/
+      reviewComments, with lowercase enums; there are no more opaque
+      digests.
+    - The report is always the repos/results[] envelope (no single-repo
+      bare shape, no top-level multi-repo errors array); filteredDeltas and
+      warnings are always present; the timestamp field is `detectedAt`.
+    - delta.title/author/url/headRefName are replaced by delta.context;
+      delta.line and hideInternalDetails' public/private delta view are
+      removed; delta.summary and delta.changed are always present.
+    - Outpost payloads no longer duplicate delta fields at the root or
+      emit eventId; delta fields live under `delta`, dedupe uses
+      `delta.id`, and Standard Webhooks headers replace X-GhDelta-Signature.
+    - A pre-schema-v2 (or otherwise invalid) snapshot or durable log is
+      never migrated: it is a permanent error naming `gh-delta reset`.
+* **classes:** a push with no other change now emits only `classes: ["head-changed"]`, not `["head-changed", "updated"]`. Any consumer relying on the forced pairing (or on `--ignore-classes updated` to avoid double-counting a push) must switch to matching `head-changed` directly. `context.title` on the missing lifecycle is now the real last-known title rather than always null.
+* **examples:** this example receiver only understands the v2 outpost payload and Standard Webhooks signing; it no longer verifies X-GhDelta-Signature or reads v1's root-level delta fields.
+* **outpost:** the outpost HTTP payload no longer duplicates delta fields at its root and no longer emits `eventId`; delta fields live under the new `delta` key, and dedupe must use `delta.id`. The X-GhDelta-Signature header is removed in favor of Standard Webhooks headers (webhook-id/webhook-timestamp/webhook-signature); receivers verifying the old header must migrate.
+* **schema:** schema/json.json, compact.json, and ndjson.json now express the delta shape as $defs.delta + $ref instead of three inlined copies; consumers resolving these schemas must support $ref.
+* **schema:** schema/json.json, compact.json, and ndjson.json no longer describe the old single/multi-repo split or the legacy delta field names; they describe the always-enveloped report and the context/changed/summary-always-on delta.
+* **cli:** delta.title/author/url/headRefName are replaced by delta.context; delta.line is removed; delta.summary and delta.changed are now always present (previously opt-in/PR-only); delta.from/to are now compact/ndjson-optional (--full) rather than always omitted. The report drops the single-repo bare shape and the multi-repo top-level `errors` array in favor of an always-present `repos`/`results[]` envelope with per-repo errors; `filteredDeltas`/`warnings` are always present; the report timestamp field is renamed from `at` to `detectedAt`.
+* **cli:** commentAuthorsIgnored is replaced by authorsIgnored, which also suppresses review-changed (via reviews[].author) and review-comments-added (via a pre-publish, double-opt-in-gated --enrich thread-replies call) when every attributable author is listed in --ignore-authors. review-changed is never suppressed when reviewDecision itself moved, even if a changed review row happens to belong to an ignored author -- that transition may not be explained by the changed row. Without --enrich thread-replies, or when every incremented thread is brand new (no prior baseline to diff replies against), a review-comments-added delta now fails open with an explicit warning instead of silently passing through unchecked. This is the one documented exception to opt-in enrichment quota being spent only after snapshot publication; see --help for --ignore-authors/--enrich.
+* **contract:** DELTA_CLASSES gains review-comments-added and review-comments-removed; DELTA_DETAIL_FIELDS_BY_CLASS renames the new-comments/comments-removed detail field from comments to conversationComments, adds reviewComments for the two new classes, and replaces comments with conversationComments/reviewComments in updated's field list.
+* **detect:** new-comments/comments-removed now fire only on conversationComments; a reply in an existing review thread instead fires the new review-comments-added/review-comments-removed classes, driven by the reviewComments compared field. Exports threadReplyIncrements, a pure per-thread reply-count-delta helper shared by --enrich thread-replies and the --ignore-authors pre-publish filter pass.
+* **fingerprint:** prFingerprint/issueFingerprint no longer carry the aggregate comments field. PR fingerprints add reviewComments alongside the existing conversationComments; issue fingerprints keep conversationComments only. delta.id changes for any PR/issue whose comment counts differ from a prior snapshot taken before this change.
+* **gh:** normalizePr/normalizeIssue no longer emit the aggregate comments field. PRs now emit conversationComments and reviewComments (= totalCommentsCount - conversationComments, clamped at 0) as independent values; issues keep conversationComments only.
+* **fingerprint:** checks[] rows may gain runId/jobId fields, which enter the content-addressed delta.id (R2 put checks[] directly in the hashed identity), so ids for PRs with parseable Actions check URLs change from prior schema-v2 snapshots.
+* **deltalog:** appendDeltaLog now requires non-empty repo/monitorId options, and every log record gains repo/monitorId fields. A durable log written before this change -- v1/v2 manifest, or pre-manifest raw NDJSON -- is rejected with an error naming `gh-delta reset`. There is no migration.
+* **snapshot:** a snapshot missing meta, or whose meta.schemaVersion is not 2, is rejected with an error naming `gh-delta reset` as the recovery path. There is no migration from an older or meta-less snapshot.
+* **gh:** lib/gh.mjs's fetchPRs, fetchIssues, fetchPRsByNumber, and fetchEnrichment now return `{ rows, rateLimit }` instead of a bare array; lib/enrich.mjs's enrichEmittedDeltas now returns `{ warnings, rateLimit }` instead of a bare warnings array. Any code importing these directly must destructure the new shape.
+* **fingerprint:** fingerprint field names and enum casing change again (schema v2, following R1); every delta.id changes accordingly. Consumers reading ci/reviews/head/base/review/ciChecks/reviewSummary/threadDigest/ threadStates/commentNodes or uppercase enum values must update to checks/reviews/headSha/baseRef/reviewDecision and lowercase enums.
+* **cli:** `--detail`/`--summaries`/agent-compact output, status items, and outpost payloads now read the three-section snapshot item shape (see the companion snapshot-split commit); a delta's `from`/`to` in every report format now carry `fingerprint`/`context`/`meta` instead of one flat object.
+* **snapshot:** snapshot items and delta from/to are now `{ fingerprint, context, meta }` instead of one flat object. Delta ids change for every entity that carries a fingerprint field previously dropped before hashing (ciChecks, reviewSummary, ciDetails, reviewDetails, commentNodes, conversationComments, threadDigest, threadStates): these now participate in the content-addressed id. Persisted v1 snapshots are not compatible with this version; consumers reading raw snapshot files must update to the three-section shape.
+
+### Features
+
+* **cli:** add gh-delta reset; snapshot writes now carry full schema-v2 meta ([9bb865b](https://github.com/diegomarino/gh-delta/commit/9bb865bb18b32ff42bf62de0c11a96a5f69cc439))
+* **cli:** authorsIgnored covers conversation, reviews, and thread replies ([0dfaad5](https://github.com/diegomarino/gh-delta/commit/0dfaad576fb1d0ea631b0f86b3086417201b5c5d))
+* **cli:** unify delta and report shape for schema v2 (R3) ([e638a9c](https://github.com/diegomarino/gh-delta/commit/e638a9ca8c97078eccfd81eedf0566f643cec890))
+* **compact,ndjson:** unify at -&gt; detectedAt with the JSON report ([83a3b8f](https://github.com/diegomarino/gh-delta/commit/83a3b8f4d7125ae211b3c70a460f2dd13d01f701))
+* **contract:** bump schema version to 2, close the v1 compat surface ([994ca97](https://github.com/diegomarino/gh-delta/commit/994ca97dd60a35179b8d835fbbe1eab1032a99bc))
+* **contract:** register review-comments-added/-removed classes ([5245366](https://github.com/diegomarino/gh-delta/commit/524536631f32b564d75b564b7640f5556dfd688e))
+* **deltalog:** version-3-only manifest, log records carry repo/monitorId ([0bee0a9](https://github.com/diegomarino/gh-delta/commit/0bee0a92eddeea454736e8c12219d92680ae143a))
+* **detect:** review-comments-added/-removed classes; new-comments is conversation-only ([7996313](https://github.com/diegomarino/gh-delta/commit/7996313b79b208acdb4ee03beeed739854a12e38))
+* **enrich:** add thread-replies enrichment kind ([2a538a9](https://github.com/diegomarino/gh-delta/commit/2a538a9486fd4554c7060bd6dbb8e01909e7358b))
+* **fingerprint:** drop digests, unify names/enums across checks/reviews/threads ([bd91971](https://github.com/diegomarino/gh-delta/commit/bd91971e157dc2e4491702258ec0c08111d0d5b6))
+* **fingerprint:** parse runId/jobId from Actions check URLs, add summary.failedChecks ([afb0089](https://github.com/diegomarino/gh-delta/commit/afb0089fb307c5447361bfe29e5fc1df5cd63be9))
+* **fingerprint:** reviewComments joins conversationComments as compared fields ([5e74f81](https://github.com/diegomarino/gh-delta/commit/5e74f81dfbb1c56942c6f5a8e2a4371d8c475a60))
+* **gh,cli:** item context (id/author/createdAt/url) and --enrich body ([b7ae6e7](https://github.com/diegomarino/gh-delta/commit/b7ae6e77961735b4d1edd4d9352000bcfececc9b))
+* **gh,cli:** item context (id/author/createdAt/url) and --enrich body (F2) ([a579c5b](https://github.com/diegomarino/gh-delta/commit/a579c5bdfa958374fb8dffeeb42d4a3e191a0bff))
+* **gh:** add fetchThreadReplies, one aliased per-thread GraphQL call ([3e2f18b](https://github.com/diegomarino/gh-delta/commit/3e2f18bbeb83b954a4b78b495f1765f5413590c4))
+* **gh:** instrument every GraphQL query with rateLimit cost tracking ([8115288](https://github.com/diegomarino/gh-delta/commit/811528830914c8c0a1e537f71860e3c1b827207e))
+* **gh:** split PR conversation and review comment counts ([15f7ee6](https://github.com/diegomarino/gh-delta/commit/15f7ee6cad6e0af72fee2f55b095fe38f48f244d))
+* **outpost:** reshape delta payload and switch to Standard Webhooks signing ([b48b808](https://github.com/diegomarino/gh-delta/commit/b48b808ae8bac6fbb4bbc3890e27d0f402d8915e))
+* **schema:** regenerate json/compact/ndjson schemas for the v2 delta/report shape ([163a73b](https://github.com/diegomarino/gh-delta/commit/163a73bdc8e4af7fa30ee97f03f6ae337c108794))
+* **snapshot:** make snapshot meta mandatory (schema v2) ([55e17e6](https://github.com/diegomarino/gh-delta/commit/55e17e68e27717a199fa1d7d1344155f52287161))
+* **snapshot:** split snapshot items into fingerprint/context/meta ([a4fb6f4](https://github.com/diegomarino/gh-delta/commit/a4fb6f41df8226a17a2499c5c4825eb81ded98dc))
+* **watch:** persist ignored terminal transitions to close the sticky-filter hole ([7207a8f](https://github.com/diegomarino/gh-delta/commit/7207a8fea670c79d9fd0a286c5b9499d93c7b3a8))
+
+
+### Bug Fixes
+
+* **classes:** decouple head-changed from updated, carry real missing-cycle titles, add firstObserved ([db842b9](https://github.com/diegomarino/gh-delta/commit/db842b96024c9d53fb644e9be39fd610541f7394))
+* **cli:** read the schema-v2 three-section item shape everywhere ([33095d7](https://github.com/diegomarino/gh-delta/commit/33095d70f46f069a382b3d2c98d4de158f989eac))
+* **cli:** repair the cli.mjs/wait.mjs detector-tick error paths ([f2f32a5](https://github.com/diegomarino/gh-delta/commit/f2f32a59823d060af0d44e6e1370d5b9dd4147c3))
+* **cli:** require full author coverage before suppressing review-comments-added ([f9cacdd](https://github.com/diegomarino/gh-delta/commit/f9cacddc6df1dafb32830ed14b8d8b50f4c082ba))
+* **compact,text:** propagate seq/firstObserved to agent formats, show title/author in status text ([dbd7a66](https://github.com/diegomarino/gh-delta/commit/dbd7a66454c6cbc276a7ee005e9988d18293ac63))
+* **contract-fields:** derive REGISTRY_ENTRY_FIELDS from real registerMonitor output ([a002b22](https://github.com/diegomarino/gh-delta/commit/a002b22bb9514888fe348a2ceaa9b05ed7315c83))
+* **contract:** correct stale AGENT_COMPACT_*/AGENT_NDJSON_END_FIELDS ([3b8bda3](https://github.com/diegomarino/gh-delta/commit/3b8bda345d767410b2f88d220fdbdcc7df430055))
+* **contract:** cover every field catalog with real-output drift detection ([60551fd](https://github.com/diegomarino/gh-delta/commit/60551fd90dff3e884361f6c4f1524b9e504c7675))
+* **deltalog:** resetDeltaLog recovers dataFile from an invalid-but-parseable manifest ([758afa9](https://github.com/diegomarino/gh-delta/commit/758afa9929f44ec4fca2ac11d43cce351260bf73))
+* **diff:** align checksDiff with diffSummaries on duplicate check names, exclude recentComments rotation from updated ([3fd8ac1](https://github.com/diegomarino/gh-delta/commit/3fd8ac104dd3c92a815f1980bc91d5e0f325c4f6))
+* **diff:** checksDiff opaque fallback only fires on a real change ([bf478b3](https://github.com/diegomarino/gh-delta/commit/bf478b351a0887b8f04f5662a3a341bca83ee5ce))
+* **examples,tools:** repair broken examples and contract-violating generated output (W7B) ([06d77cc](https://github.com/diegomarino/gh-delta/commit/06d77cc7d582dc12d82ff17705586687637c0643))
+* **examples:** fix v2 field mapping in programmatic-embed example ([b0a15cb](https://github.com/diegomarino/gh-delta/commit/b0a15cba3282f1c4f418382273f9e0f7311e0464))
+* **examples:** read coordinator logFile from results[], not top-level ([fa9eacc](https://github.com/diegomarino/gh-delta/commit/fa9eacc2fc31063e4fd74bba0fa222eb6ae8942e))
+* **fingerprint:** give buildChecks a unique sort tiebreaker ([97b683f](https://github.com/diegomarino/gh-delta/commit/97b683f19ef32135fff62846d1107611680f5e0a))
+* gh-delta init reads init baseline/stateFile from v2 results[0] ([25c7873](https://github.com/diegomarino/gh-delta/commit/25c7873ee1365bf294759737f2a011869be87dac))
+* **gh:** anchor fetchThreadReplies against the observed thread state ([d21ba5c](https://github.com/diegomarino/gh-delta/commit/d21ba5caa6fe3a9997d6e8384502ec27069ba1c8))
+* **outpost:** normalize a raw detectDeltas() delta before building its payload ([5a526fb](https://github.com/diegomarino/gh-delta/commit/5a526fba9657cdefca6a4660324f69093c6cd064))
+* post-epic cleanup lane A — release blocker, wait bug, at→detectedAt (W7A) ([b5321a1](https://github.com/diegomarino/gh-delta/commit/b5321a175aa5b034e0a3b3c466b308229cfa03ec))
+* read v2 results[0].baseline in the live playground e2e, widen the sweep ([eae7b3c](https://github.com/diegomarino/gh-delta/commit/eae7b3cf267cde40b73cabaca8cb6b24bd8a3f20))
+* resolve confirmed Codex review findings from the schema-v2 epic (code) ([24ccaca](https://github.com/diegomarino/gh-delta/commit/24ccaca7d4995bfdbe1626c70d85b7ce08c40596))
+* **schema:** share one $defs.delta across json/compact/ndjson via $ref ([a6080d7](https://github.com/diegomarino/gh-delta/commit/a6080d72ff5d508f0a99caec66f5f064aaccf120))
+* **test:** make schema-coverage's compact/ndjson checks self-policing ([836b86e](https://github.com/diegomarino/gh-delta/commit/836b86e3a82a565995113f919d560166dd18b6a3))
+* **test:** render and validate multi-repo output in every agent format ([cc10b08](https://github.com/diegomarino/gh-delta/commit/cc10b0813a2b7e9ae0cd9c8a5d805aefe13c9c90))
+* **test:** stop writing real detector ticks into the developer's registry ([6e14af5](https://github.com/diegomarino/gh-delta/commit/6e14af59b3db170d160f8b3a35d50c9e98f327d7))
+* **tools/examples:** enrich deltas before the fixture strip step ([4b76954](https://github.com/diegomarino/gh-delta/commit/4b769546f710fc203e636004df0a2b10bde35342))
+* **wait:** make --from-log --until-summary actually match ([f51092b](https://github.com/diegomarino/gh-delta/commit/f51092ba16896da72ad7ad66fab84a1ce1adf885))
+* **wait:** repoint state-file lookups at results[].stateFile ([a07ea00](https://github.com/diegomarino/gh-delta/commit/a07ea0020067a7b342cac14a29b16e719f86774e))
+* **wait:** report the highest-severity error, not the last one collected ([21bffa2](https://github.com/diegomarino/gh-delta/commit/21bffa2ad8e88bcb8ec3e750a5bd94f528c3b6f0))
+* **watch:** clean up entries by terminal state, not delta class ([9b302f7](https://github.com/diegomarino/gh-delta/commit/9b302f7ce0548ca63ba6091387406df02535995e))
+* **watch:** clean up entries by terminal state, not delta class ([d3f3ed3](https://github.com/diegomarino/gh-delta/commit/d3f3ed36c3c1fddaaaeb71a97e1ce0cbc759280c)), closes [#57](https://github.com/diegomarino/gh-delta/issues/57)
+* **watch:** derive marker suppression from real filter output, not flags ([a6d0fe0](https://github.com/diegomarino/gh-delta/commit/a6d0fe0daf89944806b554528d3dd15ce9d17b9b))
+* **watch:** fail the tick on a concurrent watch-entry replacement ([5444769](https://github.com/diegomarino/gh-delta/commit/5444769aad889c7214fdfb0ae81ab1ebdf1be83c))
+* **watch:** hold the entry lock through mark AND publish, not just the mark ([95497b4](https://github.com/diegomarino/gh-delta/commit/95497b491ed8e0469958538ca4d2eead0ed1b4d4))
+* **watch:** move unsafe lock helpers off the published API surface ([3462db6](https://github.com/diegomarino/gh-delta/commit/3462db6ee41ee89166ebc4ab78cf95a221189536))
+* **watch:** persist ignoredTerminalAt before publication, not after ([68fe707](https://github.com/diegomarino/gh-delta/commit/68fe707579e8f38415578daa5db51bffd037b607))
+* **watch:** recognize an already-terminal from.state as cleanup-eligible ([c3b357a](https://github.com/diegomarino/gh-delta/commit/c3b357a7c5c5fe474a156f147164f01960fd521f))
+* **watch:** require a surviving terminal class before cleaning up a watch entry ([2d2396f](https://github.com/diegomarino/gh-delta/commit/2d2396f7efe5b34fd71c665a6f7a5f1a3a0d484f))
+* **watch:** size the entry lock lease from --lock-stale-ms, not --gh-timeout-ms ([12d46aa](https://github.com/diegomarino/gh-delta/commit/12d46aa1ac282092a1756022afef4e7431696a0f))
+* **watch:** size the entry lock lease from a fixed constant, not --lock-stale-ms ([66833be](https://github.com/diegomarino/gh-delta/commit/66833be0def02ba3478c782f70dc3466be8a6337))
+* **watch:** treat a terminal first observation as cleanup-eligible ([894ff3c](https://github.com/diegomarino/gh-delta/commit/894ff3c635de2d2c40cfda2577ba8d2dc6333289))
+* **watch:** use from.state !== to.state for transitions, not terminal-priorState ([c5da9be](https://github.com/diegomarino/gh-delta/commit/c5da9be39ede4a50637d7c55ca9a13089111feee))
+
+
+### Documentation
+
+* add missing --enrich/--full and gh-delta reset coverage (gaps, no v2 doc home) ([c4dd79f](https://github.com/diegomarino/gh-delta/commit/c4dd79f3170e9c3659b2cbbaa37368eb151d3346))
+* **args:** stop describing repo-casing normalization via the removed eventId ([0ad352f](https://github.com/diegomarino/gh-delta/commit/0ad352f1e29a54dabae6ae27cf2e6eb50ec83c2f))
+* bring prose in line with schema v2 (W7C) ([3aa02f9](https://github.com/diegomarino/gh-delta/commit/3aa02f99ae013536a9b9fdf4cc82b92e5c650be2))
+* **contract,help:** rewrite contract.md for schema v2 ([520b22b](https://github.com/diegomarino/gh-delta/commit/520b22b2c1f55a2dac625134ee652424013d0429))
+* **contract:** fix stale manifest/log docs and internal v2 contradictions ([8c53b70](https://github.com/diegomarino/gh-delta/commit/8c53b704a5e565e2ab92c863346087cbdfdc865c))
+* **contract:** fix the from/to bare-fingerprint self-contradiction ([e6e88d7](https://github.com/diegomarino/gh-delta/commit/e6e88d7e444c3396e7170be50a5aa1b88dc6adcf))
+* **examples:** add a review-comments-added example delta, regenerate SVGs ([428598e](https://github.com/diegomarino/gh-delta/commit/428598e683fc54b24f0f0a4df173bc7b2ff92238))
+* **examples:** fix stale v1 references in examples and generator docs ([9f27dd0](https://github.com/diegomarino/gh-delta/commit/9f27dd0c2739cbbd67ff5ed062f70d33f86927af))
+* **examples:** migrate outpost-ntfy-receiver to Standard Webhooks and the v2 payload ([87b49c3](https://github.com/diegomarino/gh-delta/commit/87b49c302ea12d82f9e212e8db0dc2926411b440))
+* **examples:** update fixtures and cast generator to the v2 item shape ([a69a2d2](https://github.com/diegomarino/gh-delta/commit/a69a2d20153f54c0039368aa7e431da1ee9a5c07))
+* **examples:** update fixtures and demo runner to the v2 fingerprint shape ([abb782d](https://github.com/diegomarino/gh-delta/commit/abb782d27c602ef8fb2cbf53b6a942b967146b92))
+* **examples:** update fixtures and the GitHub Actions example for schema v2 ([35de99f](https://github.com/diegomarino/gh-delta/commit/35de99f52ada5f0eb022632a53dc9eb3d907205e))
+* **fingerprint:** fix stale drop-list comments left over from schema v2 ([0af8758](https://github.com/diegomarino/gh-delta/commit/0af87581c69ec201d6437d88cc6e2101ed5c60f7))
+* fix dead outpost-v1 anchors, stale --summaries usage, new-comments scope ([7755f13](https://github.com/diegomarino/gh-delta/commit/7755f13b1f3c7f610dab04b1c4b3225fb1ad3226))
+* fix reset --entities omission, dead v1 anchor, import comment, enrich cost ([d80e62e](https://github.com/diegomarino/gh-delta/commit/d80e62e23cdeeebd5337a420785e5c1130a72570))
+* fix v1-era field names, --summaries no-op, and add gh-delta reset recovery ([b0e3243](https://github.com/diegomarino/gh-delta/commit/b0e32436c3b9555fb96205282c9cad41f5532256))
+* **help,text-output:** document thread-replies, review-comments-*, and the pre-publish quota exception ([4dbeac4](https://github.com/diegomarino/gh-delta/commit/4dbeac43aecb79c86a0136c35692de9233fafac9))
+* **help:** document the v2 delta/report shape and the new --full flag ([014fffc](https://github.com/diegomarino/gh-delta/commit/014fffc6cd3edbc9b607fc2d3778a843efd8fac1))
+* **help:** document the v2 outpost payload shape and dedupe rule ([981a5ad](https://github.com/diegomarino/gh-delta/commit/981a5ad737aa12902af92589694d7f5013d90eda))
+* **lib:** fix stale schema-v2 comments and prose ([4836b21](https://github.com/diegomarino/gh-delta/commit/4836b21ce9b862ae0cd408ff017c2e10f7661061))
+* record F1's measured reviewThreads.comments query cost (8/8, not 7/8) ([17ab7a3](https://github.com/diegomarino/gh-delta/commit/17ab7a3605673f5b7070e2a09ad2caafbebad9fb))
+* resolve confirmed Codex review findings (docs) ([6d44056](https://github.com/diegomarino/gh-delta/commit/6d44056a3e60e4b45ca31c5ec139f4fc77a1ddb9))
+* **runbook:** cover --watch-dir monitors in the reset recovery flow ([fcd38d7](https://github.com/diegomarino/gh-delta/commit/fcd38d7c7dad72ee7fae769956ffccb700d873fa))
+* **runbook:** fix outpost v2 payload/dedupe, summaries no-op, class table gaps ([62b5d2e](https://github.com/diegomarino/gh-delta/commit/62b5d2e0458dba47b29afed6a5b4860dc6bf2d0e))
+* **watch-loop-prompt:** drop obsolete head-changed/updated pairing advice ([4d24717](https://github.com/diegomarino/gh-delta/commit/4d2471780f3b8b07f1e597db3cd7d35f87988383))
+
 ## [0.6.1](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.6.0...gh-delta-v0.6.1) (2026-09-23)
 
 
