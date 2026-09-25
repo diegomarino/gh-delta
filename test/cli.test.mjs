@@ -1012,6 +1012,85 @@ test('--ignore-classes merged protects a --until merged entry across multiple su
   assert.equal(existsSync(entry), false, 'dropping the filter must clean up on the next tick');
 });
 
+// The ordering defect: markTerminalIgnored ran AFTER the snapshot publish
+// and its failure was reduced to a warning. A filtered terminal transition
+// is unrepeatable -- once the snapshot advances to the terminal state, no
+// later tick will ever see the transition again -- so publishing anyway
+// permanently strands the entry into the exact premature-cleanup bug the
+// marker exists to prevent. The fix: the marker write now runs BEFORE
+// publication, and a failure there fails the WHOLE tick (same class as an
+// unwritable state directory or a lost lock, already failing ticks a few
+// lines up), so the snapshot never advances past a filtered transition
+// without the marker that protects it.
+test('a marker write failure fails the tick instead of publishing an unmarked terminal snapshot', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-mark-write-fails-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const merged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
+  const mergedRelabeled = {
+    ...merged,
+    updatedAt: '2026-07-01T12:00:00Z',
+    labels: [{ name: 'a' }],
+  };
+  const rowSeq = [[merged], [merged], [mergedRelabeled]];
+  const d = deps([[]], { existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: rowSeq.shift(), rateLimit: RATE_LIMIT });
+  const argvWith = (extra = []) => [
+    '--repo',
+    'o/r',
+    '--monitor-id',
+    'main',
+    '--state-file',
+    state,
+    '--watch-dir',
+    watch,
+    '--ignore-classes',
+    'merged',
+    ...extra,
+  ];
+
+  // Tick 1: the merge, filtered, but the marker write is made to fail.
+  d.markTerminalIgnored = () => {
+    throw new Error('EACCES: permission denied');
+  };
+  const tick1 = run(argvWith(), d);
+  assert.equal(tick1.code, 1);
+  assert.equal(tick1.report.results[0].error.kind, 'io');
+  assert.equal(d.writes, 0, 'the snapshot must NOT advance past an unmarked filtered transition');
+  assert.equal(existsSync(entry), true);
+  assert.equal(JSON.parse(readFileSync(entry, 'utf8')).ignoredTerminalAt, undefined);
+
+  // Tick 2: a real retry (marker writes work again). The snapshot never
+  // advanced, so the SAME transition is observed again from scratch, and
+  // this time it is correctly marked and published together.
+  delete d.markTerminalIgnored;
+  const tick2 = run(argvWith(), d);
+  assert.equal(tick2.code, 0);
+  assert.equal(d.writes, 1);
+  assert.equal(
+    JSON.parse(readFileSync(entry, 'utf8')).ignoredTerminalAt !== undefined,
+    true,
+    'the retried tick must record the marker this time',
+  );
+
+  // Tick 3: a later, unrelated metadata-only delta under the SAME filter --
+  // the marker recorded on the successful retry must still protect it.
+  const tick3 = run(argvWith(), d);
+  assert.equal(tick3.code, 10);
+  assert.deepEqual(tick3.report.deltas[0].classes, ['relabeled']);
+  assert.equal(
+    existsSync(entry),
+    true,
+    'the marker recorded on retry must protect the entry, not just the failed attempt',
+  );
+});
+
 test('watch text commands render watch-specific output, never detector deltas', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-watch-text-'));
   for (const argv of [
