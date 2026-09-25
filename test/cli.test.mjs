@@ -679,6 +679,84 @@ test('--until merged keeps its watch entry when the PR closes without merging', 
   ]);
 });
 
+// A PR that merges AND relabels in the same tick still carries `to.state ===
+// 'merged'` even after `--ignore-classes merged` strips the `merged` class
+// (attention filtering only touches `delta.classes`, never the compared
+// fingerprint -- see applyAttentionFilters). The cleanup loop must key off a
+// SURVIVING terminal class, not the raw unfiltered state, or an operator's
+// explicit --ignore-classes is silently overridden and monitoring ends anyway.
+test('--ignore-classes merged protects a --until merged watch entry even when the PR also merges', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-ignore-merged-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const mergedAndRelabeled = {
+    ...basePr,
+    state: 'merged',
+    updatedAt: '2026-07-01T11:00:00Z',
+    labels: [{ name: 'shipped' }],
+  };
+  const d = deps([[mergedAndRelabeled]], {
+    existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} },
+  });
+  d.fetchPRsByNumber = () => ({ rows: [mergedAndRelabeled], rateLimit: RATE_LIMIT });
+  const { code, report } = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      state,
+      '--watch-dir',
+      watch,
+      '--ignore-classes',
+      'merged',
+    ],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.deepEqual(report.deltas[0].classes, ['relabeled']);
+  assert.equal(existsSync(entry), true, 'the watch entry must survive: merged was ignored');
+});
+
+// Same tick, no --ignore-classes: the merged class survives filtering (there
+// is no filtering), so cleanup must still fire -- guards against
+// over-correcting the fix above into never cleaning up a relabeled merge.
+test('the same merge-and-relabel tick without --ignore-classes still cleans up the watch entry', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-merged-relabeled-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const mergedAndRelabeled = {
+    ...basePr,
+    state: 'merged',
+    updatedAt: '2026-07-01T11:00:00Z',
+    labels: [{ name: 'shipped' }],
+  };
+  const d = deps([[mergedAndRelabeled]], {
+    existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} },
+  });
+  d.fetchPRsByNumber = () => ({ rows: [mergedAndRelabeled], rateLimit: RATE_LIMIT });
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', state, '--watch-dir', watch],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.deepEqual(report.deltas[0].classes.sort(), ['merged', 'relabeled'].sort());
+  assert.equal(existsSync(entry), false);
+});
+
 test('watch text commands render watch-specific output, never detector deltas', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-watch-text-'));
   for (const argv of [
