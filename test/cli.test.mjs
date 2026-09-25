@@ -1091,6 +1091,114 @@ test('a marker write failure fails the tick instead of publishing an unmarked te
   );
 });
 
+// The granularity defect: --only-classes is a DELTA-level gate (a delta
+// survives WHOLE once ANY named class matches, all its other classes
+// intact -- see lib/help.mjs's own description), unlike --ignore-classes'
+// CLASS-level removal. merged+relabeled under --only-classes relabeled
+// therefore survives WITH `merged` still present -- there is no
+// suppression to record, and cleanup must fire normally. An earlier version
+// treated `merged` as suppressed merely because --only-classes was active
+// and did not itself name `merged`, writing a spurious marker; the marked
+// (but still-eligible) delta then hit removeWatchUnchanged with bytes this
+// same tick's own spurious write had already made stale, silently
+// stranding the entry forever.
+test('--only-classes relabeled genuinely keeps a merged+relabeled delta WHOLE: no spurious marker, cleanup fires normally', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-only-classes-kept-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const mergedAndRelabeled = {
+    ...basePr,
+    state: 'merged',
+    updatedAt: '2026-07-01T11:00:00Z',
+    labels: [{ name: 'shipped' }],
+  };
+  const d = deps([[mergedAndRelabeled]], {
+    existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} },
+  });
+  d.fetchPRsByNumber = () => ({ rows: [mergedAndRelabeled], rateLimit: RATE_LIMIT });
+  const { code, report } = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      state,
+      '--watch-dir',
+      watch,
+      '--only-classes',
+      'relabeled',
+    ],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.deepEqual(report.deltas[0].classes.sort(), ['merged', 'relabeled'].sort());
+  // The definitive proof: if a spurious marker HAD been written this tick,
+  // removeWatchUnchanged's compare would fail against the now-stale bytes
+  // its own write caused, and the entry would survive. It must not.
+  assert.equal(existsSync(entry), false, 'a delta that genuinely kept merged must still clean up');
+});
+
+test('--only-classes relabeled genuinely rejecting a bare merge writes the marker and protects the entry', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-only-classes-rejected-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const merged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
+  const mergedRelabeled = {
+    ...merged,
+    updatedAt: '2026-07-01T12:00:00Z',
+    labels: [{ name: 'a' }],
+  };
+  const rowSeq = [[merged], [mergedRelabeled]];
+  const d = deps([[]], { existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: rowSeq.shift(), rateLimit: RATE_LIMIT });
+  const argvWith = () => [
+    '--repo',
+    'o/r',
+    '--monitor-id',
+    'main',
+    '--state-file',
+    state,
+    '--watch-dir',
+    watch,
+    '--only-classes',
+    'relabeled',
+  ];
+
+  // Tick 1: a BARE merge (no relabel). Its only class, `merged`, does not
+  // match --only-classes relabeled at all, so the whole delta is genuinely
+  // rejected -- exactly what --only-classes' own delta-level gate means.
+  const tick1 = run(argvWith(), d);
+  assert.equal(tick1.code, 0);
+  assert.deepEqual(tick1.report.deltas, []);
+  assert.equal(existsSync(entry), true);
+  assert.equal(
+    JSON.parse(readFileSync(entry, 'utf8')).ignoredTerminalAt !== undefined,
+    true,
+    'a genuinely rejected transition must still be marked',
+  );
+
+  // Tick 2: a later, unrelated metadata-only delta -- now `relabeled` alone
+  // matches --only-classes relabeled and survives, but the recorded mark
+  // must still protect the entry (state.merged, no fresh merged class here).
+  const tick2 = run(argvWith(), d);
+  assert.equal(tick2.code, 10);
+  assert.deepEqual(tick2.report.deltas[0].classes, ['relabeled']);
+  assert.equal(existsSync(entry), true, 'the marker must protect across a later matching tick');
+});
+
 test('watch text commands render watch-specific output, never detector deltas', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-watch-text-'));
   for (const argv of [
