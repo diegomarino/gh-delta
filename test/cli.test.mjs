@@ -887,6 +887,54 @@ test('baseline-emit-state deltas can never carry a terminal state (structural in
   assert.deepEqual(report.deltas, [], 'a terminal item is silently seeded, never baseline-state');
 });
 
+// The remaining gap in the space: broad polling (forced here by an issue
+// watch entry, per lib/cli.mjs's economicalWatch -- any non-PR entry falls
+// back to full fetching) can already hold an already-terminal item in its
+// snapshot from BEFORE the watch was added. A later metadata-only change
+// (e.g. a relabel) fires a delta whose ONLY class is `relabeled` --
+// classifyPr never re-adds `merged`/`closed` because `from.state` already
+// equals `to.state` (no state transition this tick) -- while `firstObserved`
+// is absent (the item was already known). Neither of the previous two
+// rounds' conditions fires, so cleanup must key off `from.state` already
+// being terminal: there was no transition THIS tick for any attention
+// filter to have meant "ignore" about.
+test('an already-terminal item with only a metadata-only delta (broad polling) is still cleaned up', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-already-terminal-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const prEntry = join(watch, 'pr-42.json');
+  writeFileSync(
+    prEntry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  // An issue watch entry forces broad polling (economicalWatch requires
+  // every watched entry to be a PR) -- irrelevant to this PR's own cleanup,
+  // present only to exercise the broad-polling path the finding names.
+  writeFileSync(
+    join(watch, 'issue-1.json'),
+    '{"entity":"issue","number":1,"until":"closed","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const alreadyMergedFp = prFingerprint({ ...basePr, state: 'merged' });
+  const relabeledStillMerged = {
+    ...basePr,
+    state: 'merged',
+    updatedAt: '2026-07-01T11:00:00Z',
+    labels: [{ name: 'shipped' }],
+  };
+  const d = deps([[relabeledStillMerged]], {
+    existing: { pr: { 42: item(alreadyMergedFp) }, issue: {} },
+  });
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', state, '--watch-dir', watch],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.deepEqual(report.deltas[0].classes, ['relabeled']);
+  assert.equal(report.deltas[0].firstObserved, undefined);
+  assert.equal(existsSync(prEntry), false, 'an already-terminal item must not strand its entry');
+});
+
 test('watch text commands render watch-specific output, never detector deltas', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-watch-text-'));
   for (const argv of [
