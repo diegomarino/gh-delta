@@ -1,0 +1,330 @@
+// Guard: every report shape the CLI can actually emit must validate against
+// its published JSON Schema -- not a hand-picked sample. For the whole
+// schema-v2 epic, every ordinary failed tick emitted a report
+// (`failedAttempt`'s pre-R6 shape) that violated gh-delta's own schema
+// (missing required `repoSource`/`stateFile`), and `test/schema.test.mjs`
+// only ever validated success envelopes and the bare pre-flight error --
+// never a post-resolution failure -- so `npm run check` stayed green
+// throughout.
+//
+// This is driven from the ERROR_KINDS registry (lib/contract.mjs), not a
+// fixed list of kinds copy-pasted here: `KIND_TRIGGERS` must have exactly one
+// entry per kind in ERROR_KINDS (checked explicitly below), so adding a new
+// error kind without teaching this file how to trigger and validate it fails
+// the build -- the one property this guard exists for. `config` is the one
+// kind with no per-repo trigger (it is always a pre-flight failure, before
+// any repo is resolved -- see lib/schema.mjs's bareError) and is asserted
+// against separately for that reason, not omitted.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { run, runCommand } from '../lib/cli.mjs';
+import { ERROR_KINDS } from '../lib/contract.mjs';
+import { schemaFor } from '../lib/schema.mjs';
+
+// A test-only subset validator for precisely the keywords lib/schema.mjs
+// emits -- copied from test/schema.test.mjs's own (identically named, not
+// shared) helper, since no production or shared-test module exports one.
+function resolveRef(root, ref) {
+  const path = ref.replace(/^#\//, '').split('/');
+  return path.reduce((node, key) => node[key], root);
+}
+function validates(schema, value, root = schema) {
+  if (schema.$ref) return validates(resolveRef(root, schema.$ref), value, root);
+  if (schema.allOf && !schema.allOf.every((part) => validates(part, value, root))) return false;
+  if (schema.anyOf && !schema.anyOf.some((part) => validates(part, value, root))) return false;
+  if (schema.oneOf && schema.oneOf.filter((part) => validates(part, value, root)).length !== 1)
+    return false;
+  if (schema.not && validates(schema.not, value, root)) return false;
+  if (schema.const !== undefined && value !== schema.const) return false;
+  if (schema.enum && !schema.enum.includes(value)) return false;
+  const types = schema.type ? (Array.isArray(schema.type) ? schema.type : [schema.type]) : [];
+  const matches = (type) =>
+    (type === 'null' && value === null) ||
+    (type === 'array' && Array.isArray(value)) ||
+    (type === 'object' && value !== null && typeof value === 'object' && !Array.isArray(value)) ||
+    (type === 'string' && typeof value === 'string') ||
+    (type === 'boolean' && typeof value === 'boolean') ||
+    (type === 'integer' && Number.isInteger(value));
+  if (types.length && !types.some(matches)) return false;
+  if (schema.minimum !== undefined && value < schema.minimum) return false;
+  if (schema.minItems !== undefined && value.length < schema.minItems) return false;
+  if (schema.required && !schema.required.every((key) => Object.hasOwn(value, key))) return false;
+  if (schema.properties && value && typeof value === 'object' && !Array.isArray(value)) {
+    for (const [key, child] of Object.entries(schema.properties))
+      if (Object.hasOwn(value, key) && !validates(child, value[key], root)) return false;
+    if (
+      schema.additionalProperties === false &&
+      Object.keys(value).some((key) => !Object.hasOwn(schema.properties, key))
+    )
+      return false;
+  }
+  return (
+    !schema.items ||
+    !Array.isArray(value) ||
+    value.every((row) => validates(schema.items, row, root))
+  );
+}
+
+const RATE_LIMIT = { cost: 1, remaining: 9999, resetAt: '2026-01-01T00:00:00.000Z' };
+const locks = {
+  acquireLock: () => ({ ok: true, token: 'test-lock' }),
+  releaseLock: () => ({ ok: true }),
+  assertLockOwned: () => true,
+};
+const T = '2026-01-01T00:00:00.000Z';
+const noRows = {
+  fetchPRs: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+  fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+};
+
+// A pre-existing snapshot (schema v2 item shape) already containing one open
+// PR, so a single tick that observes a real change produces a real delta --
+// several triggers below need `deltas.length > 0` to exercise their failure
+// point (e.g. the durable log is only opened when there is something to log).
+function item(fingerprint) {
+  return {
+    fingerprint,
+    context: {},
+    meta: { seenAt: T, changedAt: T, ticksSinceChange: 0, missingTicks: 0, staleEmittedFor: null },
+  };
+}
+const EXISTING_SNAPSHOT = {
+  pr: { 1: item({ state: 'open', updatedAt: T, isDraft: false }) },
+  issue: {},
+  meta: {
+    schemaVersion: 2,
+    ghDeltaVersion: '0.0.0-test',
+    repo: 'o/r',
+    monitorId: 'm',
+    entities: ['pr', 'issue'],
+    scope: 'poll',
+    horizon: T,
+    createdAt: T,
+    updatedAt: T,
+  },
+};
+function changedPr() {
+  return { number: 1, state: 'open', updatedAt: '2026-01-01T01:00:00.000Z', isDraft: false };
+}
+
+// One trigger per ERROR_KINDS entry that is reachable post-resolution (every
+// kind except `config`, which is always a pre-flight failure -- see the
+// dedicated bareError test below). Each returns `{ argv, deps }` for a single
+// real `run()` call that reaches exactly that `results[0].error.kind`.
+const KIND_TRIGGERS = {
+  snapshot: () => ({
+    argv: ['--repo', 'o/r', '--monitor-id', 'm', '--state-file', '/tmp/x.json'],
+    deps: {
+      ...locks,
+      ...noRows,
+      readSnapshot: () => {
+        throw new Error('invalid snapshot JSON');
+      },
+      now: () => T,
+    },
+  }),
+  github: () => ({
+    argv: ['--repo', 'o/r', '--monitor-id', 'm', '--state-file', '/tmp/x.json'],
+    deps: {
+      ...locks,
+      readSnapshot: () => EXISTING_SNAPSHOT,
+      fetchPRs: () => {
+        throw new Error('gh: connection reset');
+      },
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+      now: () => T,
+    },
+  }),
+  io: () => ({
+    argv: ['--repo', 'o/r', '--monitor-id', 'm', '--state-file', '/tmp/x.json'],
+    deps: {
+      acquireLock: () => {
+        throw new Error('EACCES: permission denied');
+      },
+      releaseLock: () => ({ ok: true }),
+      assertLockOwned: () => true,
+      ...noRows,
+      now: () => T,
+    },
+  }),
+  busy: () => ({
+    argv: ['--repo', 'o/r', '--monitor-id', 'm', '--state-file', '/tmp/x.json'],
+    deps: {
+      acquireLock: () => ({ ok: false, reason: 'held' }),
+      releaseLock: () => ({ ok: true }),
+      assertLockOwned: () => true,
+      ...noRows,
+      now: () => T,
+    },
+  }),
+  log: () => ({
+    argv: ['--repo', 'o/r', '--monitor-id', 'm', '--state-file', '/tmp/x.json', '--log'],
+    deps: {
+      ...locks,
+      readSnapshot: () => EXISTING_SNAPSHOT,
+      writeSnapshotAtomic: () => {},
+      fetchPRs: () => ({ rows: [changedPr()], rateLimit: RATE_LIMIT }),
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+      appendDeltaLog: () => {
+        const err = new Error('log record predates schema v2');
+        err.kind = 'log';
+        throw err;
+      },
+      now: () => T,
+    },
+  }),
+  'rate-limit': () => ({
+    argv: [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'm',
+      '--state-file',
+      '/tmp/x.json',
+      '--rate-limit-floor',
+      '100',
+    ],
+    deps: {
+      ...locks,
+      ...noRows,
+      fetchRateLimit: () => ({ remaining: 10, resetAt: T }),
+      now: () => T,
+    },
+  }),
+};
+
+test('KIND_TRIGGERS has exactly one entry per reachable ERROR_KINDS member', () => {
+  // `config` is the one kind with no per-repo trigger -- see the bareError
+  // test below. Any OTHER kind added to ERROR_KINDS without a matching
+  // trigger here fails this assertion, not silently passing uncovered.
+  const reachable = ERROR_KINDS.filter((kind) => kind !== 'config');
+  assert.deepEqual([...reachable].sort(), Object.keys(KIND_TRIGGERS).sort());
+});
+
+for (const kind of ERROR_KINDS) {
+  if (kind === 'config') continue;
+  test(`a real post-resolution "${kind}" failure validates against the json schema`, () => {
+    const { argv, deps } = KIND_TRIGGERS[kind]();
+    const { code, report } = run(argv, deps);
+    assert.equal(report.results[0].error.kind, kind, `must actually trigger kind "${kind}"`);
+    assert.ok(
+      [1, 2].includes(code),
+      `a real error tick must exit transient (1) or permanent (2), got ${code}`,
+    );
+    assert.ok(validates(schemaFor('json'), report), `"${kind}" failure must validate`);
+  });
+}
+
+test('a real post-resolution failure validates against the compact and ndjson schemas too', async () => {
+  const { argv, deps } = KIND_TRIGGERS.snapshot();
+  for (const format of ['compact', 'ndjson']) {
+    const result = await runCommand([...argv, '--format', format], deps);
+    const records =
+      format === 'compact'
+        ? [JSON.parse(result.output)]
+        : result.output
+            .trim()
+            .split('\n')
+            .map((line) => JSON.parse(line));
+    for (const record of records) assert.ok(validates(schemaFor(format), record));
+  }
+});
+
+test('the pre-flight config error (bareError, no repo ever resolved) validates against every format', async () => {
+  for (const format of ['json', 'compact', 'ndjson']) {
+    const result = await runCommand(['--unknown-flag', '--format', format], { now: () => T });
+    assert.equal(result.code, 2);
+    const records =
+      format === 'ndjson'
+        ? result.output
+            .trim()
+            .split('\n')
+            .map((line) => JSON.parse(line))
+        : [JSON.parse(result.output)];
+    for (const record of records) {
+      if (format === 'json') assert.equal(record.kind, 'config');
+      assert.ok(validates(schemaFor(format), record), `config bareError invalid under ${format}`);
+    }
+  }
+});
+
+test('baseline, real deltas, and a no-change tick each validate against every format, single- and multi-repo', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gh-delta-schema-coverage-'));
+  try {
+    const stateFile = join(dir, 'single.json');
+    const argv = (extra = []) => [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'm',
+      '--state-file',
+      stateFile,
+      ...extra,
+    ];
+
+    // baseline
+    const baseline = await runCommand(argv(), {
+      ...noRows,
+      now: () => T,
+    });
+    assert.equal(baseline.code, 0);
+    assert.ok(validates(schemaFor('json'), baseline.report));
+
+    // real deltas
+    const withDeltas = await runCommand(argv(), {
+      fetchPRs: () => ({ rows: [changedPr()], rateLimit: RATE_LIMIT }),
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+      now: () => '2026-01-01T01:00:00.000Z',
+    });
+    assert.equal(withDeltas.code, 10);
+    assert.ok(validates(schemaFor('json'), withDeltas.report));
+    for (const format of ['compact', 'ndjson']) {
+      const rendered = await runCommand(argv(['--format', format]), {
+        fetchPRs: () => ({ rows: [changedPr()], rateLimit: RATE_LIMIT }),
+        fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+        now: () => '2026-01-01T01:00:00.000Z',
+      });
+      const records =
+        format === 'compact'
+          ? [JSON.parse(rendered.output)]
+          : rendered.output
+              .trim()
+              .split('\n')
+              .map((line) => JSON.parse(line));
+      for (const record of records) assert.ok(validates(schemaFor(format), record));
+    }
+
+    // no-change tick
+    const noChange = await runCommand(argv(), {
+      fetchPRs: () => ({ rows: [changedPr()], rateLimit: RATE_LIMIT }),
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+      now: () => '2026-01-01T02:00:00.000Z',
+    });
+    assert.equal(noChange.code, 0);
+    assert.deepEqual(noChange.report.deltas, []);
+    assert.ok(validates(schemaFor('json'), noChange.report));
+
+    // multi-repo, real deltas
+    const multiStateDir = join(dir, 'multi');
+    const multi = await runCommand(
+      ['--repo', 'o/one,o/two', '--monitor-id', 'm', '--state-dir', multiStateDir],
+      {
+        ...locks,
+        fetchPRs: (repo) => ({
+          rows: repo === 'o/one' ? [changedPr()] : [],
+          rateLimit: RATE_LIMIT,
+        }),
+        fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+        now: () => T,
+        env: { GH_DELTA_NO_REGISTRY: '1' },
+      },
+    );
+    assert.equal(multi.report.results.length, 2);
+    assert.ok(validates(schemaFor('json'), multi.report));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
