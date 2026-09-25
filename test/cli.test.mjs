@@ -11,6 +11,7 @@ import { run, runCommand } from '../lib/cli.mjs';
 import { outpostSignature } from '../lib/outpost.mjs';
 import { prFingerprint } from '../lib/fingerprint.mjs';
 import { DELTA_DETAIL_FIELDS_BY_CLASS } from '../lib/contract.mjs';
+import { markTerminalIgnored } from '../lib/watch.mjs';
 
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -1190,6 +1191,119 @@ test('a marker write failure fails the tick instead of publishing an unmarked te
     existsSync(entry),
     true,
     'the marker recorded on retry must protect the entry, not just the failed attempt',
+  );
+});
+
+// The concurrency defect: `watch add`/`rm` never touch the state-file lock
+// this tick holds throughout -- only the per-entry lock, a genuinely
+// separate resource (see the code comment above the marker-write block).
+// A concurrent `watch add` replacing this entry mid-tick is therefore real,
+// not theoretical. Case 1: the replacement lands BEFORE the mark call reads
+// the file, so markTerminalIgnored's own byte comparison correctly returns
+// false -- previously silently ignored. The tick must fail rather than
+// publish a terminal snapshot for a transition nothing now protects.
+test('a watch entry replaced concurrently just before it is marked fails the tick, not silently', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-race-before-mark-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const merged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
+  const d = deps([[]], { existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: [merged], rateLimit: RATE_LIMIT });
+  // Simulate a concurrent `watch add pr:42 --until closed` landing between
+  // watchFiles being read at tick start and the mark call: the real
+  // markTerminalIgnored, called against the ORIGINAL (now stale) bytes,
+  // correctly observes the mismatch and returns false.
+  d.markTerminalIgnored = (path, bytes, ignoredAt) => {
+    writeFileSync(
+      path,
+      '{"entity":"pr","number":42,"until":"closed","addedAt":"2026-07-01T00:05:00.000Z"}\n',
+    );
+    return markTerminalIgnored(path, bytes, ignoredAt);
+  };
+  const { code, report } = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      state,
+      '--watch-dir',
+      watch,
+      '--ignore-classes',
+      'merged',
+    ],
+    d,
+  );
+  assert.equal(code, 1);
+  assert.equal(report.results[0].error.kind, 'busy');
+  assert.equal(d.writes, 0, 'the snapshot must not advance past an unmarked filtered transition');
+  // The concurrent replacement itself is untouched -- our own write never
+  // even attempted to clobber it (markTerminalIgnored's own compare fenced
+  // that off).
+  assert.equal(JSON.parse(readFileSync(entry, 'utf8')).until, 'closed');
+});
+
+// Case 2: the mark itself SUCCEEDS, but a replacement lands in the gap
+// between that success and the snapshot publish -- possible precisely
+// because addWatch always builds a fresh entry object when replacing,
+// never preserving `ignoredTerminalAt` from the entry it replaces. Nothing
+// about a successful mark alone proves it is STILL there by the time the
+// snapshot commits. The re-verify pass immediately before publication must
+// catch this and fail the tick, not the mark-write loop (which already
+// succeeded and has no reason to know about a race that happens after it
+// returns).
+test('a watch entry replaced concurrently AFTER a successful mark, before publication, fails the tick', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-race-after-mark-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const merged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
+  const d = deps([[]], { existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: [merged], rateLimit: RATE_LIMIT });
+  // The real mark succeeds first, THEN a concurrent `watch add` (simulated)
+  // wipes it -- exactly what addWatch's replace path does, since it never
+  // carries `ignoredTerminalAt` forward.
+  d.markTerminalIgnored = (path, bytes, ignoredAt) => {
+    const marked = markTerminalIgnored(path, bytes, ignoredAt);
+    writeFileSync(
+      path,
+      '{"entity":"pr","number":42,"until":"closed","addedAt":"2026-07-01T00:05:00.000Z"}\n',
+    );
+    return marked;
+  };
+  const { code, report } = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      state,
+      '--watch-dir',
+      watch,
+      '--ignore-classes',
+      'merged',
+    ],
+    d,
+  );
+  assert.equal(code, 1);
+  assert.equal(report.results[0].error.kind, 'busy');
+  assert.equal(
+    d.writes,
+    0,
+    'a mark that was wiped before publication must not let the snapshot advance either',
   );
 });
 
