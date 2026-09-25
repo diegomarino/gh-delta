@@ -15,6 +15,7 @@ test('structured errors always carry a useful recovery hint', () => {
     fetchPRs: () => {
       throw new Error('network down');
     },
+    env: { GH_DELTA_NO_REGISTRY: '1' },
   });
   const hint = enveloped.report.results[0].error.hint;
   assert.equal(typeof hint, 'string');

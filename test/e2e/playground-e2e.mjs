@@ -254,7 +254,7 @@ export async function main() {
     const baseBranch = ensureBaseCommit(cloneDir);
 
     const baseline = runDelta(repo, monitorId, stateDir);
-    if (baseline.code !== 0 || baseline.report.baseline !== true) {
+    if (baseline.code !== 0 || baseline.report.results?.[0]?.baseline !== true) {
       throw new Error(`expected baseline exit 0; got ${baseline.code} ${baseline.report.summary}`);
     }
     log(`baseline: ${baseline.report.summary}`);

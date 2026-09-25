@@ -60,7 +60,10 @@ test('configuration supplies detector outpost settings to the delivery boundary'
   const result = await runWithOutpost([], {
     cwd: () => '/repo',
     homedir: () => '/home',
-    env: {},
+    // This resolves a real repo through a real detector tick below, so
+    // without GH_DELTA_NO_REGISTRY it writes a real breadcrumb into the
+    // developer's ~/.local/state/gh-delta/registry.
+    env: { GH_DELTA_NO_REGISTRY: '1' },
     configReadFileSync: (path) => {
       if (path === '/repo/.gh-delta.json')
         return JSON.stringify({

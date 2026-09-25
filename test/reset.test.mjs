@@ -160,6 +160,7 @@ test('a tick contending for the lock during reset gets busy; once reset complete
             fetchPRs: () => [pr],
             fetchIssues: () => [],
             now: () => '2026-09-20T12:00:01.000Z',
+            env: { GH_DELTA_NO_REGISTRY: '1' },
           },
         );
         try {
@@ -184,6 +185,7 @@ test('a tick contending for the lock during reset gets busy; once reset complete
       fetchPRs: () => [pr],
       fetchIssues: () => [],
       now: () => '2026-09-20T12:00:02.000Z',
+      env: { GH_DELTA_NO_REGISTRY: '1' },
     },
   );
   assert.equal(after.code, 0);

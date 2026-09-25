@@ -139,7 +139,7 @@ test('contract-baseline: run1 seeds a baseline with no deltas', async () => {
       fetchPRs: () => ({ rows: observation.pr, rateLimit: null }),
       fetchIssues: () => ({ rows: observation.issue, rateLimit: null }),
       now: () => '2026-01-01T00:00:00Z',
-      env: {},
+      env: { GH_DELTA_NO_REGISTRY: '1' },
     });
     assert.equal(result.code, 0);
     assert.equal(result.report.results[0].baseline, true);
@@ -178,7 +178,7 @@ test('contract-baseline: run2 reports real deltas against the prior snapshot', a
       fetchPRs: () => ({ rows: observation.pr, rateLimit: null }),
       fetchIssues: () => ({ rows: observation.issue, rateLimit: null }),
       now: () => '2026-01-01T01:00:00Z',
-      env: {},
+      env: { GH_DELTA_NO_REGISTRY: '1' },
     });
     assert.equal(result.code, 10);
     assert.equal(result.report.deltas.length, 2);
@@ -210,7 +210,7 @@ test('contract-baseline: run3 is a no-change tick with zero deltas', async () =>
       fetchPRs: () => ({ rows: observation.pr, rateLimit: null }),
       fetchIssues: () => ({ rows: observation.issue, rateLimit: null }),
       now: () => '2026-01-01T02:00:00Z',
-      env: {},
+      env: { GH_DELTA_NO_REGISTRY: '1' },
     });
     assert.equal(result.code, 0);
     assert.deepEqual(result.report.deltas, []);

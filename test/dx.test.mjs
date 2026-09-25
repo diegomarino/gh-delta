@@ -17,15 +17,23 @@ test('init writes durable project config only after a successful baseline and gi
       writeFileSync: (_path, contents) => {
         written = JSON.parse(contents);
       },
+      // Schema v2: `tick()` is the real detector `run()`, whose report carries
+      // baseline/stateFile per-repo under `results[]`, never at the top level.
       tick: () => ({
         code: 0,
-        report: { stateFile: '/work/.gh-delta/state.json', baseline: true },
+        report: { results: [{ stateFile: '/work/.gh-delta/state.json', baseline: true }] },
       }),
     },
   );
   assert.equal(result.code, 0);
   assert.deepEqual(written, { repo: 'o/r', 'state-dir': '/work/.gh-delta', 'monitor-id': 'main' });
   assert.match(result.report.nextCommand, /^gh-delta$/);
+  // Regression: initializeMonitor once read the pre-R3 top-level
+  // report.stateFile/report.baseline, which the v2 detector report never
+  // populates -- init's own report silently echoed stateFile: undefined and
+  // baseline: false on every real run, however the baseline actually went.
+  assert.equal(result.report.stateFile, '/work/.gh-delta/state.json');
+  assert.equal(result.report.baseline, true);
 });
 
 test('init config write is exclusive and fsynced before close', () => {
