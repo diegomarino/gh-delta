@@ -361,23 +361,73 @@ test('baseline, real deltas, and a no-change tick each validate against every fo
     assert.deepEqual(noChange.report.deltas, []);
     assert.ok(validates(schemaFor('json'), noChange.report));
 
-    // multi-repo, real deltas
-    const multiStateDir = join(dir, 'multi');
-    const multi = await runCommand(
-      ['--repo', 'o/one,o/two', '--monitor-id', 'm', '--state-dir', multiStateDir],
-      {
+    // multi-repo, real deltas, in every format. A fresh state-dir with no
+    // seeding tick first is a BASELINE (0 deltas, code 0) -- exactly the
+    // no-real-content trap this whole file exists to close (see the
+    // baseline/no-change tests above): validating only json here also left
+    // compact/ndjson's own multi-repo divergence (compactReport deliberately
+    // OMITS `baseline` once repos.length > 1 -- see lib/compact-output.mjs)
+    // completely unchecked, so a regression making `baseline` required in
+    // either agent schema would have passed. Each format gets its own
+    // state-dir, seeded first, then a real change tick, with the exit-code
+    // and non-empty-deltas assertions that make silently-empty output fail
+    // loudly instead of validating a trivial case.
+    for (const format of ['json', 'compact', 'ndjson']) {
+      const multiStateDir = join(dir, `multi-${format}`);
+      const multiArgv = (extra = []) => [
+        '--repo',
+        'o/one,o/two',
+        '--monitor-id',
+        'm',
+        '--state-dir',
+        multiStateDir,
+        ...extra,
+      ];
+      const multiDeps = (rows) => ({
         ...locks,
-        fetchPRs: (repo) => ({
-          rows: repo === 'o/one' ? [changedPr()] : [],
-          rateLimit: RATE_LIMIT,
-        }),
+        fetchPRs: (repo) => ({ rows: repo === 'o/one' ? rows : [], rateLimit: RATE_LIMIT }),
         fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
-        now: () => T,
         env: { GH_DELTA_NO_REGISTRY: '1' },
-      },
-    );
-    assert.equal(multi.report.results.length, 2);
-    assert.ok(validates(schemaFor('json'), multi.report));
+      });
+      const seed = await runCommand(multiArgv(), { ...multiDeps([]), now: () => T });
+      assert.equal(seed.code, 0);
+      assert.equal(seed.report.results.length, 2);
+      const rendered = await runCommand(multiArgv(format === 'json' ? [] : ['--format', format]), {
+        ...multiDeps([changedPr()]),
+        now: () => '2026-01-01T01:00:00.000Z',
+      });
+      assert.equal(
+        rendered.code,
+        10,
+        `multi-repo ${format}: must observe a real delta, not a stale or baseline tick`,
+      );
+      if (format === 'json') {
+        assert.equal(rendered.report.results.length, 2);
+        assert.equal(rendered.report.deltas.length > 0, true);
+        assert.ok(validates(schemaFor('json'), rendered.report));
+        continue;
+      }
+      const records =
+        format === 'compact'
+          ? [JSON.parse(rendered.output)]
+          : rendered.output
+              .trim()
+              .split('\n')
+              .map((line) => JSON.parse(line));
+      const envelope = format === 'compact' ? records[0] : records.at(-1); // ndjson's `end` record
+      assert.equal(
+        Object.hasOwn(envelope, 'baseline'),
+        false,
+        `${format}: must omit baseline for a >1 repo report, per compactReport`,
+      );
+      const deltaRecords =
+        format === 'compact' ? records[0].deltas : records.filter((r) => r.type === 'delta');
+      assert.ok(
+        deltaRecords.length > 0,
+        `${format}: multi-repo tick must actually carry a delta record to validate`,
+      );
+      for (const record of records) assert.ok(validates(schemaFor(format), record));
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
