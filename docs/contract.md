@@ -563,7 +563,7 @@ subpaths; the package root is intentionally not exported.
 | `gh-delta/dx`             | `initializeMonitor`, `writeConfigDurableNoOverwrite`, `runDoctorChecks`, `explainDelta`, `isTemporaryPath`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Local init, diagnostics, and persisted-delta explanation      |
 | `gh-delta/compact-output` | `compactDelta`, `compactReport`, `ndjsonReport`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Agent-oriented compact/NDJSON render shapes                   |
 | `gh-delta/schema`         | `schemaFor`, `DELTA_CORE_REQUIRED`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Draft-2020-12 JSON Schema generation for `gh-delta schema`    |
-| `gh-delta/watch`          | `watchDirPath`, `parseWatchItem`, `watchFilename`, `readWatch`, `addWatch`, `listWatch`, `removeWatch`, `removeWatchUnchanged`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Bounded-watch directory entries for `--until`                 |
+| `gh-delta/watch`          | `watchDirPath`, `parseWatchItem`, `watchFilename`, `readWatch`, `addWatch`, `listWatch`, `removeWatch`, `removeWatchUnchanged`, `markTerminalIgnored`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Bounded-watch directory entries for `--until`                 |
 | `gh-delta/contract`       | `REPORT_SCHEMA_VERSION`, `OUTPOST_SCHEMA_VERSION`, `REPORT_FIELDS`, `REPORT_RESULT_FIELDS`, `DELTA_FIELDS`, `DELTA_CONTEXT_FIELDS`, `DELTA_DETAIL_FIELDS`, `DELTA_DETAIL_FIELDS_BY_CLASS`, `DELTA_CLASSES`, `ERROR_KINDS`, `LIST_REPORT_FIELDS`, `LIST_MONITOR_FIELDS`, `REGISTRY_ENTRY_FIELDS`, `DELTA_SUMMARY_FIELDS`, `DELTA_SUMMARY_ENUMS`, `DELTA_LOG_RECORD_FIELDS`, `CURSOR_FILE_FIELDS`, `READ_REPORT_FIELDS`, `READ_CURSOR_FIELDS`, `COMPACT_REPORT_FIELDS`, `COMPACT_BOUNDS_FIELDS`, `RESET_REPORT_FIELDS`, `CURSOR_SET_REPORT_FIELDS`, `CURSOR_SET_CURSOR_FIELDS`, `WAIT_REPORT_FIELDS`, `AGENT_COMPACT_REPORT_FIELDS`, `AGENT_COMPACT_DELTA_FIELDS`, `AGENT_NDJSON_END_FIELDS` | Runtime contract constants and field catalogs                 |
 
 Behavioral notes for consumers:
@@ -1701,10 +1701,25 @@ break that guarantee.
 
 `--watch-dir <path>` and `--number <positive,...>` are mutually exclusive
 post-fetch selectors. Watch entries are canonical `{entity,number,until,addedAt}`
-JSON files and malformed entries are permanent configuration errors before a
-GitHub call or snapshot write. `watch add|rm|ls` are local-only commands;
-terminal watched items are removed only after their final delta and successful
-snapshot write, guarded against concurrent replacement.
+JSON files, plus two OPTIONAL fields (`repo`, for a scoped entry, and
+`ignoredTerminalAt`, an ISO timestamp -- see below), and malformed entries are
+permanent configuration errors before a GitHub call or snapshot write.
+`watch add|rm|ls` are local-only commands; terminal watched items are removed
+only after their final delta and successful snapshot write, guarded against
+concurrent replacement.
+
+`ignoredTerminalAt` is written the moment a watched item's terminal
+transition (a merge or close matching its `until`) is observed but
+suppressed by `--ignore-classes`/`--only-classes`: without it, a LATER,
+unrelated delta on the same (now-terminal) item -- which carries no
+transition class of its own, since a state does not transition twice --
+would silently clean up the entry despite the filter's intent. Once
+recorded, the entry stays protected for as long as, and only as long as,
+the CURRENT invocation's filters still target that terminal class; dropping
+the filter lets the very next delta clean it up. An entry written before
+this field existed simply lacks it, which means exactly "no terminal
+transition has ever been ignored for this entry" -- not an invalid or
+stale shape to migrate or reject.
 
 With an explicit `--watch-dir`, a validated list with zero to ten entries, only
 `pr` entities, and an `--entities` selection that includes `pr` automatically

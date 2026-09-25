@@ -935,6 +935,83 @@ test('an already-terminal item with only a metadata-only delta (broad polling) i
   assert.equal(existsSync(prEntry), false, 'an already-terminal item must not strand its entry');
 });
 
+// The hole reported in the fourth round on this predicate: 'already-terminal
+// from.state implies eligible' (the fix above) cannot by itself distinguish
+// "terminal before the watch existed" from "terminal transition ignored
+// while watched" -- both look identical in the CURRENT tick's data. Closing
+// it needs new persisted state: lib/watch.mjs's `ignoredTerminalAt`,
+// written the moment a genuine transition's terminal class is filtered
+// (see lib/cli.mjs's watchedTerminalTransitionFilteredThisTick), and
+// checked against the CURRENT invocation's filters on every later tick
+// (isTerminalCleanupEligible) so the entry stays protected for as long as
+// -- and only as long as -- the same filter keeps applying.
+test('--ignore-classes merged protects a --until merged entry across multiple subsequent ticks, until the filter is dropped', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-ignored-sticky-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const merged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
+  const mergedRelabeledA = {
+    ...merged,
+    updatedAt: '2026-07-01T12:00:00Z',
+    labels: [{ name: 'a' }],
+  };
+  const mergedRelabeledB = {
+    ...merged,
+    updatedAt: '2026-07-01T13:00:00Z',
+    labels: [{ name: 'b' }],
+  };
+  const rowSeq = [[merged], [mergedRelabeledA], [mergedRelabeledB]];
+  const d = deps([[]], { existing: { pr: { 42: item(prFingerprint(basePr)) }, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: rowSeq.shift(), rateLimit: RATE_LIMIT });
+  const argvWith = (extra = []) => [
+    '--repo',
+    'o/r',
+    '--monitor-id',
+    'main',
+    '--state-file',
+    state,
+    '--watch-dir',
+    watch,
+    ...extra,
+  ];
+
+  // Tick 1: the merge itself, under --ignore-classes merged. Its ONLY class
+  // is `merged`, so filtering drops the WHOLE delta -- an empty report, but
+  // the entry must survive AND get marked (this is the moment that trace
+  // would otherwise be lost forever).
+  const tick1 = run(argvWith(['--ignore-classes', 'merged']), d);
+  assert.equal(tick1.code, 0);
+  assert.deepEqual(tick1.report.deltas, []);
+  assert.equal(existsSync(entry), true, 'the filtered merge itself must not strand the entry');
+  assert.equal(
+    JSON.parse(readFileSync(entry, 'utf8')).ignoredTerminalAt !== undefined,
+    true,
+    'the merge tick must durably record that its transition was ignored',
+  );
+
+  // Tick 2: an unrelated metadata-only delta, SAME filter still active. This
+  // is the reported hole: from.state is already 'merged', and the surviving
+  // delta carries no `merged` class at all (the state did not change again)
+  // -- without the recorded mark, this would have silently cleaned up.
+  const tick2 = run(argvWith(['--ignore-classes', 'merged']), d);
+  assert.equal(tick2.code, 10);
+  assert.deepEqual(tick2.report.deltas[0].classes, ['relabeled']);
+  assert.equal(existsSync(entry), true, 'protection must survive a second, unrelated tick');
+
+  // Tick 3: the filter is DROPPED. The mark no longer protects anything --
+  // cleanup fires on the very next delta, whatever its class.
+  const tick3 = run(argvWith(), d);
+  assert.equal(tick3.code, 10);
+  assert.deepEqual(tick3.report.deltas[0].classes, ['relabeled']);
+  assert.equal(existsSync(entry), false, 'dropping the filter must clean up on the next tick');
+});
+
 test('watch text commands render watch-specific output, never detector deltas', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-watch-text-'));
   for (const argv of [
