@@ -229,6 +229,23 @@ test('a real post-resolution failure validates against the compact and ndjson sc
             .trim()
             .split('\n')
             .map((line) => JSON.parse(line));
+    // `errors` is NOT a required property of either schema (a healthy tick
+    // legitimately carries none), so schema conformance alone passes just as
+    // well on a record that silently dropped the error entirely as on one
+    // that carries it -- proven live: neutering compactErrors() to always
+    // return undefined left this test green. Assert the error content
+    // actually survived the format transformation, not merely that whatever
+    // remains is schema-shaped.
+    const withErrors = format === 'compact' ? records[0] : records.at(-1);
+    assert.ok(
+      Array.isArray(withErrors.errors) && withErrors.errors.length > 0,
+      `${format}: the triggered error must actually appear in errors[]`,
+    );
+    assert.equal(
+      withErrors.errors[0].kind,
+      'snapshot',
+      `${format}: errors[0].kind must survive transformation`,
+    );
     for (const record of records) assert.ok(validates(schemaFor(format), record));
   }
 });
@@ -246,6 +263,14 @@ test('the pre-flight config error (bareError, no repo ever resolved) validates a
         : [JSON.parse(result.output)];
     for (const record of records) {
       if (format === 'json') assert.equal(record.kind, 'config');
+      // Same reasoning as the triggered-failure test above: compact/ndjson's
+      // `errors` is optional in the schema, so assert the config error's
+      // kind actually made it into errors[], not just that the envelope
+      // happens to validate without it.
+      if (format !== 'json') {
+        assert.ok(Array.isArray(record.errors) && record.errors.length > 0);
+        assert.equal(record.errors[0].kind, 'config');
+      }
       assert.ok(validates(schemaFor(format), record), `config bareError invalid under ${format}`);
     }
   }
@@ -281,12 +306,35 @@ test('baseline, real deltas, and a no-change tick each validate against every fo
     });
     assert.equal(withDeltas.code, 10);
     assert.ok(validates(schemaFor('json'), withDeltas.report));
+    // Each format gets its OWN state file and its own baseline -> change tick
+    // pair, not a rerun against `stateFile` above: reusing it here once
+    // persisted the exact `changedPr()` fingerprint via the json run, so both
+    // the compact and ndjson reruns silently observed a no-change tick (0
+    // deltas) instead of the real delta this block claims to validate --
+    // compact validated only an empty `deltas: []`, and ndjson validated
+    // only its `end` record, never a delta record at all. The exit-code and
+    // non-empty-deltas assertions below are what make that regress loudly
+    // instead of silently, should a future edit reintroduce shared state.
     for (const format of ['compact', 'ndjson']) {
-      const rendered = await runCommand(argv(['--format', format]), {
-        fetchPRs: () => ({ rows: [changedPr()], rateLimit: RATE_LIMIT }),
-        fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
-        now: () => '2026-01-01T01:00:00.000Z',
-      });
+      const formatStateFile = join(dir, `format-${format}.json`);
+      const seed = await runCommand(
+        ['--repo', 'o/r', '--monitor-id', 'm', '--state-file', formatStateFile],
+        { ...noRows, now: () => T },
+      );
+      assert.equal(seed.code, 0);
+      const rendered = await runCommand(
+        ['--repo', 'o/r', '--monitor-id', 'm', '--state-file', formatStateFile, '--format', format],
+        {
+          fetchPRs: () => ({ rows: [changedPr()], rateLimit: RATE_LIMIT }),
+          fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+          now: () => '2026-01-01T01:00:00.000Z',
+        },
+      );
+      assert.equal(
+        rendered.code,
+        10,
+        `${format}: must observe a real delta, not a stale or no-change tick`,
+      );
       const records =
         format === 'compact'
           ? [JSON.parse(rendered.output)]
@@ -294,6 +342,12 @@ test('baseline, real deltas, and a no-change tick each validate against every fo
               .trim()
               .split('\n')
               .map((line) => JSON.parse(line));
+      const deltaRecords =
+        format === 'compact' ? records[0].deltas : records.filter((r) => r.type === 'delta');
+      assert.ok(
+        deltaRecords.length > 0,
+        `${format}: must actually carry at least one delta record to validate`,
+      );
       for (const record of records) assert.ok(validates(schemaFor(format), record));
     }
 
