@@ -935,6 +935,108 @@ test('an already-terminal item with only a metadata-only delta (broad polling) i
   assert.equal(existsSync(prEntry), false, 'an already-terminal item must not strand its entry');
 });
 
+// The round-7 defect: classifyPr classifies by DESTINATION state only
+// (`if (oldFp.state !== fp.state) { if (fp.state === 'merged') ... }`), not
+// by requiring the prior state to be open. A PR observed `closed`, then
+// reopened and merged between polls, still emits `merged` -- a genuine
+// transition -- even though `from.state` was already terminal (`closed`).
+// The round-6 predicate wrongly treated ANY terminal from.state as "no
+// transition happened", silently skipping the marker for this exact case.
+test('a PR observed closed, then reopened and merged between polls, under --ignore-classes merged with a surviving class: marked and kept', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-closed-to-merged-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const previouslyClosedFp = prFingerprint({ ...basePr, state: 'closed' });
+  const mergedAndRelabeled = {
+    ...basePr,
+    state: 'merged',
+    updatedAt: '2026-07-01T11:00:00Z',
+    labels: [{ name: 'shipped' }],
+  };
+  const d = deps([[mergedAndRelabeled]], {
+    existing: { pr: { 42: item(previouslyClosedFp) }, issue: {} },
+  });
+  d.fetchPRsByNumber = () => ({ rows: [mergedAndRelabeled], rateLimit: RATE_LIMIT });
+  const { code, report } = run(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      state,
+      '--watch-dir',
+      watch,
+      '--ignore-classes',
+      'merged',
+    ],
+    d,
+  );
+  assert.equal(code, 10);
+  assert.deepEqual(report.deltas[0].classes, ['relabeled']);
+  assert.equal(existsSync(entry), true, 'closed -> merged is a real transition; it must be marked');
+  assert.equal(
+    JSON.parse(readFileSync(entry, 'utf8')).ignoredTerminalAt !== undefined,
+    true,
+    'the closed -> merged transition must be recorded as ignored',
+  );
+});
+
+test('a PR observed closed, then reopened and merged with the delta ENTIRELY dropped by the filter: marked and kept on a later tick', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-closed-to-merged-dropped-'));
+  const state = join(dir, 'state.json');
+  const watch = join(dir, 'watch');
+  mkdirSync(watch);
+  const entry = join(watch, 'pr-42.json');
+  writeFileSync(
+    entry,
+    '{"entity":"pr","number":42,"until":"merged","addedAt":"2026-07-01T00:00:00.000Z"}\n',
+  );
+  const previouslyClosedFp = prFingerprint({ ...basePr, state: 'closed' });
+  const merged = { ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' };
+  const mergedRelabeled = { ...merged, updatedAt: '2026-07-01T12:00:00Z', labels: [{ name: 'a' }] };
+  const rowSeq = [[merged], [mergedRelabeled]];
+  const d = deps([[]], { existing: { pr: { 42: item(previouslyClosedFp) }, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: rowSeq.shift(), rateLimit: RATE_LIMIT });
+  const argvWith = () => [
+    '--repo',
+    'o/r',
+    '--monitor-id',
+    'main',
+    '--state-file',
+    state,
+    '--watch-dir',
+    watch,
+    '--ignore-classes',
+    'merged',
+  ];
+
+  // Tick 1: the closed -> merged transition, its only class `merged`, fully
+  // dropped by the filter (nothing else survives).
+  const tick1 = run(argvWith(), d);
+  assert.equal(tick1.code, 0);
+  assert.deepEqual(tick1.report.deltas, []);
+  assert.equal(existsSync(entry), true);
+  assert.equal(
+    JSON.parse(readFileSync(entry, 'utf8')).ignoredTerminalAt !== undefined,
+    true,
+    'a fully dropped closed -> merged transition must still be marked',
+  );
+
+  // Tick 2: a later, unrelated metadata-only delta under the SAME filter --
+  // the mark recorded on tick 1 must protect it.
+  const tick2 = run(argvWith(), d);
+  assert.equal(tick2.code, 10);
+  assert.deepEqual(tick2.report.deltas[0].classes, ['relabeled']);
+  assert.equal(existsSync(entry), true, 'the mark must protect the entry on the later tick');
+});
+
 // The hole reported in the fourth round on this predicate: 'already-terminal
 // from.state implies eligible' (the fix above) cannot by itself distinguish
 // "terminal before the watch existed" from "terminal transition ignored
