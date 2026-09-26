@@ -5,6 +5,11 @@ pushes are not accepted.
 
 ## Development Setup
 
+Use Node 22 or newer; Node 24 is recommended for development. CI runs tests
+on Node 22 and runs the suite with coverage on Node 24. Lint, formatting,
+skill discovery, generated skill verification, and package checks run once
+on Node 24. Distribution checks also use Node 24.
+
 ```bash
 npm install
 ```

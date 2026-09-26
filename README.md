@@ -61,7 +61,7 @@ uses your shared GitHub GraphQL rate limit, so treat this as a short demo.
 
 ## Install
 
-Node 18+ and authenticated GitHub CLI access are required.
+Node 22+ and authenticated GitHub CLI access are required.
 
 ```bash
 # npm binary

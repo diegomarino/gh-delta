@@ -109,7 +109,7 @@ including when stdout is a TTY.
 `gh-delta doctor` is read-only and emits one row each for gh installation,
 safe `gh auth status --active --hostname <host> --json hosts` authentication,
 whether `read:org` is needed, GraphQL quota/reset, state-directory writability,
-Node >=18, registry collisions, and temporary-state risk. Exit 0 means required
+Node >=22, registry collisions, and temporary-state risk. Exit 0 means required
 checks pass; exit 1 means one failed. `gh-delta explain <id>` requires exactly
 one explicit `--log-file` or `--report-file`, applies `diffFingerprint` locally,
 and never creates hidden last-report state or contacts GitHub. `gh-delta demo`
@@ -1542,7 +1542,7 @@ document and [`gh-delta reset`](#gh-delta-reset)).
 
 ## Platform Notes
 
-`gh-delta` targets Node >= 18 on any OS, but the guarantees above are
+`gh-delta` targets Node >= 22 on any OS, but the guarantees above are
 POSIX-worded. CI exercises Linux only; macOS shares the POSIX semantics.
 On **Windows** the behavior degrades explicitly, never silently:
 
