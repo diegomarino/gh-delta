@@ -9,13 +9,13 @@ import {
 
 // compactDelta echoes delta.from/delta.to verbatim under --full (see below);
 // it never inspects their shape. A real delta reaching compactReport has
-// already been stripped to the bare compared fingerprint by runSingle (see
-// lib/cli.mjs) -- not the full snapshot item -- but since this is a pure
+// already been stripped to the bare compared fingerprint by runDetector (see
+// lib/cli/detector.mjs) -- not the full snapshot item -- but since this is a pure
 // passthrough, wrapping it here does not affect what these tests verify.
 const item = (fingerprint) => ({ fingerprint, context: {}, meta: {} });
 
 // compactDelta is a pure pick: `context`/`summary`/`changed` must already be
-// precomputed on the delta object (lib/cli.mjs's enrichDelta does this at
+// precomputed on the delta object (lib/cli/delta-details.mjs's enrichDelta does this at
 // assembly time), never recomputed here.
 const delta = {
   id: 'x',

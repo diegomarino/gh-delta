@@ -26,17 +26,27 @@ downstream decisions belong to the caller.
 flowchart LR
     Sched[scheduler / watch loop] --> Bin[gh-delta.mjs]
     Bin --> CLI[lib/cli.mjs]
-    CLI --> Config[lib/config.mjs]
-    CLI --> DX[lib/dx.mjs]
-    CLI --> Args[lib/args.mjs]
-    CLI --> GH[lib/gh.mjs]
-    CLI --> Snap[lib/snapshot.mjs]
-    CLI --> Log[lib/deltalog.mjs]
-    CLI --> Det[lib/detect.mjs] --> FP[lib/fingerprint.mjs]
-    CLI --> Out[lib/outpost.mjs]
-    CLI --> Txt[lib/text-output.mjs]
-    CLI --> Lst[lib/list.mjs]
-    CLI --> Reg[lib/registry.mjs]
+    CLI --> Run[cli/runner.mjs]
+    Run --> Commands[cli/commands/*]
+    Run --> Tick[cli/detector.mjs]
+    Run --> Multi[cli/multi-repo.mjs]
+    Run --> Render[cli/render.mjs]
+    Run --> Out[lib/outpost.mjs]
+    Run --> Config[cli/config.mjs]
+    Commands --> Config
+    Commands --> DX[lib/dx.mjs]
+    Commands --> Tick
+    Config --> ConfigCore[lib/config.mjs]
+    Tick --> Parse[cli/parse.mjs]
+    Tick --> Attention[cli/attention.mjs]
+    Tick --> Details[cli/delta-details.mjs]
+    Tick --> GH[lib/gh.mjs]
+    Tick --> Snap[lib/snapshot.mjs]
+    Tick --> Log[lib/deltalog.mjs]
+    Tick --> Det[lib/detect.mjs] --> FP[lib/fingerprint.mjs]
+    Tick --> Reg[lib/registry.mjs]
+    Render --> Txt[lib/text-output.mjs]
+    Commands --> Lst[lib/list.mjs]
     GH -. gh api graphql .-> GitHub[(GitHub GraphQL)]
     Out -. HTTP POST .-> Endpoint[(outpost endpoint)]
     Snap -. read/atomic write .-> FS[(snapshot file)]
@@ -55,7 +65,7 @@ wake-ups.
 `lib/config.mjs` is a pre-parse adapter for detector, wait, status, and the DX
 commands, restricted to the public flags accepted by that command. It reads
 local JSON configuration and environment defaults, then appends those existing
-long flags; validation remains in `lib/cli.mjs`, so flags and configuration
+long flags; validation remains in the internal CLI modules, so flags and configuration
 cannot drift into separate semantics or become explain positionals. No
 configuration is present means no argv rewrite. `lib/dx.mjs` keeps `init`,
 `doctor`, and `explain` policy testable:
@@ -182,10 +192,48 @@ The impure edges are isolated:
   one versioned source of truth.
 - `entrypoint.mjs` detects direct CLI invocation through real paths so npm/npx
   `.bin` symlinks start the package bin correctly.
-- `lib/cli.mjs` wires CLI flags, GitHub fetches, snapshot I/O, output formats,
-  outposts, and exit codes.
+- `lib/cli.mjs` is a compatibility facade with explicit re-exports only.
+  Its internal modules under `lib/cli/` own orchestration and rendering.
 - `gh-delta.mjs` is the executable bin entrypoint only. It delegates to
   `lib/cli.mjs` and does not define a public import surface.
+
+### Internal CLI modules
+
+Paths below are relative to `lib/cli/`. These modules are internal; the package
+export map and the seven exports from the `lib/cli.mjs` facade stay unchanged.
+
+| Module                     | Responsibility                                                                                                                  |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `parse.mjs`                | Option tables, parser/help/version handling, format sniffing, numeric and selection parsing, and explicit repository selection. |
+| `errors.mjs`               | Error exit codes, hints, and structured error results.                                                                          |
+| `config.mjs`               | Configuration dependency selection, monitor selection, registry opt-out policy, and configured command parsing.                 |
+| `delta-details.mjs`        | Delta summary lines and field details.                                                                                          |
+| `attention.mjs`            | Pure attention filters, ignored-author decisions, and terminal-watch cleanup eligibility.                                       |
+| `commands/watch.mjs`       | Watch add, remove, and list handlers.                                                                                           |
+| `commands/inventory.mjs`   | List and status handlers, including status refresh.                                                                             |
+| `commands/cursor.mjs`      | Read and cursor-set handlers with shared cursor-lock options.                                                                   |
+| `commands/maintenance.mjs` | Log compaction, reset, and snapshot deletion.                                                                                   |
+| `commands/dx.mjs`          | Init, doctor, explain, demo, and command-generation helpers.                                                                    |
+| `commands/schema.mjs`      | Schema command handler.                                                                                                         |
+| `commands/wait.mjs`        | Wait validation, matching, heartbeat handling, and bounded-wait orchestration.                                                  |
+| `detector.mjs`             | One synchronous repository transaction, including locks, persistence, watch cleanup, and enrichment.                            |
+| `multi-repo.mjs`           | Aggregate errors, multi-repository preflight validation, and report envelopes.                                                  |
+| `runner.mjs`               | Dispatch, configuration call sites, serial repository execution, outpost delivery, and command execution.                       |
+| `render.mjs`               | Completed command results with stdout/stderr strings for each output format.                                                    |
+
+Imports flow from the facade to the runner, from the runner to command handlers,
+the detector and rendering, and from those modules to shared policies and the
+existing core modules. Internal modules never import the facade or runner.
+The runner supplies `{ run }` to `init` and `wait`, allowing their nested ticks
+to use the same injected dependencies without an import cycle. Status refresh
+calls the detector directly because it needs the raw per-repository result.
+
+`run` remains synchronous. `runWithOutpost` and `runCommand` remain asynchronous.
+Dependency defaults are evaluated at their original command call sites. The
+detector keeps lock acquisition, ownership checks, durable-log publication,
+snapshot publication, watch cleanup, enrichment, and final lock release in one
+function and in their existing order. Single-repository validation and
+multi-repository preflight validation remain separate.
 
 ## Package Surface
 
