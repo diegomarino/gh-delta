@@ -105,6 +105,27 @@ test('init refuses an existing derived snapshot before invoking its tick', () =>
   assert.equal(ticked, false);
 });
 
+for (const major of [18, 20, 21, 22, 24]) {
+  test(`doctor ${major < 22 ? 'rejects' : 'accepts'} Node ${major}`, () => {
+    const result = runDoctorChecks(
+      { repo: 'o/r', stateDir: '/state', monitorId: 'main' },
+      {
+        ghInstalled: () => true,
+        ghAuthenticated: () => true,
+        orgScope: () => ({ needed: false, ok: true }),
+        graphqlRateLimit: () => null,
+        stateDir: () => ({ exists: true, writable: true }),
+        nodeVersion: () => major,
+        registryEntries: () => [],
+        isTemporaryPath: () => false,
+      },
+    );
+    assert.equal(result.code, major < 22 ? 1 : 0);
+    assert.equal(result.report.checks.find((row) => row.name === 'node').ok, major >= 22);
+    assert.match(result.report.checks.find((row) => row.name === 'node').detail, /requires >=22/);
+  });
+}
+
 test('doctor emits one read-only row per check and fails when a required check fails', () => {
   const result = runDoctorChecks(
     { repo: 'o/r', stateDir: '/state', monitorId: 'main' },
@@ -113,7 +134,7 @@ test('doctor emits one read-only row per check and fails when a required check f
       ghAuthenticated: () => true,
       graphqlRateLimit: () => ({ remaining: 99, resetAt: '2026-01-01T00:00:00Z' }),
       stateDir: () => ({ exists: true, writable: true }),
-      nodeVersion: () => 20,
+      nodeVersion: () => 22,
       registryEntries: () => [],
       isTemporaryPath: () => false,
     },
@@ -143,7 +164,7 @@ test('doctor makes a missing organization scope a required failure', () => {
       orgScope: () => ({ needed: true, ok: false }),
       graphqlRateLimit: () => null,
       stateDir: () => ({ exists: true, writable: true }),
-      nodeVersion: () => 20,
+      nodeVersion: () => 22,
       registryEntries: () => [],
       isTemporaryPath: () => false,
     },

@@ -4,7 +4,7 @@
 set -eu
 
 if ! command -v node >/dev/null 2>&1; then
-  echo 'gh-delta requires Node.js >= 18; install Node and retry.' >&2
+  echo 'gh-delta requires Node.js >= 22; install Node and retry.' >&2
   exit 1
 fi
 
@@ -12,8 +12,8 @@ node_major=$(node -p "process.versions.node.split('.')[0]" 2>/dev/null) || {
   echo 'gh-delta could not determine the installed Node.js version.' >&2
   exit 1
 }
-if [ "$node_major" -lt 18 ]; then
-  echo "gh-delta requires Node.js >= 18; found Node.js $node_major." >&2
+if [ "$node_major" -lt 22 ]; then
+  echo "gh-delta requires Node.js >= 22; found Node.js $node_major." >&2
   exit 1
 fi
 

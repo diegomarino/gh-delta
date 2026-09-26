@@ -64,6 +64,6 @@ produces — the fingerprint reads these exact fields:
 
 ## Requirements
 
-Node >= 18, `gh` authenticated, run from a gh-delta checkout (or install the
+Node >= 22, `gh` authenticated, run from a gh-delta checkout (or install the
 published package and switch to the `gh-delta/*` imports shown in the file
 header).

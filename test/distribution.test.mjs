@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { accessSync, readFileSync, constants } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { accessSync, readFileSync, constants, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import prettier from 'prettier';
 
@@ -122,6 +124,21 @@ test('gh extension shim is executable, guards Node, and identifies its channel',
   );
 });
 
+for (const major of [18, 20, 21]) {
+  test(`gh extension rejects Node ${major} before launching the CLI`, (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'gh-delta-old-node-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    writeFileSync(join(dir, 'node'), `#!/bin/sh\nprintf '${major}\\n'\n`, { mode: 0o755 });
+    const result = spawnSync('/bin/sh', [fileURLToPath(path('gh-delta')), '--version'], {
+      env: { ...process.env, PATH: dir },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /requires Node.js >= 22/);
+  });
+}
+
 test('Claude marketplace metadata points at the root plugin', () => {
   const marketplace = JSON.parse(readFileSync(path('.claude-plugin/marketplace.json'), 'utf8'));
   assert.equal(marketplace.name, 'gh-delta');
@@ -141,7 +158,7 @@ test('release metadata and CI enforce distributable agent and extension installs
     { type: 'json', path: '.claude-plugin/plugin.json', jsonpath: '$.version' },
   ]);
   const ci = readFileSync(path('.github/workflows/ci.yml'), 'utf8');
-  assert.match(ci, /name: Verify skill discovery\n\s+if: matrix\.node-version == '20\.x'/);
+  assert.match(ci, /name: Verify skill discovery\n\s+if: matrix\.node-version == '24\.x'/);
   assert.match(ci, /listing="\$\(npx skills add \.\/ --list 2>&1\)"/);
   assert.match(ci, /grep -Fq -- 'gh-delta'/);
   assert.match(ci, /skill discovery did not list gh-delta/);

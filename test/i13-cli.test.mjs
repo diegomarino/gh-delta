@@ -87,7 +87,7 @@ test('doctor uses injectable read-only gh checks and returns one-line check rows
     },
     fetchRateLimit: () => ({ remaining: 10, resetAt: '2026-01-01T01:00:00Z' }),
     inspectStateDir: () => ({ exists: true, writable: true }),
-    nodeVersion: () => 20,
+    nodeVersion: () => 22,
     registryEntries: () => [],
     isTemporaryPath: () => false,
   });
@@ -114,7 +114,7 @@ test('doctor rejects a successful JSON status without an active authenticated ac
         : '',
     fetchRateLimit: () => null,
     inspectStateDir: () => ({ exists: true, writable: true }),
-    nodeVersion: () => 20,
+    nodeVersion: () => 22,
     registryEntries: () => [],
     isTemporaryPath: () => false,
   });
@@ -195,7 +195,7 @@ test('doctor text output retains every check as one truthful row', async () => {
           : '',
       fetchRateLimit: () => ({ remaining: 10, resetAt: '2026-01-01T01:00:00Z' }),
       inspectStateDir: () => ({ exists: true, writable: true }),
-      nodeVersion: () => 20,
+      nodeVersion: () => 22,
       registryEntries: () => [],
       isTemporaryPath: () => false,
     },
