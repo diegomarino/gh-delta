@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { run } from '../lib/cli.mjs';
-import { RESET_REPORT_FIELDS } from '../lib/contract.mjs';
+import { RESET_REPORT_FIELDS, RESET_TARGET_FIELDS } from '../lib/contract.mjs';
 import { economicalSnapshotPath, writeSnapshotAtomic } from '../lib/snapshot.mjs';
 import { appendDeltaLog } from '../lib/deltalog.mjs';
 
@@ -151,6 +151,38 @@ test('reset --state-dir removes an economical watch snapshot and its durable log
   ]);
 });
 
+test('reset --state-dir --entities issue preserves an economical PR watch snapshot', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-reset-watch-'));
+  const stateFile = economicalSnapshotPath(REPO, MONITOR, 'pr', dir);
+  const logFile = seedMonitor(stateFile);
+  const manifestFile = `${logFile}.published.json`;
+
+  const result = run(
+    [
+      'reset',
+      '--repo',
+      REPO,
+      '--monitor-id',
+      MONITOR,
+      '--state-dir',
+      dir,
+      '--entities',
+      'issue',
+      '--yes',
+    ],
+    { now: () => '2026-09-20T12:00:00.000Z' },
+  );
+
+  assert.equal(result.code, 0);
+  assert.deepEqual(
+    result.report.targets.map((target) => target.scope),
+    ['poll'],
+  );
+  assert.equal(existsSync(stateFile), true);
+  assert.equal(existsSync(logFile), true);
+  assert.equal(existsSync(manifestFile), true);
+});
+
 test('reset --yes on a clean/never-run monitor is a no-op that still exits 0', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-reset-'));
   const stateFile = join(dir, 'never-existed.json');
@@ -173,6 +205,13 @@ test('reset report covers exactly RESET_REPORT_FIELDS', () => {
   assert.deepEqual(Object.keys(result.report).sort(), [...RESET_REPORT_FIELDS].sort());
   assert.equal(result.report.stateFile, stateFile);
   assert.match(result.report.logFile, /\.deltalog\.ndjson$/);
+});
+
+test('reset --help-json publishes the nested target report fields', () => {
+  const result = run(['reset', '--help-json']);
+  assert.equal(result.code, 0);
+  const help = JSON.parse(result.report);
+  assert.deepEqual(help.output.targetFields, RESET_TARGET_FIELDS);
 });
 
 test('reset is excluded from config application, so a GH_DELTA_* env var carrying detector-only flags does not break it', () => {
