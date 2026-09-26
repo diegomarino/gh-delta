@@ -4,6 +4,18 @@ All notable changes to this package will be documented here.
 
 This project follows semantic versioning.
 
+## [0.8.1](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.8.0...gh-delta-v0.8.1) (2026-09-26)
+
+
+### Bug Fixes
+
+* reset economical watch state ([#90](https://github.com/diegomarino/gh-delta/issues/90)) ([3c3d068](https://github.com/diegomarino/gh-delta/commit/3c3d0681d71a3659534db06fed03b434ba619150))
+
+
+### Code Refactoring
+
+* **cli:** split orchestration into internal modules ([#88](https://github.com/diegomarino/gh-delta/issues/88)) ([2cd2613](https://github.com/diegomarino/gh-delta/commit/2cd26139ecbf4031268f5ee0ef29ddeaceeaa417))
+
 ## [0.8.0](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.7.1...gh-delta-v0.8.0) (2026-09-26)
 
 
