@@ -108,11 +108,28 @@ gh-delta wait \
   --progress
 ```
 
-On exit `10`, inspect `reason` and the observed summaries in
-`lastReport.deltas[].summary` before deciding what to do. `wait` has its own
-envelope; `lastReport` is the nested detector report and can be null when no
-tick completed. Exit `0` is timeout/signal, not success. This workflow observes only; it
-does not authorize merge or review actions.
+On exit `10`, inspect `reason` and the returned `deltas[].summary`, matching
+the target repository and item. The deltas accumulate across the wait, so
+earlier entries can describe earlier states. The public `wait` report does
+not expose `lastReport`.
+
+An `already-satisfied` result can have an empty `deltas` array: the condition
+may have matched the snapshot on the first tick. To inspect the open PR's
+locally observed state, use the same monitor and watch scope:
+
+```bash
+gh-delta status \
+  --repo "$REPO" --monitor-id "$MONITOR_ID" \
+  --state-dir "$STATE_DIR" --watch-dir "$WATCH_DIR" \
+  --entities pr --format json
+```
+
+Read the matching `items[].summary`. `status` lists only open items; for a
+closed or merged PR, inspect `pr["42"].fingerprint` (substituting the target
+number) in the snapshot named by its `stateFile`. This is the latest local
+observation, not a new GitHub fetch. Exit `0` from `wait` means timeout/signal,
+not success. This workflow observes only; it does not authorize merge or
+review actions.
 
 ## Pattern 3: monitor a search or selected PR set
 
