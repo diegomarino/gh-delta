@@ -95,9 +95,11 @@ documented recovery: it takes the monitor's state-file lock for the whole
 operation and deletes the snapshot file, the log's published manifest, and
 the log's data file in one lock-scoped step, so a concurrent tick sees either
 the fully intact pre-reset state or the fully clean post-reset state, never a
-half-deleted monitor. The next run then seeds a fresh baseline. This is also
-the upgrade path for every pre-schema-v2 (v1) monitor — there is nothing to
-migrate in place.
+half-deleted monitor. With `--state-dir`, it also locks and resets the
+economical `watch-pr` sibling; inspect `targets[].removed` and
+`targets[].missing` to see exactly what happened. The next run then seeds a
+fresh baseline. This is also the upgrade path for every pre-schema-v2 (v1)
+monitor — there is nothing to migrate in place.
 
 **Snapshot file grows over time on a long-lived monitor.**
 Snapshot files retain dormant closed items and archived `presumed-deleted`

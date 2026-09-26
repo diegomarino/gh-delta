@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   formatListTextOutput,
   formatReadTextOutput,
+  formatResetTextOutput,
   formatStatusTextOutput,
   formatTextOutput,
 } from '../lib/text-output.mjs';
@@ -399,4 +400,35 @@ test('text error renderers retain structured recovery hints without altering suc
     },
   });
   assert.match(aggregate, /hint: fix disk/);
+});
+
+test('reset text output reports removed and absent target files', () => {
+  const output = formatResetTextOutput({
+    now: () => '2026-09-20T12:00:00.000Z',
+    report: {
+      at: '2026-09-20T12:00:00.000Z',
+      summary: 'reset 3 file(s)',
+      stateFile: '/tmp/state/poll.json',
+      logFile: '/tmp/state/poll.ndjson',
+      targets: [
+        {
+          scope: 'poll',
+          stateFile: '/tmp/state/poll.json',
+          logFile: '/tmp/state/poll.ndjson',
+          removed: [],
+          missing: ['/tmp/state/poll.json', '/tmp/state/poll.ndjson'],
+        },
+        {
+          scope: 'watch-pr',
+          stateFile: '/tmp/state/watch.json',
+          logFile: '/tmp/state/watch.ndjson',
+          removed: ['/tmp/state/watch.json', '/tmp/state/watch.ndjson'],
+          missing: [],
+        },
+      ],
+    },
+  });
+
+  assert.match(output, /poll: 0 removed, 2 absent/);
+  assert.match(output, /watch-pr: 2 removed, 0 absent/);
 });

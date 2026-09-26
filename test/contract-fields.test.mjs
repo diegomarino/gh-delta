@@ -757,6 +757,8 @@ const COVERAGE = {
   COMPACT_BOUNDS_FIELDS: (f) =>
     new Set([...Object.keys(f.compact.report.previous), ...Object.keys(f.compact.report.retained)]),
   RESET_REPORT_FIELDS: (f) => Object.keys(f.reset.report),
+  RESET_TARGET_FIELDS: (f) =>
+    new Set(f.reset.report.targets.flatMap((target) => Object.keys(target))),
   CURSOR_SET_REPORT_FIELDS: (f) => Object.keys(f.cursorSet.report),
   CURSOR_SET_CURSOR_FIELDS: (f) => Object.keys(f.cursorSet.report.cursor),
   // waitFailed's report is NOT this shape: `reason: 'error'` takes runWait's
