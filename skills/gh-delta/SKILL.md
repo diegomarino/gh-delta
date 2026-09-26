@@ -16,6 +16,19 @@ pre-0.7 monitor, read
 Before parsing reports or adapting a consumer, read
 [references/patterns.md](references/patterns.md#consume-schema-v2-output).
 
+## Check CLI availability
+
+Before starting monitoring, run `gh-delta --version`. If it exits `0`, use
+`gh-delta`. Otherwise, try `gh delta --version`; if it exits `0`, use the
+GitHub CLI extension launcher `gh delta`. Use the successful launcher for
+all subsequent commands, including scheduled commands. The examples in this
+skill and its references use `gh-delta`; replace that command prefix with
+`gh delta` when using the extension, keeping the arguments unchanged.
+
+If both probes fail, tell the user that the CLI availability check failed,
+include the actual errors, and stop before creating monitoring state or
+schedules. Installing this skill does not install the CLI.
+
 ## Start with the monitoring intent
 
 For the usual request—“monitor the repository I am working in”—resolve the
