@@ -16,6 +16,13 @@ pre-0.7 monitor, read
 Before parsing reports or adapting a consumer, read
 [references/patterns.md](references/patterns.md#consume-schema-v2-output).
 
+## Check CLI availability
+
+Before starting monitoring, run `gh-delta --version` and require exit code `0`.
+If the command is missing or fails, tell the user that the CLI availability
+check failed, include the actual error, and stop before creating monitoring
+state or schedules. Installing this skill does not install the CLI.
+
 ## Start with the monitoring intent
 
 For the usual request—“monitor the repository I am working in”—resolve the
