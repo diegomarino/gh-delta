@@ -4,6 +4,13 @@ All notable changes to this package will be documented here.
 
 This project follows semantic versioning.
 
+## [0.7.1](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.7.0...gh-delta-v0.7.1) (2026-09-26)
+
+
+### Bug Fixes
+
+* **skill:** update operating guide for schema v2 ([#83](https://github.com/diegomarino/gh-delta/issues/83)) ([ce0ff8e](https://github.com/diegomarino/gh-delta/commit/ce0ff8ef01f834ba971a227248ba3fca9034b130))
+
 ## [0.7.0](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.6.1...gh-delta-v0.7.0) (2026-09-25)
 
 
