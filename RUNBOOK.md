@@ -287,28 +287,15 @@ developer polling loops or webhook-driven automation.
   selection: the snapshot filename is scoped by the canonical entity set, and
   omitting `--entities` reverts to the default `pr,issue`. Against a monitor
   running with a narrower selection (e.g. `--entities pr`) that resolves to a
-  different, likely nonexistent, snapshot path — deleting it is a silent
-  no-op (exit `0`) that leaves the actual corrupt snapshot in place, so the
-  next tick fails with the same exit `2`.
-  **`--watch-dir` monitors are a separate case `--entities` cannot fix.** A
-  monitor run with `--watch-dir` and at most ten PR-only watch entries stores
-  its state at an "economical" path that `reset` cannot derive: `reset` has
-  no `--watch-dir` flag and always computes the standard entity-scoped path,
-  never the watch one. For such a monitor the real snapshot lives at
-  `<state-file>.watch.json` (if the monitor was run with an explicit
-  `--state-file`) or at
-  `<state-dir>/repo-<owner%2Fname>__monitor-<id>__watch-pr.json` (if the
-  monitor was run with `--state-dir`). Recover it by pointing `reset`
-  directly at that path with `--state-file`, bypassing derivation entirely —
-  `--entities`/`--state-dir` will not find it:
-  `gh-delta reset --repo <owner/name> --monitor-id <id> --state-file
-<the-watch-snapshot-path-above> --yes` (this also clears the matching
-  `<path>.deltalog.ndjson`). A success exit `0` from `reset` is never proof
-  the right file was cleared — it exits `0` just as happily when the target
-  path doesn't exist — so if the next tick repeats the same exit `2`, that is
-  the signal you targeted the wrong path, not that the corruption persisted
-  through a real reset. See
-  [Troubleshooting](docs/troubleshooting.md) for the full recovery flow.
+  different snapshot path. Inspect `targets[].removed` and
+  `targets[].missing` to confirm the selected path before the next tick.
+  **`--watch-dir` monitors with `--state-dir` are reset automatically.**
+  `reset` resolves both the standard entity-scoped path and the economical
+  `__watch-pr.json` sibling, locks both, and reports every removed or absent
+  path in `targets`. For an explicit `--state-file`, the path stays exact;
+  pass the actual `<state-file>.watch.json` when resetting that explicit watch
+  state. Inspect `targets[].removed` rather than relying only on exit `0`.
+  See [Troubleshooting](docs/troubleshooting.md) for the full recovery flow.
 - Keep scheduler logs for tick output. A delta is acknowledged by snapshot
   advancement before any downstream action completes.
 - If using `--outpost-url`, make the endpoint idempotent and deduplicate by

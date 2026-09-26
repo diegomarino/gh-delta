@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { run } from '../lib/cli.mjs';
 import { RESET_REPORT_FIELDS } from '../lib/contract.mjs';
-import { writeSnapshotAtomic } from '../lib/snapshot.mjs';
+import { economicalSnapshotPath, writeSnapshotAtomic } from '../lib/snapshot.mjs';
 import { appendDeltaLog } from '../lib/deltalog.mjs';
 
 const REPO = 'o/r';
@@ -103,6 +103,54 @@ test('reset --yes deletes the snapshot, the log manifest, and the log data file'
   assert.equal(existsSync(manifestFile), false);
 });
 
+test('reset --state-dir removes an economical watch snapshot and its durable log', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-reset-watch-'));
+  const stateFile = economicalSnapshotPath(REPO, MONITOR, 'pr', dir);
+  const logFile = seedMonitor(stateFile);
+  const manifestFile = `${logFile}.published.json`;
+
+  const result = run(
+    [
+      'reset',
+      '--repo',
+      REPO,
+      '--monitor-id',
+      MONITOR,
+      '--state-dir',
+      dir,
+      '--entities',
+      'pr',
+      '--yes',
+    ],
+    { now: () => '2026-09-20T12:00:00.000Z' },
+  );
+
+  assert.equal(result.code, 0);
+  assert.equal(existsSync(stateFile), false);
+  assert.equal(existsSync(logFile), false);
+  assert.equal(existsSync(manifestFile), false);
+  assert.deepEqual(result.report.targets, [
+    {
+      scope: 'poll',
+      stateFile: join(dir, 'repo-o%2Fr__monitor-m__pr.json'),
+      logFile: join(dir, 'log-o%2Fr__monitor-m__pr.ndjson'),
+      removed: [],
+      missing: [
+        join(dir, 'repo-o%2Fr__monitor-m__pr.json'),
+        join(dir, 'log-o%2Fr__monitor-m__pr.ndjson'),
+        join(dir, 'log-o%2Fr__monitor-m__pr.ndjson.published.json'),
+      ],
+    },
+    {
+      scope: 'watch-pr',
+      stateFile,
+      logFile,
+      removed: [stateFile, logFile, manifestFile],
+      missing: [],
+    },
+  ]);
+});
+
 test('reset --yes on a clean/never-run monitor is a no-op that still exits 0', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-reset-'));
   const stateFile = join(dir, 'never-existed.json');
@@ -168,6 +216,7 @@ test('a tick contending for the lock during reset gets busy; once reset complete
         } catch (err) {
           if (err?.code !== 'ENOENT') throw err;
         }
+        return true;
       },
     },
   );
