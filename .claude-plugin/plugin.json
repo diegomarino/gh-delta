@@ -1,5 +1,5 @@
 {
   "name": "gh-delta",
   "description": "Decision guide for observing GitHub PR and issue deltas with gh-delta.",
-  "version": "0.7.1"
+  "version": "0.8.0"
 }
