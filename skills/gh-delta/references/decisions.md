@@ -31,15 +31,20 @@
   items updated since the horizon. It never publishes a partial snapshot.
 - Use `--rate-limit-floor` when several monitors share one GitHub token and
   exhausting the shared GraphQL budget would be worse than a delayed tick.
+- Measure actual query cost from JSON `results[].rateLimit`, which accumulates
+  the repository's GraphQL calls. It can be null when no query was made.
 
 ## Baselines and failures
 
 - A missing snapshot creates a baseline; it is not evidence that every
   pre-existing item was just created.
-- Exit `1` is retryable and leaves the previous snapshot unchanged. Preserve
-  the state and retry on the next scheduled slot.
+- Exit `1` is retryable and leaves the failed repository's previous snapshot
+  unchanged. Preserve the state and retry on the next scheduled slot; inspect
+  `results[].error` because other repositories may already have succeeded.
 - Exit `2` is permanent for that invocation. Diagnose configuration or snapshot
   bytes before retrying; make a recovery copy before any intentional reseed.
+- For pre-0.7 snapshots or logs, follow the
+  [upgrade recovery procedure](troubleshooting.md#upgrade-from-pre-07-state).
 - `status` is local-only unless `--refresh` is explicit. `doctor`, `list`,
   `read`, `explain`, and watch-list management have documented read/local
   boundaries—use them before adding another GitHub fetch.
@@ -56,6 +61,10 @@
   advancing before downstream handling is acceptable.
 - Use stable `delta.id` for idempotency. A sequence number is a journal
   position, not a cross-system exactly-once key.
+- Upgrade monitors that share a deduplication consumer together: delta IDs are
+  stable within a gh-delta version, but fingerprint changes across releases
+  can change them. Outpost v2 sends the report delta under `delta`; use
+  `deliveryId` for send-attempt identity and `delta.id` for change identity.
 
 ## Safety boundary
 

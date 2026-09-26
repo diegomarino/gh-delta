@@ -1,5 +1,51 @@
 # Troubleshooting and recovery
 
+## Upgrade from pre-0.7 state
+
+gh-delta 0.7.0 uses report and snapshot schema v2. Old snapshots and durable
+logs are rejected with exit `2` (`snapshot` or `log`); there is no automatic
+migration. Changing a version field by hand does not convert the data.
+Watch entries and cursor files have their own formats; a report schema bump
+does not mean rewriting their version fields.
+
+1. Stop the exact producer and its consumers through their owning launcher.
+   Inspect `gh-delta list --state-dir "$STATE_DIR" --format json`, the last
+   report, and the error to identify the affected snapshot and log. Preserve
+   a recovery copy of the snapshot, log manifest, physical log data, and each
+   consumer cursor before an intentional reset.
+2. When the requested recovery authorizes discarding that monitor's baseline
+   and log, use `gh-delta reset` with its exact repository, monitor ID, entity
+   selection, and state path. For an ordinary producer whose state is derived
+   from `$STATE_DIR`, the command is:
+
+   ```bash
+   gh-delta reset \
+     --repo "$REPO" --monitor-id "$MONITOR_ID" \
+     --entities pr --state-dir "$STATE_DIR" --yes --format json
+   ```
+
+   Match `--entities` to the existing producer. For an explicit snapshot,
+   replace `--state-dir` with `--state-file` and the exact path. An economical
+   watch uses a separate snapshot (`__watch-pr.json` or `.watch.json`);
+   `reset` does not accept `--watch-dir`. Pass the watch's actual snapshot
+   path with `--state-file` and verify that its derived log matches the
+   producer's recorded log path. `--yes` confirms deletion of the selected snapshot,
+   log manifest, and physical log data; this is not a conversion or dry run.
+
+3. A consumer cursor beyond the reset log's empty tail is rejected. Archive
+   the exact stale cursor and recreate it at sequence `0`, bound to the
+   producer's actual log path, using the consumer pattern in `patterns.md`.
+   Coordinate this with downstream acknowledgement; resetting does not
+   preserve replay history.
+4. Run the producer with its original scope to establish a fresh baseline.
+   Confirm schema v2 and the matching JSON `results[]` row's `baseline` and
+   absence of `error` before resuming its schedule and consumers. The baseline
+   is normally quiet; `--baseline-emit-state` intentionally emits existing
+   open items and can trigger downstream work.
+
+For exact reset and cursor behavior, consult the
+[reset contract](https://github.com/diegomarino/gh-delta/blob/main/docs/contract.md#gh-delta-reset).
+
 ## `gh: HTTP 502`
 
 Treat an HTTP 502 as a transient GitHub fetch failure first. `gh-delta` exits
