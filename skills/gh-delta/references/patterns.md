@@ -108,9 +108,28 @@ gh-delta wait \
   --progress
 ```
 
-On exit `10`, inspect `reason` and the observed summary before deciding what to
-do. Exit `0` is timeout/signal, not success. This workflow observes only; it
-does not authorize merge or review actions.
+On exit `10`, inspect `reason` and the returned `deltas[].summary`, matching
+the target repository and item. The deltas accumulate across the wait, so
+earlier entries can describe earlier states. The public `wait` report does
+not expose `lastReport`.
+
+An `already-satisfied` result can have an empty `deltas` array: the condition
+may have matched the snapshot on the first tick. To inspect the open PR's
+locally observed state, use the same monitor and watch scope:
+
+```bash
+gh-delta status \
+  --repo "$REPO" --monitor-id "$MONITOR_ID" \
+  --state-dir "$STATE_DIR" --watch-dir "$WATCH_DIR" \
+  --entities pr --format json
+```
+
+Read the matching `items[].summary`. `status` lists only open items; for a
+closed or merged PR, inspect `pr["42"].fingerprint` (substituting the target
+number) in the snapshot named by its `stateFile`. This is the latest local
+observation, not a new GitHub fetch. Exit `0` from `wait` means timeout/signal,
+not success. This workflow observes only; it does not authorize merge or
+review actions.
 
 ## Pattern 3: monitor a search or selected PR set
 
@@ -135,14 +154,18 @@ gh-delta \
   --format compact
 ```
 
-A zero-to-ten PR-only watch list activates one targeted GraphQL request. Issue
+A one-to-ten PR-only watch list activates one targeted GraphQL request; an
+empty list performs no observation query. Issue
 entries, more than ten entries, or `--entities issue` retain broad fetching.
 `--number` is a post-fetch output selector and does not reduce GitHub work.
 Refresh search membership intentionally with `watch add`/`watch rm`; do not let
 an unbounded list accumulate. Use `--until merged` for an integration workflow
-or `--until closed` when an unmerged close is the terminal event. A merged PR
-emits `merged`, not `closed`; remove the opposite terminal outcome during the
-next membership refresh.
+or `--until closed` for either a close or a merge. Cleanup uses terminal state
+on eligible emitted deltas, including a first observation of an already
+terminal item. Attention filters that suppress the terminal transition can
+retain the entry; inspect the filters before treating it as stuck. With
+`--until merged`, remove an unmerged closed PR during membership refresh if
+it no longer belongs in the selection.
 
 ## Pattern 4: one producer, many consumers
 
@@ -157,7 +180,7 @@ gh-delta \
   --log \
   --format json > "$REPORT_DIR/last-tick.json"
 
-LOG=$(jq -r '.results[0].logFile' "$REPORT_DIR/last-tick.json")
+LOG=$(jq -er '.results[0] | select(.error == null) | .logFile // empty' "$REPORT_DIR/last-tick.json") || exit 2
 gh-delta cursor set "$SCENARIO_ROOT/reviewer.cursor.json" 0 --log-file "$LOG"
 ```
 
@@ -227,6 +250,39 @@ moved; that is diagnostic history, not a live monitor. Delete an exact archived
 root only when the user explicitly requests permanent removal and after a
 readback. Never clean with a broad agent-prefix glob.
 
+## Consume schema v2 output
+
+Check the exit code and `schemaVersion === 2` before interpreting a report.
+For ordinary JSON detector output, one repository and many repositories use
+the same `repos`/`results[]` envelope. Read `baseline`, `stateFile`, `logFile`,
+`rateLimit`, and any per-repository `error` from the matching `results[]` row.
+Use `results[0]` only for a known single-repository invocation. `deltas` is
+the flattened collection; route multi-repository deltas using their `repo`.
+Inspect all result rows on a partial failure: successful repositories may
+already have published their snapshots and logs.
+
+A failure before repository execution can instead return a bare error with
+`kind`, `error`, `hint`, and `at`, without `results`. Subcommands such as
+`read`, `status`, and `reset` retain their own command-specific envelopes.
+
+Use `delta.context` for title, URL, author, and PR branch name. Use `classes`
+for change categories, `changed` for the bounded field diff, and `summary`
+for current semantic state. Issue summaries contain `{state}`; a missing
+item has `summary: null`. Fingerprints use lowercase enums and readable
+arrays. `from` and `to` are bare fingerprints, while persisted snapshot
+items have separate `fingerprint`, `context`, and `meta` sections.
+
+Compact output has `counts`, `deltas`, optional `errors`, and `warnings`;
+it does not carry `results[]`. NDJSON ends with one `type: "end"` record
+containing counts, errors when present, warnings, and `exitCode`; inspect
+that record even when earlier delta records were received. Use JSON when
+the consumer needs per-repository state paths or quota measurements.
+
+For exact field definitions, consult the canonical
+[contract](https://github.com/diegomarino/gh-delta/blob/main/docs/contract.md)
+or the local `gh-delta schema --format json|compact|ndjson` command, choosing
+one format. Tolerate additive fields within schema v2.
+
 ## Output choice
 
 - `compact`: bounded self-contained agent input.
@@ -234,7 +290,15 @@ readback. Never clean with a broad agent-prefix glob.
 - `json`: complete integration contract and structured detail.
 - `text`: operator logs, not machine parsing.
 - `--detail`: exact changed fields when the consumer must explain a delta.
-- `delta.summary`: current semantic PR state, always present, derived without a
-  second GitHub fetch (`--summaries` is a deprecated no-op).
-- `--enrich`: fetch review/comment/thread bodies only for matching emitted
-  deltas, after snapshot publication.
+- `--full`: include `from`/`to` in compact or NDJSON when the bounded `changed`
+  diff is insufficient. JSON includes them by default.
+- `delta.summary`: current semantic state, derived without a second GitHub
+  fetch (`--summaries` is a deprecated no-op).
+- `--enrich review,comments,threads`: fetch bodies for matching emitted review,
+  conversation-comment, and unresolved-thread deltas after snapshot publication.
+- `--enrich body,thread-replies`: fetch item bodies for
+  `new`/`first-seen`/`reopened`/`baseline-state`, or reply bodies for
+  `review-comments-added`. Read `flags.md` for bounds and matching rules;
+  enrichment can add GitHub calls and warnings without undoing the snapshot.
+  With `--ignore-authors`, thread replies are also fetched before publication
+  for filtering; that pass does not populate the emitted enrichment.

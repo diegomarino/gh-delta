@@ -10,6 +10,12 @@ license: MIT
 returns durable facts to its caller. It never grants permission to merge,
 comment, close, assign, or otherwise mutate GitHub.
 
+This guide targets gh-delta 0.7.0 and report schema v2. Before resuming a
+pre-0.7 monitor, read
+[references/troubleshooting.md](references/troubleshooting.md#upgrade-from-pre-07-state).
+Before parsing reports or adapting a consumer, read
+[references/patterns.md](references/patterns.md#consume-schema-v2-output).
+
 ## Start with the monitoring intent
 
 For the usual request—“monitor the repository I am working in”—resolve the
@@ -49,7 +55,8 @@ authentication, rate limits, page caps, locks, and snapshot recovery.
   is understood.
 - Branch on exit code before parsing output. For `wait`: `10`
   until/already-satisfied, `0` timeout/signal, `1` retryable failure, `2` fix
-  configuration. Failed ticks do not advance the snapshot.
+  configuration. A failed repository tick does not advance that repository's
+  snapshot; a multi-repository run can still publish successful repositories.
 - For ordinary detector output use `compact` for bounded agent context,
   `ndjson` for streams, JSON for the full integration contract, and `text` for
   operator logs. `wait` accepts JSON only.
