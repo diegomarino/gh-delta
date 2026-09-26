@@ -4,6 +4,22 @@ All notable changes to this package will be documented here.
 
 This project follows semantic versioning.
 
+## [0.8.0](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.7.1...gh-delta-v0.8.0) (2026-09-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **runtime:** Node.js versions below 22 are no longer supported. CI tests Node 22 and Node 24, with shared quality checks and coverage on Node 24.
+
+### Features
+
+* **runtime:** require Node 22 and streamline CI ([#85](https://github.com/diegomarino/gh-delta/issues/85)) ([1b87309](https://github.com/diegomarino/gh-delta/commit/1b8730919f308d4194ce5496879e308c261dcc69))
+
+
+### Bug Fixes
+
+* **skill:** check CLI availability before monitoring ([#87](https://github.com/diegomarino/gh-delta/issues/87)) ([6f5bc55](https://github.com/diegomarino/gh-delta/commit/6f5bc55c033e76955af6b2684b2b2d1c9ae36f25))
+
 ## [0.7.1](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.7.0...gh-delta-v0.7.1) (2026-09-26)
 
 
