@@ -367,7 +367,7 @@
               "maxProperties": 8,
               "propertyNames": {
                 "type": "string",
-                "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,31}$"
+                "pattern": "^(?!(?:until|repo|__proto__|constructor|prototype)$)[A-Za-z][A-Za-z0-9_.-]{0,31}$"
               },
               "additionalProperties": {
                 "type": "string",

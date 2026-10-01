@@ -347,3 +347,24 @@ test('delta schema accepts a legal watch map and rejects size and grammar violat
     false,
   );
 });
+
+test('every delta schema rejects exact reserved label keys and accepts case variants', () => {
+  for (const format of ['json', 'compact', 'ndjson']) {
+    const schema = schemaFor(format);
+    for (const key of ['until', 'repo', '__proto__', 'constructor', 'prototype']) {
+      const labels = { [key]: 'value' };
+      assert.equal(
+        validates(schema.$defs.delta, { ...delta, watch: { labels } }, schema),
+        false,
+        `${format}: reserved ${key}`,
+      );
+    }
+    for (const key of ['Until', 'Repo', 'Constructor', 'Prototype', 'repo.id', 'until-next']) {
+      assert.equal(
+        validates(schema.$defs.delta, { ...delta, watch: { labels: { [key]: 'value' } } }, schema),
+        true,
+        `${format}: legal ${key}`,
+      );
+    }
+  }
+});
