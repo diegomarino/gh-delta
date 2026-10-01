@@ -53,11 +53,17 @@ done
 ```
 
 The first tick establishes the baseline; later ticks report only observed
-changes, such as pending CI becoming green or failed. Quiet ticks are normal:
-even a busy repository cannot guarantee a change to the selected PR every
-minute. The watch directory keeps the query economical by fetching that PR
-directly instead of scanning the repository's full PR history. Each tick still
-uses your shared GitHub GraphQL rate limit, so treat this as a short demo.
+changes, such as pending CI becoming green or failed. The watch directory keeps
+the query economical by fetching that PR directly instead of scanning the
+repository's full PR history. Each tick still uses your shared GitHub GraphQL
+rate limit, so treat this as a short demo.
+
+```sh
+gh-delta watch add pr:3 --until merged --watch-dir ./watch \
+  --label thread=t-0004 --label package=F001-P05
+```
+
+`--label` is local routing on `watch add` ([usage](docs/usage.md)).
 
 ## Install
 

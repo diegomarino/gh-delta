@@ -917,6 +917,13 @@ Each delta — see `DELTA_FIELDS` in `gh-delta/contract`:
   for this delta after snapshot publication — see
   [Opt-in emitted-delta enrichment](#opt-in-emitted-delta-enrichment). Never
   written to snapshots or durable logs.
+- `watch` (object, optional): present on an emitted delta whose effective
+  `(repo, entity, number)` matches a labeled watch entry captured for that tick.
+  Shape is `{ "labels": { "<key>": "<value>", ... } }` with keys in ascending
+  ASCII order. Omitted entirely when the matching entry has no labels. Identical
+  across JSON, compact, NDJSON, log replay, and outpost `delta`. Excluded from
+  `delta.id`. Cursor reads replay the recorded map and do not consult today's
+  watch directory.
 - `staleAt` (string, optional): present only on a `stale` delta — the UTC day
   that triggered it, included in the delta id so distinct periods have
   distinct ids.
@@ -1195,7 +1202,9 @@ Each complete UTF-8 NDJSON line has exactly `seq`, `id`, `detectedAt`, `delta`,
 without re-deriving it from the log's own filename); `seq` starts at 1 and is
 strictly contiguous, and `id === delta.id`. The journal stores the exact
 pre-enrichment delta after attention filters and requested durable decoration;
-transient `--enrich` bodies are never logged. `<logFile>.published.json` is the
+transient `--enrich` bodies are never logged. When the captured watch entry had
+labels, the logged delta includes the same optional `watch.labels` map as the
+report. Cursor reads replay that recorded map. `<logFile>.published.json` is the
 small publication manifest. Manifest v3 — exactly
 `{"version":3,"firstSeq":F,"lastSeq":N,"byteLength":B,"dataFile":"<same-directory filename>"}`
 — is the only supported generation; there is no reader for the older v1
@@ -1673,7 +1682,9 @@ job — do not use one where the other belongs:
   the `id` is recorded, not after. The reference implementation of this rule
   is `examples/outpost-ntfy-receiver/receiver.mjs`'s `shouldForward`: it
   tracks the last `delta.id` per `(repo, entity, number)` and only forwards a
-  payload whose `id` differs from that recorded value.
+  payload whose `id` differs from that recorded value. Optional `delta.watch.labels`
+  is routing context copied from the watch entry; it is identical across JSON,
+  compact, NDJSON, and log replay, and it never participates in `delta.id`.
 - **`deliveryId`** is the identity of **one send attempt**: it is also used
   for **processing idempotency** — the Standard Webhooks `webhook-id` header
   a spec-conformant receiver can use to reject a byte-identical retry of the
@@ -1721,8 +1732,9 @@ break that guarantee.
 
 `--watch-dir <path>` and `--number <positive,...>` are mutually exclusive
 post-fetch selectors. Watch entries are canonical `{entity,number,until,addedAt}`
-JSON files, plus two OPTIONAL fields (`repo`, for a scoped entry, and
-`ignoredTerminalAt`, an ISO timestamp -- see below), and malformed entries are
+JSON files, plus optional `repo` (scoped entry), `ignoredTerminalAt` (ISO timestamp -- see below),
+and `labels` (a sorted string map, omitted when empty). Old binaries reject files
+that contain `labels`. Unlabeled files stay byte-compatible. Malformed entries are
 permanent configuration errors before a GitHub call or snapshot write.
 `watch add|rm|ls` are local-only commands; terminal watched items are removed
 only after their final delta and successful snapshot write, guarded against

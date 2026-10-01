@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { compactReport, ndjsonReport } from '../lib/compact-output.mjs';
+import { compactDelta, compactReport, ndjsonReport } from '../lib/compact-output.mjs';
 import {
   AGENT_COMPACT_REPORT_FIELDS,
   AGENT_COMPACT_DELTA_FIELDS,
@@ -91,6 +91,19 @@ test('compactReport emits self-contained agent deltas only', () => {
     ],
     warnings: [],
   });
+});
+
+test('compactDelta copies watch.labels and omits an absent watch', () => {
+  const labeled = compactDelta({ ...delta, watch: { labels: { thread: 't-0004' } } });
+  assert.deepEqual(labeled.watch, { labels: { thread: 't-0004' } });
+  assert.equal(Object.hasOwn(compactDelta(delta), 'watch'), false);
+  const ndjson = ndjsonReport(baseReport({ deltas: [labeled] }), 10, []);
+  const record = JSON.parse(ndjson.trim().split('\n')[0]);
+  assert.equal(record.type, 'delta');
+  assert.deepEqual(record.watch.labels, { thread: 't-0004' });
+  const end = JSON.parse(ndjson.trim().split('\n').at(-1));
+  assert.equal(end.type, 'end');
+  assert.equal(Object.hasOwn(end, 'watch'), false);
 });
 
 test('compactDelta includes from/to only under the full option', () => {
@@ -196,6 +209,7 @@ test('AGENT_COMPACT_*/AGENT_NDJSON_END_FIELDS catalogs match every key compact/n
     firstObserved: true,
     seq: 3,
     enrichment: { threadReplies: [] },
+    watch: { labels: { package: 'F001-P05', thread: 't-0004' } },
   };
   const happyReport = compactReport(baseReport({ deltas: [fullDelta] }), 10, [], {
     detail: true,

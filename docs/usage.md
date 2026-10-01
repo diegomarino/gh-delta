@@ -372,7 +372,21 @@ cannot otherwise be verified instead fails open with an explicit warning.
 ## Watch a small set of items
 
 `gh-delta watch add pr:42 --until merged --watch-dir ./state/watch` creates an
-atomic local entry; `watch ls` and `watch rm pr:42` never contact GitHub. A tick
+atomic local entry; `watch ls` and `watch rm pr:42` never contact GitHub.
+
+```sh
+gh-delta watch add pr:3 --until merged --watch-dir ./watch \
+  --label thread=t-0004 --label package=F001-P05
+gh-delta watch add pr:3 --until merged --watch-dir ./watch --label thread=t-0005
+```
+
+The second command replaces the entire label map, preserves `addedAt` and any
+`ignoredTerminalAt`, and emits no detector delta. `--label` is invalid on
+`watch rm`, `watch ls`, and detector commands. There is no CLI clear flag;
+remove and re-add to drop labels from the CLI, which resets lifecycle. API
+callers can pass `labels: {}`.
+
+A tick
 with an explicit `--watch-dir` automatically uses economical mode when
 `--entities` includes `pr` and the validated list has zero to ten PR entries: it makes one aliased GraphQL request
 for unique PR numbers (or no GitHub request for an empty list), never fetches

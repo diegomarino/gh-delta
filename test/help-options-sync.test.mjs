@@ -6,6 +6,7 @@
 // more subcommands (wait, read, status, watch, schema, ...) land.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { PARSER_OPTIONS_BY_COMMAND } from '../lib/cli.mjs';
 import { HELP_COMMAND_KEYS, getHelpSpec } from '../lib/help.mjs';
 
@@ -46,6 +47,18 @@ test('log compact help requires an explicit repo without promising derivation', 
   );
   assert.equal(repo.required, true);
   assert.doesNotMatch(repo.description, /derived|optional/i);
+});
+
+test('watch add --label names reserved __proto__ after skill generation', () => {
+  const label = getHelpSpec('gh-delta watch add').options.find(
+    (option) => option.name === '--label',
+  );
+  assert.match(label.description, /`__proto__`/);
+  const flags = readFileSync(
+    new URL('../skills/gh-delta/references/flags.md', import.meta.url),
+    'utf8',
+  );
+  assert.match(flags, /reserved keys are until, repo, `__proto__`/);
 });
 
 test('root help advertises agent formats and the schema subcommand', () => {

@@ -77,6 +77,12 @@ the new snapshot before the agent acts on the printed deltas. Persist the tick
 output in scheduler logs before taking action. If you need at-least-once action
 delivery, wrap `gh-delta` with an external queue or acknowledgement layer.
 
+Local watch labels are routing context, not proof of ownership. Upgrade every
+reader and writer of a shared watch directory before using labels: old binaries
+reject labeled entries. Eight full-size labels can consume much of a
+4,000-character consumer budget. This feature does not truncate output or
+acknowledge delivery.
+
 The same rule applies to optional outposts. If `--outpost-url` is configured, the
 snapshot has already advanced before each outbound POST is attempted. A failed
 outpost does not roll back the snapshot, does not retry, and does not change the

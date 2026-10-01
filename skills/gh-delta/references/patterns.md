@@ -94,6 +94,13 @@ PR_NUMBER=42
 gh-delta watch add "pr:$PR_NUMBER" \
   --repo "$REPO" --watch-dir "$WATCH_DIR" --until merged --format text
 
+gh-delta watch add "pr:$PR_NUMBER" \
+  --repo "$REPO" --watch-dir "$WATCH_DIR" --until merged \
+  --label thread=t-0004 --label package=F001-P05 --format text
+
+Labels are local routing context stored on the watch entry and copied onto
+emitted deltas. They are not proof of task ownership.
+
 gh-delta wait \
   --repo "$REPO" \
   --monitor-id "$MONITOR_ID" \

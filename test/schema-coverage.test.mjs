@@ -49,6 +49,32 @@ function validates(schema, value, root = schema) {
     (type === 'boolean' && typeof value === 'boolean') ||
     (type === 'integer' && Number.isInteger(value));
   if (types.length && !types.some(matches)) return false;
+  if (
+    schema.pattern !== undefined &&
+    typeof value === 'string' &&
+    !new RegExp(schema.pattern).test(value)
+  )
+    return false;
+  if (
+    schema.minProperties !== undefined &&
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.keys(value).length < schema.minProperties
+  )
+    return false;
+  if (
+    schema.maxProperties !== undefined &&
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.keys(value).length > schema.maxProperties
+  )
+    return false;
+  if (schema.propertyNames && value && typeof value === 'object' && !Array.isArray(value)) {
+    for (const key of Object.keys(value))
+      if (!validates(schema.propertyNames, key, root)) return false;
+  }
   if (schema.minimum !== undefined && value < schema.minimum) return false;
   if (schema.minItems !== undefined && value.length < schema.minItems) return false;
   if (schema.required && !schema.required.every((key) => Object.hasOwn(value, key))) return false;
@@ -60,6 +86,18 @@ function validates(schema, value, root = schema) {
       Object.keys(value).some((key) => !Object.hasOwn(schema.properties, key))
     )
       return false;
+  }
+  if (
+    schema.additionalProperties &&
+    typeof schema.additionalProperties === 'object' &&
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value)
+  ) {
+    for (const key of Object.keys(value)) {
+      if (schema.properties && Object.hasOwn(schema.properties, key)) continue;
+      if (!validates(schema.additionalProperties, value[key], root)) return false;
+    }
   }
   return (
     !schema.items ||
@@ -201,6 +239,7 @@ const KIND_TRIGGERS = {
     deps: {
       ...locks,
       ...noRows,
+      readSnapshot: () => EXISTING_SNAPSHOT,
       fetchRateLimit: () => ({ remaining: 10, resetAt: T }),
       now: () => T,
       env: NO_REGISTRY,

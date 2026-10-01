@@ -87,6 +87,7 @@ test('fully enriched deltas jointly cover exactly the frozen DELTA_FIELDS, minus
     // representative delta -- this synthetic object exists only to exercise
     // field coverage, not to model a realistic classes/firstObserved pairing.
     firstObserved: true,
+    watch: { labels: { thread: 't-0004' } },
     from: item({ state: 'open', conversationComments: 1 }),
     to: item({ state: 'open', conversationComments: 3 }),
     enrichment: {
