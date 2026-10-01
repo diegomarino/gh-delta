@@ -289,6 +289,13 @@ snapshots and delta IDs. Use `--detail` only when the structured detail rows
 are needed. Schemas are
 available locally with `gh-delta schema --format compact`.
 
+`--omit-end` is detector-only, default false, and valid only with `--format
+ndjson`. Stdout is then the ordinary delta lines (or an empty string when there
+are none); stderr carries prefixed compact JSON diagnostics instead of an `end`
+record. Exit codes stay 0/10/1/2. Project config `"omit-end": true` and
+`GH_DELTA_OMIT_END` follow the usual flag > env > project > user > default
+precedence. `read` and `wait` do not accept the flag.
+
 Text output consists of an ISO timestamp heartbeat line followed by one block per
 delta:
 

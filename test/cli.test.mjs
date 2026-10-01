@@ -5331,3 +5331,306 @@ test('durable watch labels replay through log and cursor reads after relabel and
     assert.equal(replay.report.deltas[0].id, storedDelta.id);
   }
 });
+
+test('omit-end config reaches rendering without the flag on argv', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-omit-end-config-'));
+  writeFileSync(
+    join(dir, '.gh-delta.json'),
+    JSON.stringify({ format: 'ndjson', 'omit-end': true }),
+  );
+  const quiet = await runCommand(['--repo', 'o/r', '--state-file', join(dir, 'state.json')], {
+    ...NOOP_LOCK_DEPS,
+    cwd: () => dir,
+    fetchPRs: () => ({ rows: [], rateLimit: null }),
+    fetchIssues: () => ({ rows: [], rateLimit: null }),
+    now: () => '2026-07-01T12:00:00Z',
+    env: { GH_DELTA_NO_REGISTRY: '1' },
+  });
+  assert.equal(quiet.code, 0);
+  assert.equal(quiet.output, '');
+  assert.equal(quiet.stderr, '');
+});
+
+test('omit-end with json format exits 2 before fetch and keeps the json error renderer', async () => {
+  let fetched = false;
+  const result = await runCommand(['--repo', 'o/r', '--format', 'json', '--omit-end'], {
+    fetchPRs: () => {
+      fetched = true;
+      return { rows: [], rateLimit: null };
+    },
+  });
+  assert.equal(result.code, 2);
+  assert.equal(fetched, false);
+  assert.equal(result.output.includes('gh-delta: error'), false);
+  assert.match(result.output, /omit-end requires --format ndjson/);
+});
+
+test('wait rejects omit-end as an unknown option', async () => {
+  const result = await runCommand(['wait', '--timeout', '1s', '--omit-end', '--repo', 'o/r']);
+  assert.equal(result.code, 2);
+  assert.match(result.output, /omit-end|Unknown option/i);
+});
+
+test('read and schema reject omit-end as an unknown option', async () => {
+  const read = await runCommand(['read', '--cursor', '/tmp/c.json', '--omit-end']);
+  assert.equal(read.code, 2);
+  assert.match(read.output, /omit-end|Unknown option/i);
+  const schema = await runCommand(['schema', '--format', 'ndjson', '--omit-end']);
+  assert.equal(schema.code, 2);
+  assert.match(schema.output, /omit-end|Unknown option/i);
+});
+
+test('explicit ndjson omit-end pair diagnoses a config load failure on stderr', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-omit-end-bad-config-'));
+  writeFileSync(join(dir, '.gh-delta.json'), '{');
+  const diagnosed = await runCommand(['--repo', 'o/r', '--format', 'ndjson', '--omit-end'], {
+    cwd: () => dir,
+    env: { GH_DELTA_NO_REGISTRY: '1' },
+  });
+  assert.equal(diagnosed.code, 2);
+  assert.equal(diagnosed.output, '');
+  assert.match(diagnosed.stderr, /^gh-delta: error \{/);
+  const ordinary = await runCommand(['--repo', 'o/r'], {
+    cwd: () => dir,
+    env: { GH_DELTA_NO_REGISTRY: '1' },
+  });
+  assert.equal(ordinary.code, 2);
+  assert.match(ordinary.output, /invalid JSON/);
+  assert.equal(ordinary.stderr ?? '', '');
+});
+
+test('omit-end env and project precedence and boolean config type', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-omit-end-prec-'));
+  writeFileSync(
+    join(dir, '.gh-delta.json'),
+    JSON.stringify({ format: 'ndjson', 'omit-end': true }),
+  );
+  const fromEnv = await runCommand(['--repo', 'o/r', '--state-file', join(dir, 'state.json')], {
+    ...NOOP_LOCK_DEPS,
+    cwd: () => dir,
+    fetchPRs: () => ({ rows: [], rateLimit: null }),
+    fetchIssues: () => ({ rows: [], rateLimit: null }),
+    now: () => '2026-07-01T12:00:00Z',
+    env: { GH_DELTA_NO_REGISTRY: '1', GH_DELTA_OMIT_END: 'false' },
+  });
+  assert.equal(fromEnv.code, 0);
+  assert.match(fromEnv.output, /"type":"end"/);
+
+  const envOn = await runCommand(
+    ['--repo', 'o/r', '--format', 'ndjson', '--state-file', join(dir, 'state-env.json')],
+    {
+      ...NOOP_LOCK_DEPS,
+      cwd: () => dir,
+      homedir: () => dir,
+      fetchPRs: () => ({ rows: [], rateLimit: null }),
+      fetchIssues: () => ({ rows: [], rateLimit: null }),
+      now: () => '2026-07-01T12:00:00Z',
+      env: { GH_DELTA_NO_REGISTRY: '1', GH_DELTA_OMIT_END: 'true' },
+      configReadFileSync: () => {
+        const error = new Error('missing');
+        error.code = 'ENOENT';
+        throw error;
+      },
+    },
+  );
+  assert.equal(envOn.code, 0);
+  assert.equal(envOn.output, '');
+
+  const stringKey = mkdtempSync(join(tmpdir(), 'gd-omit-end-str-'));
+  writeFileSync(join(stringKey, '.gh-delta.json'), JSON.stringify({ 'omit-end': 'true' }));
+  const badType = await runCommand(['--repo', 'o/r'], {
+    cwd: () => stringKey,
+    env: { GH_DELTA_NO_REGISTRY: '1' },
+  });
+  assert.equal(badType.code, 2);
+  assert.match(badType.output, /omit-end must be a boolean/);
+});
+
+test('omit-end invalid class uses stderr diagnostics', async () => {
+  const badClass = await runCommand(
+    ['--repo', 'o/r', '--format', 'ndjson', '--omit-end', '--only-classes', 'bogus'],
+    { env: { GH_DELTA_NO_REGISTRY: '1' } },
+  );
+  assert.equal(badClass.code, 2);
+  assert.equal(badClass.output, '');
+  assert.match(badClass.stderr, /"kind":"config"/);
+  assert.match(badClass.stderr, /bogus/);
+});
+
+test('help with omit-end and a broken project config still prints help', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-omit-end-help-'));
+  writeFileSync(join(dir, '.gh-delta.json'), '{');
+  const help = await runCommand(['--help', '--omit-end'], {
+    cwd: () => dir,
+    env: { GH_DELTA_NO_REGISTRY: '1' },
+  });
+  assert.equal(help.code, 0);
+  assert.match(help.output, /deterministic detection pass/);
+});
+
+test('wait nested ticks do not inherit omit-end from GH_DELTA_OMIT_END', async () => {
+  let clock = 0;
+  const result = await runCommand(
+    [
+      'wait',
+      '--timeout',
+      '1s',
+      '--format',
+      'json',
+      '--repo',
+      'o/r',
+      '--until',
+      'ci-changed',
+      '--state-file',
+      '/tmp/omit-end-wait.json',
+    ],
+    {
+      ...NOOP_LOCK_DEPS,
+      now: () => '2026-07-01T12:00:00Z',
+      clock: () => {
+        clock += 1000;
+        return clock;
+      },
+      sleep: async () => {},
+      fetchPRs: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+      readSnapshot: () => ({ pr: {}, issue: {}, meta: DEFAULT_OLD_META }),
+      writeSnapshotAtomic: () => {},
+      env: { GH_DELTA_NO_REGISTRY: '1', GH_DELTA_OMIT_END: 'true' },
+    },
+  );
+  assert.notEqual(result.code, 2);
+  assert.equal(result.output.includes('--omit-end requires --format ndjson'), false);
+});
+
+test('omit-end multi-repo keeps successful deltas and permanent exit 2', async () => {
+  const snapshots = new Map();
+  const changed = { ...basePr, number: 2, title: 'two', updatedAt: '2026-07-01T11:00:00Z' };
+  const result = await runCommand(
+    [
+      '--repo',
+      'a/one,b/two',
+      '--monitor-id',
+      'i9',
+      '--state-dir',
+      '/tmp/omit-end-multi-perm',
+      '--entities',
+      'pr',
+      '--format',
+      'ndjson',
+      '--omit-end',
+    ],
+    {
+      ...NOOP_LOCK_DEPS,
+      now: () => '2026-07-01T12:00:00Z',
+      readSnapshot: (path) => {
+        if (path.includes('a%2Fone')) throw new Error('invalid snapshot JSON');
+        return (
+          snapshots.get(path) ?? {
+            pr: { 2: item(prFingerprint({ ...changed, updatedAt: '2026-07-01T10:00:00Z' })) },
+            issue: {},
+            meta: { ...DEFAULT_OLD_META, repo: 'b/two' },
+          }
+        );
+      },
+      writeSnapshotAtomic: (path, value) => snapshots.set(path, value),
+      fetchPRs: () => ({ rows: [changed], rateLimit: RATE_LIMIT }),
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+      env: { GH_DELTA_NO_REGISTRY: '1' },
+    },
+  );
+  assert.equal(result.code, 2);
+  const lines = result.output.trimEnd() === '' ? [] : result.output.trimEnd().split('\n');
+  assert.ok(lines.length >= 1);
+  for (const line of lines) {
+    const record = JSON.parse(line);
+    assert.equal(record.type, 'delta');
+  }
+  assert.match(result.stderr, /gh-delta: error /);
+  assert.match(result.stderr, /"repo":"a\/one"/);
+  assert.match(result.stderr, /"hint":/);
+});
+
+test('omit-end multi-repo transient failure exits 1 and keeps the other repo delta', async () => {
+  const snapshots = new Map();
+  const changed = { ...basePr, number: 2, title: 'two', updatedAt: '2026-07-01T11:00:00Z' };
+  const result = await runCommand(
+    [
+      '--repo',
+      'a/one,b/two',
+      '--monitor-id',
+      'i9',
+      '--state-dir',
+      '/tmp/omit-end-multi-trans',
+      '--entities',
+      'pr',
+      '--format',
+      'ndjson',
+      '--omit-end',
+    ],
+    {
+      ...NOOP_LOCK_DEPS,
+      now: () => '2026-07-01T12:00:00Z',
+      readSnapshot: (path) =>
+        snapshots.get(path) ?? {
+          pr: path.includes('b%2Ftwo')
+            ? { 2: item(prFingerprint({ ...changed, updatedAt: '2026-07-01T10:00:00Z' })) }
+            : {},
+          issue: {},
+          meta: DEFAULT_OLD_META,
+        },
+      writeSnapshotAtomic: (path, value) => snapshots.set(path, value),
+      fetchPRs: (repo) => {
+        if (repo === 'a/one') throw new Error('temporary GitHub failure');
+        return { rows: [changed], rateLimit: RATE_LIMIT };
+      },
+      fetchIssues: () => ({ rows: [], rateLimit: RATE_LIMIT }),
+      env: { GH_DELTA_NO_REGISTRY: '1' },
+    },
+  );
+  assert.equal(result.code, 1);
+  const lines = result.output.trimEnd().split('\n');
+  assert.equal(JSON.parse(lines[0]).type, 'delta');
+  assert.equal(
+    lines.some((line) => JSON.parse(line).type === 'end'),
+    false,
+  );
+  assert.match(result.stderr, /"repo":"a\/one"/);
+});
+
+test('omit-end outpost warning is on stderr once without an end line', async () => {
+  const d = deps([[{ ...basePr, state: 'merged', updatedAt: '2026-07-01T11:00:00Z' }]], {
+    existing: {
+      pr: { 42: item(openFp) },
+      issue: {},
+    },
+  });
+  d.outpostFetch = async () => ({ ok: false, status: 500 });
+  const result = await runCommand(
+    [
+      '--repo',
+      'o/r',
+      '--monitor-id',
+      'main',
+      '--state-file',
+      '/tmp/omit-end-outpost.json',
+      '--format',
+      'ndjson',
+      '--omit-end',
+      '--outpost-url',
+      'https://example.com/hook',
+    ],
+    d,
+  );
+  assert.equal(result.code, 10);
+  const lines = result.output.trimEnd().split('\n').map(JSON.parse);
+  assert.equal(
+    lines.some((row) => row.type === 'end'),
+    false,
+  );
+  assert.ok(lines.every((row) => row.type === 'delta'));
+  const warnings = result.stderr.trimEnd().split('\n');
+  assert.equal(warnings.length, 1);
+  assert.match(result.stderr, /^gh-delta: warning /);
+  assert.match(result.stderr, /HTTP 500/);
+});

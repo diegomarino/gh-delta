@@ -66,6 +66,10 @@
   can change them. Outpost v2 sends the report delta under `delta`; use
   `deliveryId` for send-attempt identity and `delta.id` for change identity.
 
+Opted-in NDJSON (`--omit-end` with `--format ndjson`) may omit the `end` record.
+Completeness, counts, and exit metadata then live in the process status and in
+prefixed stderr diagnostics, not in the stream.
+
 ## Safety boundary
 
 A green CI rollup, approval, mergeability change, or resolved thread is an

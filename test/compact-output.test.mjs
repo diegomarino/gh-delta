@@ -149,6 +149,24 @@ test('ndjsonReport ends with an end record and newline', () => {
   assert.ok(output.endsWith('\n'));
 });
 
+test('ndjsonReport omitEnd drops the end record and is empty when there are no deltas', () => {
+  const report = baseReport({ deltas: [delta] });
+  const ordinary = ndjsonReport(report, 10, []);
+  const omitted = ndjsonReport(report, 10, [], { omitEnd: true });
+  assert.equal(
+    ordinary.endsWith('"type":"end"}\n') ||
+      ordinary.trim().split('\n').at(-1).includes('"type":"end"'),
+    true,
+  );
+  const ordinaryLines = ordinary.trimEnd().split('\n');
+  assert.equal(omitted, `${ordinaryLines.slice(0, -1).join('\n')}\n`);
+  assert.equal(JSON.parse(omitted.trim()).type, 'delta');
+  assert.equal(ndjsonReport(baseReport({ deltas: [] }), 0, [], { omitEnd: true }), '');
+  const detailed = ndjsonReport(report, 10, [], { omitEnd: true, detail: true, full: true });
+  const detailedDefault = ndjsonReport(report, 10, [], { detail: true, full: true });
+  assert.equal(detailed, `${detailedDefault.trimEnd().split('\n').slice(0, -1).join('\n')}\n`);
+});
+
 test('a representative compact ci change without detail stays bounded', () => {
   const report = compactReport(baseReport(), 10);
   assert.ok(JSON.stringify(report.deltas[0]).length <= 600);
