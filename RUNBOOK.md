@@ -85,6 +85,11 @@ reject labeled entries. Eight full-size labels can consume much of a
 4,000-character consumer budget. This feature does not truncate output or
 acknowledge delivery.
 
+`--format template` does not truncate lines to 4,000 characters and does not
+acknowledge delivery. `read --advance` still records consumption before a
+consumer is guaranteed to have stored the line. Hash `--template-sha256` against
+raw file bytes; interpolated GitHub text remains untrusted.
+
 The same rule applies to optional outposts. If `--outpost-url` is configured, the
 snapshot has already advanced before each outbound POST is attempted. A failed
 outpost does not roll back the snapshot, does not retry, and does not change the
