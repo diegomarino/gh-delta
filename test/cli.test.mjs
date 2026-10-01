@@ -6851,3 +6851,36 @@ test('read does not advance the cursor when a template leaf is an object', async
   assert.match(result.stderr, /gh-delta: error \{/);
   assert.deepEqual(readFileSync(cursor), before);
 });
+
+test('read templates use journal repo and seq without changing public deltas', async () => {
+  const stored = { id: 'd1', entity: 'pr', number: 42, classes: ['new'] };
+  const d = {
+    env: { GH_DELTA_NO_REGISTRY: '1' },
+    readCursor: () => ({ logFile: '/tmp/unused.ndjson', seq: 0 }),
+    readDeltaLog: () => ({
+      entries: [{ repo: 'acme/widgets', seq: 17, delta: stored }],
+      lastSeq: 17,
+      firstSeq: 1,
+      scannedTo: 17,
+    }),
+  };
+  const result = await runCommand(
+    [
+      'read',
+      '--cursor',
+      '/tmp/unused.cursor',
+      '--format',
+      'template',
+      '--template',
+      '{repo} #{number} @{seq}',
+    ],
+    d,
+  );
+  assert.equal(result.code, 10);
+  assert.equal(result.output, 'acme/widgets #42 @17\n');
+  assert.deepEqual(result.report.deltas, [stored]);
+  assert.deepEqual(
+    (await runCommand(['read', '--cursor', '/tmp/unused.cursor'], d)).report.deltas,
+    [stored],
+  );
+});
