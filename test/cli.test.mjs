@@ -4,7 +4,15 @@ import assert from 'node:assert/strict';
 
 // Tests must never leave breadcrumbs in the developer's real run registry.
 process.env.GH_DELTA_NO_REGISTRY = '1';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { run, runCommand } from '../lib/cli.mjs';
@@ -6458,3 +6466,72 @@ for (const strict of [false, true]) {
     }
   }
 }
+
+test('invalid strict waits fail before heartbeat or detector state mutation', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-strict-wait-validation-'));
+  try {
+    const watch = join(dir, 'watch');
+    mkdirSync(watch);
+    const cases = [
+      { args: [], error: /requires --watch-dir/ },
+      { args: ['--watch-dir', watch, '--entities', 'issue'], error: /including pr/ },
+      { args: ['--watch-dir', watch, '--number', '1'], error: /mutually exclusive/ },
+      {
+        args: ['--watch-dir', watch],
+        entry: { entity: 'issue', number: 1, until: 'closed' },
+        error: /cannot include issue watch entries/,
+      },
+      {
+        args: ['--watch-dir', watch, '--repo', 'o/r,a/b'],
+        entry: { entity: 'issue', number: 1, until: 'closed', repo: 'a/b' },
+        error: /cannot include issue watch entries/,
+      },
+      { args: ['--watch-dir', watch], malformed: true, error: /invalid watch entry/ },
+    ];
+    for (const scenario of cases) {
+      if (scenario.entry) {
+        const entry = { ...scenario.entry, addedAt: '2026-07-01T00:00:00Z' };
+        const { watchFilename } = await import('../lib/watch.mjs');
+        writeFileSync(join(watch, watchFilename(entry)), JSON.stringify(entry));
+      }
+      if (scenario.malformed) writeFileSync(join(watch, 'pr-1.json'), 'invalid');
+      for (const explicitHeartbeat of [false, true]) {
+        const forbidden = () => assert.fail('invalid wait must not mutate state or fetch');
+        const result = await runCommand(
+          [
+            'wait',
+            '--repo',
+            'o/r',
+            '--watch-strict',
+            '--entities',
+            'pr',
+            '--state-dir',
+            join(dir, 'state'),
+            '--until',
+            'merged',
+            '--timeout',
+            '1s',
+            ...(explicitHeartbeat ? ['--heartbeat-file', join(dir, 'worker.hb')] : []),
+            ...scenario.args,
+          ],
+          {
+            ...deps([[]]),
+            handleSignals: false,
+            touchHeartbeat: forbidden,
+            acquireLock: forbidden,
+            writeSnapshotAtomic: forbidden,
+            fetchPRs: forbidden,
+            fetchPRsByNumber: forbidden,
+            fetchIssues: forbidden,
+            appendDeltaLog: forbidden,
+          },
+        );
+        assert.equal(result.code, 2);
+        assert.match(result.report.error, scenario.error);
+      }
+      for (const entry of readdirSync(watch)) rmSync(join(watch, entry));
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
