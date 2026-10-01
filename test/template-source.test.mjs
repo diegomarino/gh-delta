@@ -226,3 +226,82 @@ test('effective detector template config preserves the winning source group and 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('normal detector and read template files use the nonblocking descriptor path', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const root = mkdtempSync(join(tmpdir(), 'gd-template-cli-fifo-'));
+  try {
+    for (const prefix of [[], ['read', '--cursor', join(root, 'cursor')]]) {
+      const path = join(root, 'line');
+      writeFileSync(path, '{id}');
+      const script = `
+        import { runCommand } from ${JSON.stringify(new URL('../lib/cli.mjs', import.meta.url).href)};
+        import { lstatSync, unlinkSync } from 'node:fs';
+        import { execFileSync } from 'node:child_process';
+        const result = await runCommand(${JSON.stringify([...prefix, '--format', 'template', '--template-file', path])}, {
+          env: { GH_DELTA_NO_REGISTRY: '1' },
+          lstatSync: (name) => {
+            const stat = lstatSync(name); unlinkSync(name); execFileSync('mkfifo', [name]); return stat;
+          }
+        });
+        if (result.code !== 2 || result.output !== '' || !/regular file/.test(result.stderr)) {
+          console.error(result); process.exitCode = 1;
+        }
+      `;
+      const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+        timeout: 1500,
+        encoding: 'utf8',
+      });
+      assert.equal(result.error, undefined);
+      assert.equal(result.status, 0, result.stderr);
+      rmSync(path);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('normal CLI oversized templates read only 4099 bytes and never use the config reader', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const root = mkdtempSync(join(tmpdir(), 'gd-template-cli-bound-'));
+  try {
+    const path = join(root, 'large');
+    writeFileSync(path, 'a'.repeat(1024 * 1024));
+    const script = `
+      import fs from 'node:fs';
+      import { syncBuiltinESMExports } from 'node:module';
+      const originalRead = fs.readSync; const originalOpen = fs.openSync;
+      let bytes = 0; let templateFd;
+      fs.openSync = (name, ...args) => {
+        const fd = originalOpen(name, ...args);
+        if (name === ${JSON.stringify(path)}) templateFd = fd;
+        return fd;
+      };
+      fs.readSync = (...args) => {
+        if (args[0] === templateFd) bytes += args[3];
+        return originalRead(...args);
+      };
+      const originalFileRead = fs.readFileSync;
+      fs.readFileSync = (name, ...args) => {
+        if (name === ${JSON.stringify(path)}) throw new Error('unbounded template read');
+        return originalFileRead(name, ...args);
+      };
+      syncBuiltinESMExports();
+      const { runCommand } = await import(${JSON.stringify(new URL('../lib/cli.mjs', import.meta.url).href)});
+      const result = await runCommand(['--format', 'template', '--template-file', ${JSON.stringify(path)}], {
+        env: { GH_DELTA_NO_REGISTRY: '1' }
+      });
+      if (result.code !== 2 || result.output !== '' || !/4098/.test(result.stderr) || bytes !== 4099) {
+        console.error({ result, bytes }); process.exitCode = 1;
+      }
+    `;
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      timeout: 5000,
+      encoding: 'utf8',
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
