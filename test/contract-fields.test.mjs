@@ -34,7 +34,7 @@ import { compactReport, ndjsonReport } from '../lib/compact-output.mjs';
 import { listMonitors } from '../lib/list.mjs';
 import { registerMonitor } from '../lib/registry.mjs';
 import { snapshotPath, writeSnapshotAtomic } from '../lib/snapshot.mjs';
-import { watchDirPath } from '../lib/watch.mjs';
+import { addWatch, watchDirPath } from '../lib/watch.mjs';
 
 function isFieldCatalog(name, value) {
   return (
@@ -209,6 +209,38 @@ async function buildFixtures() {
     env: { GH_DELTA_NO_REGISTRY: '1' },
   });
   assert.equal(tick3.code, 10);
+
+  const labeledRoot = mkdtempSync(join(tmpdir(), 'gh-delta-contract-fields-labels-'));
+  const labeledWatchDir = join(labeledRoot, 'watch');
+  addWatch(labeledWatchDir, 'pr:1', 'merged', { now: () => T0, labels: { thread: 't-0004' } });
+  const labeledState = join(labeledRoot, 'state.json');
+  const labeledArgv = [
+    '--repo',
+    REPO,
+    '--monitor-id',
+    'labels',
+    '--state-file',
+    labeledState,
+    '--watch-dir',
+    labeledWatchDir,
+  ];
+  const labeledTick1 = await runCommand(labeledArgv, {
+    fetchPRsByNumber: () => ({ rows: [{ ...pr1(), number: 1 }], rateLimit: null }),
+    fetchIssues: () => ({ rows: [], rateLimit: null }),
+    now: () => T0,
+    env: { GH_DELTA_NO_REGISTRY: '1' },
+  });
+  assert.equal(labeledTick1.code, 0);
+  const labeledTick2 = await runCommand(labeledArgv, {
+    fetchPRsByNumber: () => ({
+      rows: [{ ...pr1(), number: 1, conversationComments: 3, updatedAt: T2H }],
+      rateLimit: null,
+    }),
+    fetchIssues: () => ({ rows: [], rateLimit: null }),
+    now: () => T2H,
+    env: { GH_DELTA_NO_REGISTRY: '1' },
+  });
+  assert.equal(labeledTick2.code, 10);
 
   const failed = await runCommand(
     ['--repo', REPO, '--monitor-id', MONITOR_ID, '--state-file', stateFile],
@@ -649,6 +681,10 @@ async function buildFixtures() {
   // AGENT_COMPACT_DELTA_FIELDS'/DELTA_FIELDS' `missingTicks` in this fixture
   // set, so it needs its own compact render alongside tick2's.
   const agentCompactHappy3 = compactReport(tick3.report, 10, [], { detail: true, full: true });
+  const agentCompactLabeled = compactReport(labeledTick2.report, 10, [], {
+    detail: true,
+    full: true,
+  });
   const agentCompactError = compactReport(failed.report, 2, []);
   const agentNdjsonHappyEnd = ndjsonReport(tick2.report, 10, [], { detail: true, full: true })
     .trimEnd()
@@ -666,6 +702,7 @@ async function buildFixtures() {
     tick1,
     tick2,
     tick3,
+    labeledTick2,
     failed,
     logRecords,
     realCursorFile,
@@ -683,6 +720,7 @@ async function buildFixtures() {
     registryEntryB,
     agentCompactHappy,
     agentCompactHappy3,
+    agentCompactLabeled,
     agentCompactError,
     agentNdjsonHappyEnd,
     agentNdjsonErrorEnd,
@@ -696,6 +734,7 @@ async function buildFixtures() {
         regStateDir,
         regRegistryDir,
         aWatchDir,
+        labeledRoot,
       ]) {
         rmSync(d, { recursive: true, force: true });
       }
@@ -724,6 +763,7 @@ const COVERAGE = {
     new Set([
       ...f.tick2.report.deltas.flatMap((d) => Object.keys(d)),
       ...f.tick3.report.deltas.flatMap((d) => Object.keys(d)),
+      ...f.labeledTick2.report.deltas.flatMap((d) => Object.keys(d)),
     ]),
   DELTA_CONTEXT_FIELDS: (f) =>
     new Set([
@@ -799,6 +839,7 @@ const COVERAGE = {
     new Set([
       ...(f.agentCompactHappy.deltas ?? []).flatMap((d) => Object.keys(d)),
       ...(f.agentCompactHappy3.deltas ?? []).flatMap((d) => Object.keys(d)),
+      ...(f.agentCompactLabeled.deltas ?? []).flatMap((d) => Object.keys(d)),
       ...(f.agentCompactError.deltas ?? []).flatMap((d) => Object.keys(d)),
     ]),
   AGENT_NDJSON_END_FIELDS: (f) =>

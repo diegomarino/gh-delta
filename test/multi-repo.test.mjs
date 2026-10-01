@@ -348,3 +348,74 @@ test('aggregate outpost caps group skipped warnings by repository in flattened o
     { label: 'c/three: outpost', reason: 'skipped 1 delta(s) after max outpost post count 1' },
   ]);
 });
+
+test('same-number watch labels stay repo and entity scoped with unscoped entries on the first repo', () => {
+  const root = mkdtempSync(join(tmpdir(), 'gd-label-repos-'));
+  const watch = join(root, 'watch');
+  addWatch(watch, 'pr:42', 'merged', { labels: { thread: 'first' } });
+  addWatch(watch, 'pr:42', 'merged', { repo: 'b/two', labels: { thread: 'second' } });
+  addWatch(watch, 'issue:42', 'closed', { repo: 'b/two', labels: { thread: 'issue' } });
+  const snapshots = new Map();
+  let fetched = 0;
+  const d = {
+    ...locks,
+    now: () => '2026-09-20T12:00:00.000Z',
+    readSnapshot: (path) => snapshots.get(path) ?? { pr: {}, issue: {}, meta: DEFAULT_OLD_META },
+    writeSnapshotAtomic: (path, value) => snapshots.set(path, value),
+    fetchPRsByNumber: () => {
+      fetched++;
+      return { rows: [pr(42, 'watched')], rateLimit: RATE_LIMIT };
+    },
+    fetchPRs: () => {
+      fetched++;
+      return { rows: [pr(42, 'watched'), pr(7, 'unwatched')], rateLimit: RATE_LIMIT };
+    },
+    fetchIssues: () => ({
+      rows: [
+        {
+          number: 42,
+          title: 'issue',
+          state: 'OPEN',
+          updatedAt: '2026-09-20T10:00:00Z',
+          comments: [],
+          labels: [],
+          assignees: [],
+        },
+      ],
+      rateLimit: RATE_LIMIT,
+    }),
+    env: { GH_DELTA_NO_REGISTRY: '1' },
+  };
+  const argv = [
+    '--repo',
+    'a/one,b/two',
+    '--state-dir',
+    root,
+    '--monitor-id',
+    'labels',
+    '--watch-dir',
+    watch,
+  ];
+  const result = run(argv, d);
+  assert.equal(result.code, 10, JSON.stringify(result.report));
+  assert.deepEqual(
+    result.report.deltas.map((delta) => [
+      delta.repo,
+      delta.entity,
+      delta.number,
+      delta.watch.labels.thread,
+    ]),
+    [
+      ['a/one', 'pr', 42, 'first'],
+      ['b/two', 'pr', 42, 'second'],
+      ['b/two', 'issue', 42, 'issue'],
+    ],
+  );
+  addWatch(watch, 'pr:42', 'merged', { repo: 'a/one', labels: { thread: 'collision' } });
+  fetched = 0;
+  const collision = run(argv, d);
+  assert.equal(collision.code, 2);
+  assert.match(JSON.stringify(collision.report), /duplicate effective watch entry/);
+  assert.equal(fetched, 0);
+  rmSync(root, { recursive: true, force: true });
+});

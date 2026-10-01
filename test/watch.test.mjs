@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -12,6 +12,7 @@ import {
   removeWatchUnchanged,
   watchDirPath,
 } from '../lib/watch.mjs';
+import { canonicalLabels, captureWatchFiles } from '../lib/watch-entry.mjs';
 import { ENTRY_LOCK_LEASE_MS, withTerminalMarkLocks } from '../lib/watch-lock.mjs';
 import { LOCK_EXPIRY_SLACK_MS } from '../lib/lock.mjs';
 
@@ -179,6 +180,185 @@ test('watch read rejects corrupt and duplicate canonical entries', () => {
   assert.throws(() => readWatch(dir), /duplicate/);
 });
 
+test('canonicalLabels accepts a bounded sorted map and rejects the grammar boundaries', () => {
+  const key32 = `k${'a'.repeat(31)}`;
+  const key33 = `k${'a'.repeat(32)}`;
+  const value128 = `v${'b'.repeat(127)}`;
+  const value129 = `v${'b'.repeat(128)}`;
+  assert.deepEqual(canonicalLabels({ thread: 't-0004', package: 'F001-P05' }), {
+    package: 'F001-P05',
+    thread: 't-0004',
+  });
+  assert.deepEqual(Object.keys(canonicalLabels({ z: 'a1', a: 'b2' })), ['a', 'z']);
+  assert.deepEqual(canonicalLabels({}), {});
+  assert.deepEqual(canonicalLabels(Object.assign(Object.create(null), { thread: 't1' })), {
+    thread: 't1',
+  });
+  const inherited = Object.create({ hidden: 'nope' });
+  inherited.thread = 't1';
+  assert.throws(() => canonicalLabels(inherited), /plain object/);
+  const eight = Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`k${i}`, 'v0']));
+  assert.equal(Object.keys(canonicalLabels(eight)).length, 8);
+  function labeled(key, value) {
+    const map = Object.create(null);
+    map[key] = value;
+    return map;
+  }
+  for (const input of [
+    null,
+    [],
+    new Date(),
+    { ...eight, k9: 'v0' },
+    { [key33]: 'v0' },
+    { k: value129 },
+    { until: 'merged' },
+    { repo: 'o/r' },
+    { '1bad': 'v0' },
+    { k: '' },
+    { k: ' has-space' },
+    { '': 'v0' },
+  ]) {
+    assert.throws(() => canonicalLabels(input), /label/i);
+  }
+  assert.throws(() => canonicalLabels(labeled('__proto__', 'x')), /label/i);
+  assert.throws(() => canonicalLabels(labeled('constructor', 'x')), /label/i);
+  assert.throws(() => canonicalLabels(labeled('prototype', 'x')), /label/i);
+  assert.deepEqual(canonicalLabels({ [key32]: value128 }), { [key32]: value128 });
+});
+
+const NOW = '2026-09-30T10:00:00.000Z';
+const LATER = '2026-09-30T11:00:00.000Z';
+
+function bytes(dir, name) {
+  return readFileSync(join(dir, name), 'utf8');
+}
+
+test('addWatch creates, replaces, preserves, and clears labels', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-labels-'));
+  const created = addWatch(dir, 'pr:3', 'merged', {
+    now: () => NOW,
+    labels: { thread: 't-0004', package: 'F001-P05' },
+  });
+  assert.equal(created.added, true);
+  assert.equal(
+    bytes(dir, 'pr-3.json'),
+    '{"entity":"pr","number":3,"until":"merged","addedAt":"2026-09-30T10:00:00.000Z","labels":{"package":"F001-P05","thread":"t-0004"}}\n',
+  );
+  const unchanged = bytes(dir, 'pr-3.json');
+  const same = addWatch(dir, 'pr:3', 'merged', {
+    now: () => LATER,
+    labels: { package: 'F001-P05', thread: 't-0004' },
+  });
+  assert.equal(same.added, false);
+  assert.equal(bytes(dir, 'pr-3.json'), unchanged);
+  const omitted = addWatch(dir, 'pr:3', 'merged', { now: () => LATER });
+  assert.equal(omitted.added, false);
+  assert.deepEqual(omitted.entry.labels, { package: 'F001-P05', thread: 't-0004' });
+  const replaced = addWatch(dir, 'pr:3', 'merged', {
+    now: () => LATER,
+    labels: { thread: 't-0005' },
+  });
+  assert.equal(replaced.added, true);
+  assert.equal(replaced.entry.addedAt, NOW);
+  assert.deepEqual(replaced.entry.labels, { thread: 't-0005' });
+  const marked = readFileSync(replaced.path, 'utf8');
+  assert.equal(markTerminalIgnored(replaced.path, marked, '2026-09-30T12:00:00.000Z'), true);
+  const relabeled = addWatch(dir, 'pr:3', 'merged', {
+    now: () => LATER,
+    labels: { thread: 't-0006' },
+  });
+  assert.equal(relabeled.entry.addedAt, NOW);
+  assert.equal(relabeled.entry.ignoredTerminalAt, '2026-09-30T12:00:00.000Z');
+  assert.deepEqual(relabeled.entry.labels, { thread: 't-0006' });
+  const cleared = addWatch(dir, 'pr:3', 'merged', { now: () => LATER, labels: {} });
+  assert.equal(cleared.added, true);
+  assert.equal(Object.hasOwn(cleared.entry, 'labels'), false);
+  assert.equal(cleared.entry.ignoredTerminalAt, '2026-09-30T12:00:00.000Z');
+  const untilReset = addWatch(dir, 'pr:3', 'closed', { now: () => LATER });
+  assert.equal(untilReset.added, true);
+  assert.equal(untilReset.entry.addedAt, LATER);
+  assert.equal(Object.hasOwn(untilReset.entry, 'ignoredTerminalAt'), false);
+  assert.equal(Object.hasOwn(untilReset.entry, 'labels'), false);
+});
+
+test('changing until carries existing labels unless an explicit map is given', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-labels-until-'));
+  addWatch(dir, 'pr:3', 'merged', { now: () => NOW, labels: { thread: 't-0004' } });
+  const carried = addWatch(dir, 'pr:3', 'closed', { now: () => LATER });
+  assert.equal(carried.entry.addedAt, LATER);
+  assert.deepEqual(carried.entry.labels, { thread: 't-0004' });
+  const explicit = addWatch(dir, 'pr:3', 'merged', {
+    now: () => '2026-09-30T12:00:00.000Z',
+    labels: { package: 'F001-P05' },
+  });
+  assert.deepEqual(explicit.entry.labels, { package: 'F001-P05' });
+  assert.equal(Object.hasOwn(explicit.entry, 'ignoredTerminalAt'), false);
+});
+
+test('invalid labels and malformed label-bearing entries do not change bytes', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-labels-reject-'));
+  addWatch(dir, 'pr:3', 'merged', { now: () => NOW, labels: { thread: 't-0004' } });
+  const before = bytes(dir, 'pr-3.json');
+  assert.throws(
+    () => addWatch(dir, 'pr:3', 'merged', { now: () => LATER, labels: { until: 'merged' } }),
+    /label/i,
+  );
+  assert.equal(bytes(dir, 'pr-3.json'), before);
+  writeFileSync(join(dir, 'pr-3.json'), '{"entity":"pr","number":3,"labels":[]}\n');
+  const broken = bytes(dir, 'pr-3.json');
+  assert.throws(() => addWatch(dir, 'pr:3', 'merged', { now: () => LATER }), /invalid watch entry/);
+  assert.throws(
+    () => addWatch(dir, 'pr:3', 'merged', { now: () => LATER, labels: { thread: 't-0005' } }),
+    /invalid watch entry/,
+  );
+  assert.equal(bytes(dir, 'pr-3.json'), broken);
+  writeFileSync(join(dir, 'pr-9.json'), '{"entity":"pr","number":9,"extra":true}\n');
+  const legacy = bytes(dir, 'pr-9.json');
+  const replaced = addWatch(dir, 'pr:9', 'merged', { now: () => NOW });
+  assert.equal(replaced.added, true);
+  assert.notEqual(bytes(dir, 'pr-9.json'), legacy);
+  writeFileSync(join(dir, 'pr-8.json'), '{"entity":"pr","number":8,"extra":true}\n');
+  const legacyLabeled = bytes(dir, 'pr-8.json');
+  assert.throws(
+    () => addWatch(dir, 'pr:8', 'merged', { now: () => NOW, labels: { thread: 't1' } }),
+    /invalid watch entry/,
+  );
+  assert.equal(bytes(dir, 'pr-8.json'), legacyLabeled);
+});
+
+test('readWatch rejects an empty stored label map and lists canonical labels', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-labels-read-'));
+  addWatch(dir, 'pr:3', 'merged', { now: () => NOW, labels: { thread: 't-0004' } });
+  assert.deepEqual(listWatch(dir)[0].labels, { thread: 't-0004' });
+  writeFileSync(
+    join(dir, 'pr-3.json'),
+    '{"entity":"pr","number":3,"until":"merged","addedAt":"2026-09-30T10:00:00.000Z","labels":{}}\n',
+  );
+  assert.throws(() => readWatch(dir), /invalid watch entry/);
+});
+
+test('captureWatchFiles pairs labels with the bytes of one read', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-capture-'));
+  const added = addWatch(dir, 'pr:3', 'merged', {
+    now: () => NOW,
+    labels: { thread: 't-0004' },
+  });
+  const [captured] = captureWatchFiles(dir, readWatch(dir));
+  assert.equal(captured.path, added.path);
+  assert.equal(captured.bytes, readFileSync(added.path, 'utf8'));
+  assert.deepEqual(captured.entry.labels, { thread: 't-0004' });
+  assert.equal(`${JSON.stringify(captured.entry)}\n`, captured.bytes);
+});
+
+test('removeWatchUnchanged leaves a newer labeled entry in place', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-labels-cleanup-'));
+  const added = addWatch(dir, 'pr:3', 'merged', { now: () => NOW, labels: { thread: 't-0004' } });
+  const stale = bytes(dir, 'pr-3.json');
+  addWatch(dir, 'pr:3', 'merged', { now: () => LATER, labels: { thread: 't-0005' } });
+  assert.equal(removeWatchUnchanged(added.path, stale), false);
+  assert.deepEqual(readWatch(dir)[0].labels, { thread: 't-0005' });
+});
+
 test('watchDirPath keeps watch state monitor-private', () => {
   assert.equal(watchDirPath('o/r', 'main', '/state'), '/state/watch-o%2Fr__main.d');
 });
@@ -198,4 +378,53 @@ test('terminal cleanup cannot delete a same-entry replacement', () => {
     listWatch(dir).map((entry) => entry.number),
     [42],
   );
+});
+
+test('addWatch rejects non-plain label maps before creating or changing state', () => {
+  class Labels {
+    thread = 't1';
+  }
+  const root = mkdtempSync(join(tmpdir(), 'gd-watch-prototypes-'));
+  for (const labels of [
+    new Labels(),
+    Object.assign(Object.create({ hidden: 'x' }), { thread: 't1' }),
+  ]) {
+    const absent = join(root, 'absent');
+    assert.throws(() => addWatch(absent, 'pr:3', 'merged', { labels }), /plain object/);
+    assert.equal(existsSync(absent), false);
+    const existing = addWatch(root, 'pr:3', 'merged', { labels: { thread: 'old' } });
+    const before = readFileSync(existing.path, 'utf8');
+    assert.throws(() => addWatch(root, 'pr:3', 'merged', { labels }), /plain object/);
+    assert.equal(readFileSync(existing.path, 'utf8'), before);
+  }
+});
+
+test('published watch exports retain the existing API surface', async () => {
+  assert.deepEqual(
+    Object.keys(await import('gh-delta/watch')).sort(),
+    [
+      'addWatch',
+      'listWatch',
+      'markTerminalIgnored',
+      'parseWatchItem',
+      'readWatch',
+      'removeWatch',
+      'removeWatchUnchanged',
+      'watchDirPath',
+      'watchFilename',
+    ].sort(),
+  );
+});
+
+test('ordinary label maps ignore inherited Object.prototype entries', () => {
+  Object.defineProperty(Object.prototype, 'inheritedLabel', {
+    value: 'ignored',
+    enumerable: true,
+    configurable: true,
+  });
+  try {
+    assert.deepEqual(canonicalLabels({ thread: 't1' }), { thread: 't1' });
+  } finally {
+    delete Object.prototype.inheritedLabel;
+  }
 });

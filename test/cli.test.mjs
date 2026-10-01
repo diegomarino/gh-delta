@@ -11,8 +11,10 @@ import { run, runCommand } from '../lib/cli.mjs';
 import { outpostSignature } from '../lib/outpost.mjs';
 import { prFingerprint } from '../lib/fingerprint.mjs';
 import { DELTA_DETAIL_FIELDS_BY_CLASS } from '../lib/contract.mjs';
-import { addWatch } from '../lib/watch.mjs';
+import { addWatch, readWatch, removeWatch, removeWatchUnchanged } from '../lib/watch.mjs';
+import { readDeltaLog, setCursorAtomic } from '../lib/deltalog.mjs';
 import { writeTerminalIgnoredLocked } from '../lib/watch-lock.mjs';
+import { acquireLock, releaseLock } from '../lib/lock.mjs';
 
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -310,6 +312,179 @@ test('watch add derives only a local repository and defaults monitor/state paths
   assert.equal(calls, 1);
   assert.equal(result.code, 0);
   assert.match(result.report.watchDir, /watch-o%2Fr__local\.d$/);
+});
+
+test('watch add --label replaces the map and watch ls text prints sorted tokens', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-label-cli-'));
+  const add = run(
+    [
+      'watch',
+      'add',
+      'pr:3',
+      '--until',
+      'merged',
+      '--watch-dir',
+      dir,
+      '--label',
+      'thread=t-0004',
+      '--label',
+      'package=F001-P05',
+    ],
+    { now: () => '2026-09-30T10:00:00.000Z' },
+  );
+  assert.equal(add.code, 0);
+  assert.deepEqual(add.report.entry.labels, { package: 'F001-P05', thread: 't-0004' });
+  const listed = await runCommand(['watch', 'ls', '--watch-dir', dir, '--format', 'text'], {
+    now: () => '2026-09-30T10:00:00.000Z',
+  });
+  assert.equal(listed.code, 0);
+  assert.match(listed.output, /pr:3 until merged package=F001-P05 thread=t-0004/);
+  const unlabeled = mkdtempSync(join(tmpdir(), 'gd-watch-label-plain-'));
+  run(['watch', 'add', 'pr:3', '--until', 'merged', '--watch-dir', unlabeled], {
+    now: () => '2026-09-30T10:00:00.000Z',
+  });
+  const plain = await runCommand(['watch', 'ls', '--watch-dir', unlabeled, '--format', 'text'], {
+    now: () => '2026-09-30T10:00:00.000Z',
+  });
+  assert.match(plain.output, /pr:3 until merged\n?$/);
+  assert.equal(plain.output.includes('package='), false);
+  const bad = run(
+    ['watch', 'add', 'pr:3', '--until', 'merged', '--watch-dir', dir, '--label', 'thread='],
+    { now: () => '2026-09-30T10:00:00.000Z' },
+  );
+  assert.equal(bad.code, 2);
+  const dup = run(
+    [
+      'watch',
+      'add',
+      'pr:3',
+      '--until',
+      'merged',
+      '--watch-dir',
+      dir,
+      '--label',
+      'thread=t-0004',
+      '--label',
+      'thread=t-0005',
+    ],
+    { now: () => '2026-09-30T10:00:00.000Z' },
+  );
+  assert.equal(dup.code, 2);
+  assert.equal(readFileSync(join(dir, 'pr-3.json'), 'utf8').includes('t-0005'), false);
+});
+
+test('--label is rejected on watch rm, watch ls, and detector commands before fetch', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-label-reject-flag-'));
+  for (const argv of [
+    ['watch', 'rm', 'pr:3', '--watch-dir', dir, '--label', 'thread=t1'],
+    ['watch', 'ls', '--watch-dir', dir, '--label', 'thread=t1'],
+  ]) {
+    const result = run(argv, { now: () => '2026-09-30T10:00:00.000Z' });
+    assert.equal(result.code, 2, argv.join(' '));
+  }
+  let fetched = false;
+  const detected = run(['--repo', 'o/r', '--label', 'thread=t1'], {
+    fetchPRs: () => {
+      fetched = true;
+      return { rows: [], rateLimit: null };
+    },
+    fetchIssues: () => ({ rows: [], rateLimit: null }),
+  });
+  assert.equal(detected.code, 2);
+  assert.equal(fetched, false);
+});
+
+test('a watch lock failure whose path contains label still exits 1', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-labels-lock-'));
+  addWatch(dir, 'pr:3', 'merged', { now: () => '2026-09-30T10:00:00.000Z' });
+  const path = join(dir, 'pr-3.json');
+  const held = acquireLock(path, { ghTimeoutMs: 60000, staleMs: 30000 });
+  assert.equal(held.ok, true);
+  try {
+    const result = run(['watch', 'add', 'pr:3', '--until', 'merged', '--watch-dir', dir], {
+      now: () => '2026-09-30T11:00:00.000Z',
+    });
+    assert.equal(result.code, 1);
+    assert.equal(result.report.kind, 'io');
+  } finally {
+    releaseLock(path, held.token);
+  }
+});
+
+test('labeled watch entries attach watch.labels without changing delta ids', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-delta-labels-'));
+  addWatch(dir, 'pr:42', 'merged', {
+    now: () => '2026-07-01T00:00:00Z',
+    labels: { thread: 't-0004', package: 'F001-P05' },
+  });
+  const argv = ['--repo', 'o/r', '--state-file', join(dir, 'state.json'), '--watch-dir', dir];
+  const firstDeps = deps([[]]);
+  firstDeps.fetchPRsByNumber = () => ({ rows: [{ ...basePr }], rateLimit: RATE_LIMIT });
+  firstDeps.fetchPRs = () => {
+    throw new Error('broad fetch must not run');
+  };
+  const first = run(argv, firstDeps);
+  assert.equal(first.code, 0);
+  const baseline = JSON.parse(JSON.stringify(firstDeps.stored));
+  const changed = { ...basePr, conversationComments: 2, updatedAt: '2026-07-01T11:00:00Z' };
+  const secondDeps = deps([[]], { existing: baseline });
+  secondDeps.fetchPRsByNumber = () => ({ rows: [changed], rateLimit: RATE_LIMIT });
+  secondDeps.fetchPRs = () => {
+    throw new Error('broad fetch must not run');
+  };
+  const second = run([...argv, '--format', 'json'], secondDeps);
+  assert.equal(second.code, 10);
+  const delta = second.report.deltas[0];
+  assert.deepEqual(delta.watch, { labels: { package: 'F001-P05', thread: 't-0004' } });
+  const other = mkdtempSync(join(tmpdir(), 'gd-watch-delta-labels-other-'));
+  addWatch(other, 'pr:42', 'merged', {
+    now: () => '2026-07-01T00:00:00Z',
+    labels: { thread: 'other' },
+  });
+  const relabeledDeps = deps([[]], { existing: baseline });
+  relabeledDeps.fetchPRsByNumber = () => ({ rows: [changed], rateLimit: RATE_LIMIT });
+  relabeledDeps.fetchPRs = () => {
+    throw new Error('broad fetch must not run');
+  };
+  const relabeled = run(
+    [
+      '--repo',
+      'o/r',
+      '--state-file',
+      join(dir, 'state.json'),
+      '--watch-dir',
+      other,
+      '--format',
+      'json',
+    ],
+    relabeledDeps,
+  );
+  assert.equal(relabeled.report.deltas[0].id, delta.id);
+  assert.deepEqual(relabeled.report.deltas[0].watch.labels, { thread: 'other' });
+});
+
+test('relabeling a watched PR emits no delta', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-relabel-quiet-'));
+  const state = join(dir, 'state.json');
+  addWatch(dir, 'pr:42', 'merged', { now: () => '2026-07-01T00:00:00Z' });
+  const baselineDeps = deps([[]]);
+  baselineDeps.fetchPRsByNumber = () => ({ rows: [{ ...basePr }], rateLimit: RATE_LIMIT });
+  baselineDeps.fetchPRs = () => {
+    throw new Error('broad fetch must not run');
+  };
+  run(['--repo', 'o/r', '--state-file', state, '--watch-dir', dir], baselineDeps);
+  addWatch(dir, 'pr:42', 'merged', {
+    now: () => '2026-07-01T00:00:00Z',
+    labels: { thread: 't-0005' },
+  });
+  const again = deps([[]], { existing: baselineDeps.stored });
+  again.fetchPRsByNumber = () => ({ rows: [{ ...basePr }], rateLimit: RATE_LIMIT });
+  again.fetchPRs = () => {
+    throw new Error('broad fetch must not run');
+  };
+  const result = run(['--repo', 'o/r', '--state-file', state, '--watch-dir', dir], again);
+  assert.equal(result.code, 0);
+  assert.equal(result.report.deltas.length, 0);
 });
 
 test('eligible PR-only watch uses the economical fetch and separate explicit state file', () => {
@@ -3443,6 +3618,21 @@ test('config validation precedes repo derivation: an invalid --outpost-url short
   assert.match(report.error, /--outpost-url must use http: or https:/);
 });
 
+test('outpost payload copies watch.labels from the source delta', async () => {
+  const { buildOutpostPayload } = await import('../lib/outpost.mjs');
+  const payload = buildOutpostPayload({
+    report: { repo: 'o/r', monitorId: 'main', detectedAt: '2026-07-01T12:00:00Z' },
+    delta: {
+      entity: 'pr',
+      number: 42,
+      context: { title: 'x' },
+      classes: ['new-comments'],
+      watch: { labels: { thread: 't-0004' } },
+    },
+  });
+  assert.equal(payload.delta.watch.labels.thread, 't-0004');
+});
+
 test('outpost deliveryId is order-independent across class permutations', async () => {
   const { buildOutpostPayload } = await import('../lib/outpost.mjs');
   const report = { repo: 'o/r', monitorId: 'main', detectedAt: '2026-07-01T12:00:00Z' };
@@ -4956,4 +5146,188 @@ test('single-repo compact output carries per-delta repo and context from the rep
   assert.equal(report.deltas[0].repo, 'o/r');
   assert.equal(report.deltas[0].context.title, 'add widget');
   assert.equal(Object.hasOwn(report.deltas[0], 'url'), false);
+});
+
+// These cases exercise detector assembly, not just rendering a hand-built delta.
+test('watch labels propagate through observation and lifecycle delta classes', () => {
+  const root = mkdtempSync(join(tmpdir(), 'gd-label-lifecycle-'));
+  const watch = join(root, 'watch');
+  addWatch(watch, 'pr:42', 'merged', { labels: { thread: 't1' } });
+  const argv = ['--repo', 'o/r', '--state-file', join(root, 'state.json'), '--watch-dir', watch];
+  const empty = { pr: {}, issue: {} };
+  const cases = [
+    ['baseline-state', [basePr], null, ['--baseline-emit-state']],
+    ['new', [basePr], empty, []],
+    ['first-seen', [{ ...basePr, state: 'closed' }], empty, []],
+    ['missing', [], { pr: { 42: item(openFp) }, issue: {} }, []],
+    [
+      'stale',
+      [basePr],
+      {
+        pr: {
+          42: item(openFp, { changedAt: '2026-07-01T00:00:00Z', seenAt: '2026-07-01T00:00:00Z' }),
+        },
+        issue: {},
+      },
+      ['--stale-after', '1h'],
+    ],
+  ];
+  for (const [expected, rows, existing, flags] of cases) {
+    const d = deps([], { existing });
+    d.fetchPRsByNumber = () => ({ rows, rateLimit: RATE_LIMIT });
+    const result = run([...argv, ...flags], d);
+    assert.equal(result.code, 10, `${expected}: ${JSON.stringify(result.report)}`);
+    assert.ok(
+      result.report.deltas.some((delta) => delta.classes.includes(expected)),
+      expected,
+    );
+    assert.deepEqual(result.report.deltas[0].watch, { labels: { thread: 't1' } });
+  }
+  const quiet = deps([]);
+  quiet.fetchPRsByNumber = () => ({ rows: [basePr], rateLimit: RATE_LIMIT });
+  assert.deepEqual(run(argv, quiet).report.deltas, []);
+});
+
+test('watch labels have identical rendered JSON compact and NDJSON maps with detail and full', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'gd-label-formats-'));
+  const watch = join(root, 'watch');
+  addWatch(watch, 'pr:42', 'merged', { labels: { thread: 't1', package: 'p1' } });
+  for (const format of ['json', 'compact', 'ndjson']) {
+    for (const flags of [[], ['--detail'], ['--full'], ['--detail', '--full']]) {
+      const d = deps([], { existing: { pr: { 42: item(openFp) }, issue: {} } });
+      d.fetchPRsByNumber = () => ({
+        rows: [{ ...basePr, conversationComments: 2 }],
+        rateLimit: RATE_LIMIT,
+      });
+      const result = await runCommand(
+        [
+          '--repo',
+          'o/r',
+          '--state-file',
+          join(root, 'state.json'),
+          '--watch-dir',
+          watch,
+          '--format',
+          format,
+          ...flags,
+        ],
+        d,
+      );
+      assert.equal(result.code, 10);
+      const rendered =
+        format === 'ndjson'
+          ? result.output
+              .trim()
+              .split('\n')
+              .map(JSON.parse)
+              .find((row) => row.type === 'delta')
+          : JSON.parse(result.output).deltas[0];
+      assert.deepEqual(
+        rendered.watch,
+        { labels: { package: 'p1', thread: 't1' } },
+        `${format} ${flags}`,
+      );
+    }
+  }
+});
+
+test('detector accepts one watch version after an update between parsing and capture', () => {
+  const root = mkdtempSync(join(tmpdir(), 'gd-label-capture-race-'));
+  const watch = join(root, 'watch');
+  addWatch(watch, 'pr:42', 'merged', { labels: { thread: 'earlier' } });
+  const d = deps([], { existing: { pr: { 42: item(openFp) }, issue: {} } });
+  // Repo derivation is the existing seam between readWatch and byte capture.
+  d.resolveRepo = () => {
+    addWatch(watch, 'pr:42', 'merged', { labels: { thread: 'accepted' } });
+    return { status: 'ok', repo: 'o/r', source: 'test' };
+  };
+  d.fetchPRsByNumber = () => {
+    addWatch(watch, 'pr:42', 'merged', { labels: { thread: 'newer' } });
+    return { rows: [{ ...basePr, state: 'merged' }], rateLimit: RATE_LIMIT };
+  };
+  const result = run(['--state-file', join(root, 'state.json'), '--watch-dir', watch], d);
+  assert.equal(result.code, 10);
+  assert.deepEqual(result.report.deltas[0].watch, { labels: { thread: 'accepted' } });
+  assert.equal(JSON.parse(readFileSync(join(watch, 'pr-42.json'), 'utf8')).labels.thread, 'newer');
+});
+
+test('a label replacement immediately before terminal marking aborts without publishing', () => {
+  const root = mkdtempSync(join(tmpdir(), 'gd-label-mark-race-'));
+  const watch = join(root, 'watch');
+  addWatch(watch, 'pr:42', 'merged', { labels: { thread: 'earlier' } });
+  const d = deps([], { existing: { pr: { 42: item(openFp) }, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: [{ ...basePr, state: 'merged' }], rateLimit: RATE_LIMIT });
+  d.withTerminalMarkLocks = (_paths, fn) => {
+    addWatch(watch, 'pr:42', 'merged', { labels: { thread: 'newer' } });
+    return fn();
+  };
+  const result = run(
+    [
+      '--repo',
+      'o/r',
+      '--state-file',
+      join(root, 'state.json'),
+      '--watch-dir',
+      watch,
+      '--ignore-classes',
+      'merged',
+    ],
+    d,
+  );
+  assert.equal(result.report.results[0].error.kind, 'busy');
+  assert.equal(d.writes, 0);
+  const entry = JSON.parse(readFileSync(join(watch, 'pr-42.json'), 'utf8'));
+  assert.deepEqual(entry.labels, { thread: 'newer' });
+  assert.equal(Object.hasOwn(entry, 'ignoredTerminalAt'), false);
+});
+
+test('a relabel during terminal cleanup survives while emitted context stays accepted', () => {
+  const root = mkdtempSync(join(tmpdir(), 'gd-label-cleanup-race-'));
+  const watch = join(root, 'watch');
+  addWatch(watch, 'pr:42', 'merged', { labels: { thread: 'accepted' } });
+  const d = deps([], { existing: { pr: { 42: item(openFp) }, issue: {} } });
+  d.fetchPRsByNumber = () => ({ rows: [{ ...basePr, state: 'merged' }], rateLimit: RATE_LIMIT });
+  let cleanupRan = false;
+  d.removeWatchUnchanged = (path, acceptedBytes) => {
+    cleanupRan = true;
+    addWatch(watch, 'pr:42', 'merged', { labels: { thread: 'newer' } });
+    return removeWatchUnchanged(path, acceptedBytes);
+  };
+  const result = run(
+    ['--repo', 'o/r', '--state-file', join(root, 'state.json'), '--watch-dir', watch],
+    d,
+  );
+  assert.equal(result.code, 10);
+  assert.equal(cleanupRan, true);
+  assert.deepEqual(result.report.deltas[0].watch, { labels: { thread: 'accepted' } });
+  assert.deepEqual(readWatch(watch)[0].labels, { thread: 'newer' });
+});
+
+test('durable watch labels replay through log and cursor reads after relabel and removal', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'gd-label-replay-'));
+  const watch = join(root, 'watch');
+  const state = join(root, 'state.json');
+  addWatch(watch, 'pr:42', 'merged', { labels: { thread: 'historic' } });
+  const d = deps([], { existing: { pr: { 42: item(openFp) }, issue: {} } });
+  d.fetchPRsByNumber = () => ({
+    rows: [{ ...basePr, conversationComments: 2 }],
+    rateLimit: RATE_LIMIT,
+  });
+  const produced = run(['--repo', 'o/r', '--state-file', state, '--watch-dir', watch, '--log'], d);
+  assert.equal(produced.code, 10);
+  const log = produced.report.results[0].logFile;
+  const storedDelta = readDeltaLog(log).entries[0].delta;
+  assert.deepEqual(storedDelta.watch, { labels: { thread: 'historic' } });
+  const cursor = join(root, 'cursor.json');
+  setCursorAtomic(cursor, { cursorVersion: 1, logFile: log, seq: 0 });
+  for (const removed of [false, true]) {
+    if (removed) removeWatch(watch, 'pr:42');
+    else addWatch(watch, 'pr:42', 'merged', { labels: { thread: 'today' } });
+    assert.deepEqual(readDeltaLog(log).entries[0].delta.watch, storedDelta.watch);
+    const replay = await runCommand(['read', '--cursor', cursor, '--format', 'json']);
+    assert.equal(replay.code, 10, JSON.stringify(replay.report));
+    assert.deepEqual(replay.report.deltas[0].watch, storedDelta.watch);
+    assert.deepEqual(JSON.parse(replay.output).deltas[0].watch, storedDelta.watch);
+    assert.equal(replay.report.deltas[0].id, storedDelta.id);
+  }
 });
