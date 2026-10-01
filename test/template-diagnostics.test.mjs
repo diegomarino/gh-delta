@@ -14,3 +14,34 @@ test('formatTemplateDiagnostics escapes DEL and U+2028 inside JSON strings', () 
   assert.equal(stderr.includes('\u2028'), false);
   assert.equal(stderr.includes('\u007F'), false);
 });
+
+test('template diagnostics match NDJSON suppression and preserve warning occurrence order', async () => {
+  const { formatOmitEndDiagnostics } = await import('../lib/omit-end-diagnostics.mjs');
+  const a = { label: 'A', reason: 'a' };
+  const b = { label: 'B', reason: 'b' };
+  const report = {
+    results: [
+      {
+        repo: 'o/r',
+        error: {
+          kind: 'rate-limit',
+          message: 'retry\n\u2029',
+          hint: 'later',
+          resetAt: 'now',
+          remaining: 0,
+          cost: 2,
+        },
+      },
+    ],
+    warnings: [a, b, a],
+  };
+  assert.equal(formatTemplateDiagnostics(report, [a, b]), formatOmitEndDiagnostics(report, [a, b]));
+  assert.deepEqual(
+    formatTemplateDiagnostics(report, [a, b])
+      .trimEnd()
+      .split('\n')
+      .slice(1)
+      .map((line) => JSON.parse(line.slice('gh-delta: warning '.length)).label),
+    ['A', 'B', 'A'],
+  );
+});

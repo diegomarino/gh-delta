@@ -98,7 +98,7 @@ gh-delta --format compact
 reuse that identity. A first run exits `0`; a changed run exits `10`; exit `1`
 is retryable; exit `2` needs configuration or snapshot repair. JSON is always
 the default. Use `--format compact` for agents, `text` for logs, or `template`
-for per-delta lines.
+for [per-delta lines](docs/template-examples.md).
 
 The quick demo below shows the initial baseline followed by a later compact
 JSON report after GitHub state changes:

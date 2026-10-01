@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -89,7 +89,7 @@ function writeFakeGh(binDir, { payload } = {}) {
   return payloadPath;
 }
 
-function runTick({ dir, binDir, payloadPath, args = [] }) {
+function runTick({ dir, binDir, payloadPath, args = [], format = 'ndjson' }) {
   return spawnSync(
     process.execPath,
     [
@@ -101,8 +101,8 @@ function runTick({ dir, binDir, payloadPath, args = [] }) {
       '--state-dir',
       join(dir, 'state'),
       '--format',
-      'ndjson',
-      '--omit-end',
+      format,
+      ...(format === 'ndjson' ? ['--omit-end'] : []),
       '--entities',
       'pr',
       ...args,
@@ -204,4 +204,75 @@ test('omit-end subprocess failure is empty stdout and prefixed stderr', () => {
   assert.ok(result.status === 1 || result.status === 2, String(result.status));
   assert.equal(result.stdout, '');
   assert.match(result.stderr, /^gh-delta: error /);
+});
+
+test('template subprocess preserves quiet, delta, warning and failure exit/output tuples', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-template-sub-'));
+  try {
+    const binDir = join(dir, 'bin');
+    const payloadPath = writeFakeGh(binDir);
+    const tick = (args = []) =>
+      runTick({
+        dir,
+        binDir,
+        payloadPath,
+        format: 'template',
+        args: ['--template={repo} #{number} [{classes}]', ...args],
+      });
+    const baseline = tick();
+    assert.equal(baseline.status, 0, baseline.stderr);
+    assert.equal(baseline.stdout, '');
+    assert.equal(baseline.stderr, '');
+    writeFileSync(payloadPath, prGraphql());
+    const event = tick(['--log', '--enrich', 'body']);
+    assert.equal(event.status, 10, event.stderr);
+    assert.equal(event.stdout, 'o/r #1 [new]\n');
+    assert.equal(
+      event.stderr,
+      'gh-delta: warning {"label":"enrichment body","reason":"GitHub enrichment returned errors: body unavailable\\nretry later"}\n',
+    );
+    const quiet = tick();
+    const quietAgain = tick();
+    assert.deepEqual([quiet.status, quiet.stdout, quiet.stderr], [0, '', '']);
+    assert.deepEqual([quietAgain.status, quietAgain.stdout, quietAgain.stderr], [0, '', '']);
+    const state = readFileSync(join(dir, 'state', 'repo-o%2Fr__monitor-sub__pr.json'));
+    const invalid = runTick({
+      dir,
+      binDir,
+      payloadPath,
+      format: 'template',
+      args: ['--template', '{summary.typo}'],
+    });
+    assert.equal(invalid.status, 2);
+    assert.equal(invalid.stdout, '');
+    assert.match(invalid.stderr, /path is unknown/);
+    assert.deepEqual(readFileSync(join(dir, 'state', 'repo-o%2Fr__monitor-sub__pr.json')), state);
+    const env = {
+      ...process.env,
+      GH_DELTA_NO_REGISTRY: '1',
+      PATH: `${binDir}:${process.env.PATH}`,
+      FAKE_GH_PAYLOAD: payloadPath,
+      FAKE_GH_FAIL: '1',
+    };
+    const failure = spawnSync(
+      process.execPath,
+      [
+        'gh-delta.mjs',
+        '--repo',
+        'o/r',
+        '--state-dir',
+        join(dir, 'failure'),
+        '--format',
+        'template',
+        '--template',
+        '{number}',
+      ],
+      { cwd: root, env, encoding: 'utf8' },
+    );
+    assert.equal(failure.status, 1);
+    assert.equal(failure.stdout, '');
+    assert.match(failure.stderr, /^gh-delta: error /);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

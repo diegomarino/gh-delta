@@ -6884,3 +6884,301 @@ test('read templates use journal repo and seq without changing public deltas', a
     [stored],
   );
 });
+
+test('template changes terminal output only across detail, full, filtering and baseline flags', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-template-equivalence-'));
+  try {
+    for (const flags of [
+      [],
+      ['--detail'],
+      ['--summary-line'],
+      ['--summaries'],
+      ['--full'],
+      ['--detail', '--full'],
+      ['--ignore-classes', 'head-changed'],
+    ]) {
+      const existing = { pr: { 42: item(openFp) }, issue: {} };
+      const rows = [{ ...basePr, headSha: 'sha2' }];
+      const outputs = [];
+      for (const format of ['json', 'template']) {
+        const d = deps([[...rows]], { existing: globalThis.structuredClone(existing) });
+        let logged;
+        d.appendDeltaLog = (_path, value) => {
+          logged = globalThis.structuredClone(value);
+          return { appended: value.deltas.length };
+        };
+        d.fetchEnrichment = () => assert.fail('selecting enrichment fields must not fetch');
+        const result = await runCommand(
+          [
+            '--repo',
+            'o/r',
+            '--monitor-id',
+            'main',
+            '--state-file',
+            join(dir, 'state'),
+            '--log',
+            ...flags,
+            '--format',
+            format,
+            ...(format === 'template'
+              ? ['--template', '{repo} #{number}: {to.headSha}|{enrichment.body.body}']
+              : []),
+          ],
+          d,
+        );
+        outputs.push({ result, snapshot: d.stored, logged });
+      }
+      assert.equal(outputs[0].result.code, outputs[1].result.code);
+      assert.deepEqual(outputs[0].result.report, outputs[1].result.report);
+      assert.deepEqual(outputs[0].snapshot, outputs[1].snapshot);
+      assert.deepEqual(outputs[0].logged, outputs[1].logged);
+      assert.equal(
+        outputs[1].result.output,
+        flags.includes('--ignore-classes') ? '' : 'o/r #42: sha2|\n',
+      );
+    }
+    for (const flags of [[], ['--baseline-emit-state']]) {
+      const result = await runCommand(
+        [
+          '--repo',
+          'o/r',
+          '--state-file',
+          join(dir, 'baseline'),
+          '--format',
+          'template',
+          '--template',
+          '{number}',
+          ...flags,
+        ],
+        deps([[basePr]]),
+      );
+      assert.equal(result.code, flags.length ? 10 : 0);
+      assert.equal(result.output, flags.length ? '42\n' : '');
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('template hash mismatch prevents detector and cursor mutations', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-template-reject-hash-'));
+  try {
+    const path = join(dir, 'line');
+    writeFileSync(path, '{id}\n');
+    const forbidden = () => assert.fail('hash mismatch must fail before effects');
+    const d = {
+      env: { GH_DELTA_NO_REGISTRY: '1' },
+      resolveRepo: forbidden,
+      fetchPRs: forbidden,
+      acquireLock: forbidden,
+      readCursor: forbidden,
+      readDeltaLog: forbidden,
+      appendDeltaLog: forbidden,
+      writeSnapshotAtomic: forbidden,
+      registerMonitor: forbidden,
+    };
+    for (const prefix of [
+      [],
+      ['--repo', 'o/a,o/b'],
+      ['read', '--cursor', join(dir, 'cursor'), '--advance'],
+    ]) {
+      const result = await runCommand(
+        [
+          ...prefix,
+          '--format',
+          'template',
+          '--template-file',
+          path,
+          '--template-sha256',
+          'a'.repeat(64),
+        ],
+        d,
+      );
+      assert.equal(result.code, 2);
+      assert.equal(result.output, '');
+      assert.match(result.stderr, /sha256/);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('template multi-repo publication validates durable leaves per repository', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'gd-template-durable-'));
+  try {
+    const writes = [];
+    const result = await runCommand(
+      [
+        '--repo',
+        'o/a,o/b',
+        '--state-dir',
+        root,
+        '--entities',
+        'pr',
+        '--baseline-emit-state',
+        '--format',
+        'template',
+        '--template',
+        '{repo}: {context.title}',
+      ],
+      {
+        ...NOOP_LOCK_DEPS,
+        env: { GH_DELTA_NO_REGISTRY: '1' },
+        readSnapshot: () => null,
+        fetchPRs: (repo) => ({
+          rows: [{ ...basePr, title: repo === 'o/a' ? 'accepted' : { invalid: true } }],
+          rateLimit: RATE_LIMIT,
+        }),
+        writeSnapshotAtomic: (_path, snapshot) => writes.push(snapshot.meta.repo),
+      },
+    );
+    assert.equal(result.code, 2);
+    assert.equal(result.output, 'o/a: accepted\n');
+    assert.deepEqual(writes, ['o/a']);
+    assert.match(result.stderr, /primitive/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('invalid transient template data preserves other repository lines after publication', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'gd-template-transient-'));
+  try {
+    const published = [];
+    const result = await runCommand(
+      [
+        '--repo',
+        'o/a,o/b',
+        '--state-dir',
+        root,
+        '--entities',
+        'pr',
+        '--baseline-emit-state',
+        '--enrich',
+        'body',
+        '--format',
+        'template',
+        '--template',
+        '{repo}: {enrichment.body.body}',
+      ],
+      {
+        ...NOOP_LOCK_DEPS,
+        env: { GH_DELTA_NO_REGISTRY: '1' },
+        readSnapshot: () => null,
+        fetchPRs: (repo) => ({ rows: [{ ...basePr, id: repo }], rateLimit: RATE_LIMIT }),
+        writeSnapshotAtomic: (_path, snapshot) => published.push(snapshot.meta.repo),
+        fetchEnrichment: (_kind, ids) => ({
+          rows: ids.map((id) => ({
+            id,
+            body: id === 'o/a' ? 'accepted' : { invalid: true },
+            mentions: [],
+          })),
+          rateLimit: RATE_LIMIT,
+        }),
+      },
+    );
+    assert.equal(result.code, 2);
+    assert.equal(result.output, 'o/a: accepted\n');
+    assert.deepEqual(published, ['o/a', 'o/b']);
+    assert.match(result.stderr, /primitive/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('multi-repo template uses one accepted file read even after replacement', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'gd-template-one-read-'));
+  try {
+    const path = join(root, 'line.txt');
+    const raw = '{repo} #{number}\n';
+    writeFileSync(path, raw);
+    const digest = createHash('sha256').update(raw).digest('hex');
+    let reads = 0;
+    const result = await runCommand(
+      [
+        '--repo',
+        'o/a,o/b',
+        '--state-dir',
+        root,
+        '--entities',
+        'pr',
+        '--baseline-emit-state',
+        '--format',
+        'template',
+        '--template-file',
+        path,
+        '--template-sha256',
+        digest,
+      ],
+      {
+        ...NOOP_LOCK_DEPS,
+        env: { GH_DELTA_NO_REGISTRY: '1' },
+        readSnapshot: () => null,
+        fetchPRs: () => ({ rows: [basePr], rateLimit: RATE_LIMIT }),
+        writeSnapshotAtomic: () => {},
+        readFileSync: (name, encoding) => {
+          if (name !== path) return readFileSync(name, encoding);
+          reads++;
+          const accepted = readFileSync(name);
+          writeFileSync(name, '{summary.typo}');
+          return accepted;
+        },
+      },
+    );
+    assert.equal(result.code, 10);
+    assert.equal(result.output, 'o/a #42\no/b #42\n');
+    assert.equal(reads, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('transient body enrichment renders escaped text and stays absent on durable replay', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'gd-template-enrichment-replay-'));
+  try {
+    const state = join(root, 'state');
+    const d = deps([[basePr]], { existing: { pr: {}, issue: {} } });
+    d.fetchEnrichment = () => ({
+      rows: [{ id: 'PR_42', body: 'line\n{number} @a @b' }],
+      rateLimit: RATE_LIMIT,
+    });
+    d.fetchPRs = () => ({ rows: [{ ...basePr, id: 'PR_42' }], rateLimit: RATE_LIMIT });
+    const produced = await runCommand(
+      [
+        '--repo',
+        'o/r',
+        '--state-file',
+        state,
+        '--log',
+        '--enrich',
+        'body',
+        '--format',
+        'template',
+        '--template',
+        '{enrichment.body.body}|{enrichment.body.mentions}',
+      ],
+      d,
+    );
+    assert.equal(produced.code, 10);
+    assert.equal(produced.output, 'line\\n{number} @a @b|a,b\n');
+    const cursor = join(root, 'cursor');
+    setCursorAtomic(cursor, {
+      cursorVersion: 1,
+      logFile: produced.report.results[0].logFile,
+      seq: 0,
+    });
+    const replay = await runCommand([
+      'read',
+      '--cursor',
+      cursor,
+      '--format',
+      'template',
+      '--template',
+      '{enrichment.body.body}|{enrichment.body.mentions}',
+    ]);
+    assert.equal(replay.code, 10);
+    assert.equal(replay.output, '|\n');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
