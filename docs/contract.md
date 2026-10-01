@@ -1545,7 +1545,10 @@ entire fetch duration down to that single remaining syscall gap; it does
 **not** eliminate the race. No POSIX (or Windows) filesystem primitive gives
 two independent files a compare-and-swap. Treat the lock as a strong, loud
 guard against the common case (overlapping ticks, a slow holder outlasted by
-a faster one, a hung fetch), not a formal mutual-exclusion proof.
+a faster one, a hung fetch), not a formal mutual-exclusion proof. The watch
+directory lock (`.gh-delta-watch.lock`, 10m internal lease) uses the same
+primitives: it does not claim safety past lease expiry or on network
+filesystems.
 
 **`--lock-stale-ms`** (default `10m`) only bounds the unreadable/corrupt case
 above; a readable lock is stolen purely on its own `expiresAt`, regardless of
@@ -1755,9 +1758,27 @@ JSON files, plus optional `repo` (scoped entry), `ignoredTerminalAt` (ISO timest
 and `labels` (a sorted string map, omitted when empty). Old binaries reject files
 that contain `labels`. Unlabeled files stay byte-compatible. Malformed entries are
 permanent configuration errors before a GitHub call or snapshot write.
-`watch add|rm|ls` are local-only commands; terminal watched items are removed
+`watch add|rm|ls|sync` are local-only commands; terminal watched items are removed
 only after their final delta and successful snapshot write, guarded against
 concurrent replacement.
+
+The first successful `watch sync` publishes `watch-set.json`
+(`{formatVersion:1,generation,entries}`) by same-directory rename. After that
+file exists it is the only authority: leftover per-entry JSON is neither merged
+nor deleted as part of success, and a malformed manifest does not fall back.
+`--repo` on sync is an input default, not a partial update. `generation` is
+internal; it changes on every real mutation. A detector that captured a
+generation aborts with exit 1 (busy) if it changed before log or snapshot
+publication. Directory-lock busy is exit 1; malformed watch state remains
+exit 2.
+
+In manifest mode, `addWatch`/`removeWatch`/`listWatch` still return
+`path` as `join(dir, watchFilename(entry))`; that path is not a readable file.
+`removeWatchUnchanged` and `markTerminalIgnored` throw an unsupported-operation
+error and do not modify the manifest. The directory lock uses a fixed internal
+lease independent of `--gh-timeout-ms` and `--lock-stale-ms`. It does not make
+a network filesystem or an expired lease safe; the same residual check-to-rename
+gap documented in [Lock Semantics](#lock-semantics) remains.
 
 `ignoredTerminalAt` is written the moment a watched item's terminal
 transition (a merge or close matching its `until`) is observed but

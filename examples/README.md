@@ -12,6 +12,7 @@ repo documentation — none ship in the npm package.
 | [agent-worker-wait](agent-worker-wait/)                     | One bounded worker decision                  | `wait --until-summary`                           |
 | [coordinator-fanout](coordinator-fanout/)                   | One fetch, independent consumers             | `--log`, `read`, per-worker cursors              |
 | [claude-code-hook](claude-code-hook/)                       | Spend context only for changes               | exit `10` + compact JSON                         |
+| [watch-sync](watch-sync/)                                   | Atomic local watch replacement               | `watch sync --from` + producer gating            |
 | [github-action](github-action/)                             | CI integration boundary                      | local action shape; external action pending      |
 | [scheduled-ndjson-omit-end](scheduled-ndjson-omit-end/)     | Scheduled stream with zero-byte quiet ticks  | `--format ndjson --omit-end`                     |
 

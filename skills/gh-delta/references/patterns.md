@@ -165,7 +165,8 @@ A one-to-ten PR-only watch list activates one targeted GraphQL request; an
 empty list performs no observation query. Issue
 entries, more than ten entries, or `--entities issue` retain broad fetching.
 `--number` is a post-fetch output selector and does not reduce GitHub work.
-Refresh search membership intentionally with `watch add`/`watch rm`; do not let
+Refresh search membership intentionally with `watch sync` (whole-directory
+replace, framed `end N`) or with `watch add`/`watch rm`; do not let
 an unbounded list accumulate. Use `--until merged` for an integration workflow
 or `--until closed` for either a close or a merge. Cleanup uses terminal state
 on eligible emitted deltas, including a first observation of an already
