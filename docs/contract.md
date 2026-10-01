@@ -19,7 +19,8 @@ is no automatic v1 → v2 upgrade path; re-baseline the monitor instead.
 ```
 gh-delta [--repo <owner/name>] [--monitor-id <id>]
          [--state-file <path> | --state-dir <dir>]
-         [--entities pr,issue] [--format json|text|compact|ndjson]
+         [--entities pr,issue] [--format json|text|compact|ndjson|template]
+         [--template <text> | --template-file <path>] [--template-sha256 <hex>]
          [--omit-end] [--summary-line] [--detail] [--summaries] [--full]
          [--stale-after <duration>]
          [--only-classes <classes>] [--ignore-classes <classes>] [--ignore-authors <logins>] [--settled]
@@ -96,6 +97,45 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
   other subcommands reject the flag. Invalid format pairings use that format's
   ordinary error renderer (invalid format falls back to JSON) and do not get a
   quiet-stdout guarantee.
+
+  `template` emits one LF-terminated escaped text
+  line per emitted delta (or empty stdout when there are none). It is not
+  NDJSON and does not emit `end`. `--format template` requires exactly one of
+  `--template <text>` or `--template-file <path>` on detector ticks and
+  `read`. `--template-sha256` is CLI-only, requires a file, and is compared
+  case-insensitively to the SHA-256 of the **raw file bytes** before one
+  trailing LF/CRLF is stripped. Relative `--template-file` paths resolve
+  against the process working directory. `template` and `template-file` are
+  one source-selection group (CLI > env `GH_DELTA_TEMPLATE` /
+  `GH_DELTA_TEMPLATE_FILE` > project config > user config); the highest layer
+  that supplies either source wins entirely. A source override does not change
+  `format`. `read` does not inherit detector template config. `wait` and other
+  subcommands reject template format and template options. Substituted values
+  escape `\`, LF, CR, TAB, and other C0/C1/DEL/U+2028/U+2029; escaping does
+  not make GitHub-authored title or body text safe to execute. Placeholder
+  `{watch.labels.task.id}` looks up the single own-property key `task.id`.
+  The allowlist, grammar, file bounds, and diagnostics are specified in
+  [Per-delta templates](#per-delta-templates).
+
+### Per-delta templates
+
+`--format template` compiles a one-line grammar before repository resolution,
+fetches, locks, log appends, snapshot writes, or cursor advancement. Unknown
+static paths (including `{summary.typo}`) exit `2` with empty stdout even on a
+quiet tick or empty log. Diagnostics use `gh-delta: error <canonical JSON>`
+and `gh-delta: warning <canonical JSON>` on stderr.
+
+Allowlisted paths are the public delta scalars and primitive arrays named in
+issue [#95](https://github.com/diegomarino/gh-delta/issues/95): identity
+fields (`id`, `repo`, `entity`, `number`, `missingTicks`, `firstObserved`,
+`seq`, `summaryLine`, `staleAt`), `classes`, `context.*` scalars, `summary.*`
+scalars (not object arrays such as `summary.failedChecks`), `from`/`to` leaf
+scalars and primitive `labels`/`assignees`/`reviewRequests` arrays,
+`enrichment.body.body`, `enrichment.body.mentions`, and
+`watch.labels.<key>` where the entire suffix is one label key. Object parents
+and object arrays are unsupported. Absent or null values render as an empty
+string; `0` and `false` render as `0` and `false`. Worked examples:
+[template examples](template-examples.md).
 
 ### Project setup, configuration, and local DX commands
 
@@ -440,7 +480,8 @@ Exit codes: `0` reset completed (including a no-op reset of a clean monitor),
 ```
 gh-delta read --cursor <path>
   [--only-classes <classes>] [--number <positive integer>]
-  [--advance] [--format json|text]
+  [--advance] [--format json|text|template]
+  [--template <text> | --template-file <path>] [--template-sha256 <hex>]
 ```
 
 Reads only the existing cursor-bound log: no GitHub call, snapshot read/write,
