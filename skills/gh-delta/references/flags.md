@@ -217,6 +217,20 @@ This reference is generated from `lib/help.mjs`. Run `npm run build:skill` after
 | `--help-json`                      |         | Print this machine-readable help document as JSON.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `--version`                        |         | Print version, distribution channel, and release URL.                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
+## gh-delta watch sync
+
+`gh-delta watch sync --from <file|-> --watch-dir <path> [--repo owner/name] [--allow-empty]`
+
+| Flag                  | Default | Meaning                                                                 |
+| --------------------- | ------- | ----------------------------------------------------------------------- |
+| `--from <file\|->`    |         | Desired-set file, or - for stdin.                                       |
+| `--watch-dir <path>`  |         | Explicit watch directory. Required; never inferred.                     |
+| `--repo <owner/name>` |         | Default repository scope for input lines that omit repo=. Not a filter. |
+| `--allow-empty`       |         | Permit an intentional empty set (end 0).                                |
+| `--help`              |         | Show human-readable help.                                               |
+| `--help-json`         |         | Print this machine-readable help document as JSON.                      |
+| `--version`           |         | Print version, distribution channel, and release URL.                   |
+
 ## gh-delta status
 
 `gh-delta status [--repo <owner/name>] [--number <numbers>] [--watch-dir <path>] [--state-file <path>|--state-dir <dir>] [--refresh] [--format json|text]`

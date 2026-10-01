@@ -42,14 +42,14 @@ the answer changes the design; do not make the user choose CLI flags.
 
 ## Choose the operating pattern
 
-| Need                                     | Pattern                                                                          |
-| ---------------------------------------- | -------------------------------------------------------------------------------- |
-| Recurring repository monitor             | One scheduler-owned detector tick with stable identity and durable state         |
-| One PR until CI/review/lifecycle changes | A targeted watch entry plus bounded `wait`                                       |
-| A search or up to ten selected PRs       | Resolve the selection, persist it with `watch add`, then tick with `--watch-dir` |
-| Several independent consumers            | One producer with `--log`; one durable cursor per consumer                       |
-| Inactive work                            | Normal ticks with `--stale-after`, then local `status`                           |
-| Explain an old notification              | Local `explain` using the report or delta log                                    |
+| Need                                     | Pattern                                                                                          |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Recurring repository monitor             | One scheduler-owned detector tick with stable identity and durable state                         |
+| One PR until CI/review/lifecycle changes | A targeted watch entry plus bounded `wait`                                                       |
+| A search or up to ten selected PRs       | Resolve the selection, persist it with `watch add` or `watch sync`, then tick with `--watch-dir` |
+| Several independent consumers            | One producer with `--log`; one durable cursor per consumer                                       |
+| Inactive work                            | Normal ticks with `--stale-after`, then local `status`                                           |
+| Explain an old notification              | Local `explain` using the report or delta log                                                    |
 
 Read [references/patterns.md](references/patterns.md) for complete commands,
 `<agent-type>-<last8(session-id)>-<purpose>` scenario ownership, and safe
@@ -75,6 +75,8 @@ authentication, rate limits, page caps, locks, and snapshot recovery.
   operator logs. `wait` accepts JSON only.
 - A log consumer advances its cursor only after durable handling. Deduplicate
   external actions by `delta.id`, not log sequence.
+- `watch sync` success is exit 0 and must be redirected away from the detector
+  event stream. Check the producer first. `--repo` does not scope replacement.
 
 Read [references/decisions.md](references/decisions.md) for ownership,
 acknowledgement, safety, and cost boundaries. Read

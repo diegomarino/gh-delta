@@ -322,6 +322,12 @@ developer polling loops or webhook-driven automation.
   can overlap jobs, add external locking or increase the interval. This rule is
   also exposed in `gh-delta --help-json` as `stateConcurrency` for agent and
   scheduler tooling.
+- `watch sync` replaces the whole `--watch-dir`. Redirect its JSON stdout away
+  from detector output. Check the producer’s exit code before sync; a complete
+  `end N` frame does not mean the producer succeeded. `--repo` is not a
+  partial-update filter. After `watch-set.json` exists, leftover per-entry
+  files are not part of the set. Mixed-version binaries and network
+  filesystems are not a supported fencing upgrade.
 - If the command exits `1` with "exceeded N pages — narrow the monitor scope or
   re-seed the baseline", do exactly that before continuing. The tool fails closed
   rather than silently truncating. Open items are capped at 1 000 per family;
