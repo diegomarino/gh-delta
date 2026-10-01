@@ -2235,7 +2235,7 @@ test('a real concurrent watch add attempted during mark-and-publish fails fast, 
     ],
     d,
   );
-  assert.match(String(concurrentAddThrew?.message), /watch entry locked/);
+  assert.match(String(concurrentAddThrew?.message), /watch directory locked/);
   // The tick itself is unaffected by the OTHER process's failed attempt --
   // its own hold on the lock, not the contender's, is what mattered.
   assert.equal(code, 0);
@@ -6000,14 +6000,18 @@ test('detector accepts one watch version after an update between parsing and cap
   assert.equal(JSON.parse(readFileSync(join(watch, 'pr-42.json'), 'utf8')).labels.thread, 'newer');
 });
 
-test('a label replacement immediately before terminal marking aborts without publishing', () => {
+test('an external label replacement immediately before terminal marking aborts without publishing', () => {
   const root = mkdtempSync(join(tmpdir(), 'gd-label-mark-race-'));
   const watch = join(root, 'watch');
   addWatch(watch, 'pr:42', 'merged', { labels: { thread: 'earlier' } });
   const d = deps([], { existing: { pr: { 42: item(openFp) }, issue: {} } });
   d.fetchPRsByNumber = () => ({ rows: [{ ...basePr, state: 'merged' }], rateLimit: RATE_LIMIT });
   d.withTerminalMarkLocks = (_paths, fn) => {
-    addWatch(watch, 'pr:42', 'merged', { labels: { thread: 'newer' } });
+    // Cooperating add/rm now respect the directory lock. An external writer
+    // can still replace legacy bytes; the terminal-mark comparison must refuse it.
+    const path = join(watch, 'pr-42.json');
+    const current = JSON.parse(readFileSync(path, 'utf8'));
+    writeFileSync(path, JSON.stringify({ ...current, labels: { thread: 'newer' } }));
     return fn();
   };
   const result = run(
