@@ -6374,3 +6374,87 @@ test('omit-end outpost warning is on stderr once without an end line', async () 
   assert.match(result.stderr, /^gh-delta: warning /);
   assert.match(result.stderr, /HTTP 500/);
 });
+
+test('strict unscoped issues fail before repository discovery', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-strict-issue-discovery-'));
+  try {
+    writeFileSync(
+      join(dir, 'issue-1.json'),
+      JSON.stringify({
+        entity: 'issue',
+        number: 1,
+        until: 'closed',
+        addedAt: '2026-07-01T00:00:00Z',
+      }),
+    );
+    const d = deps([[]]);
+    let discoveries = 0;
+    d.resolveRepo = () => {
+      discoveries++;
+      return { status: 'failed', reason: 'offline' };
+    };
+    const result = run(['--watch-dir', dir, '--watch-strict', '--entities', 'pr'], d);
+    assert.equal(result.code, 2);
+    assert.match(result.report.error, /--watch-strict cannot include issue watch entries/);
+    assert.equal(discoveries, 0);
+    assert.equal(d.writes, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+for (const strict of [false, true]) {
+  for (const explicitState of [false, true]) {
+    for (const override of [false, true]) {
+      test(`watch wait heartbeat follows snapshot: strict=${strict}, explicitState=${explicitState}, override=${override}`, async () => {
+        const dir = strictPrDir('gd-watch-heartbeat-', strict ? 11 : 1);
+        try {
+          const state = join(dir, 'state.json');
+          const heartbeat = join(dir, 'custom.hb');
+          const d = deps([[]]);
+          const touched = [];
+          let clock = 0;
+          d.fetchPRsByNumber = () => ({ rows: [], rateLimit: RATE_LIMIT });
+          const result = await runCommand(
+            [
+              'wait',
+              '--repo',
+              'o/r',
+              '--monitor-id',
+              'heartbeat',
+              explicitState ? '--state-file' : '--state-dir',
+              state,
+              '--watch-dir',
+              dir,
+              '--entities',
+              'pr',
+              ...(strict ? ['--watch-strict'] : []),
+              ...(override ? ['--heartbeat-file', heartbeat] : []),
+              '--until',
+              'merged',
+              '--timeout',
+              '1s',
+              '--interval',
+              '1s',
+            ],
+            {
+              ...d,
+              clock: () => clock,
+              sleep: async (ms) => {
+                clock += ms;
+              },
+              handleSignals: false,
+              touchHeartbeat: (path) => touched.push(path),
+            },
+          );
+          assert.equal(result.code, 0);
+          assert.ok(d.writePath.endsWith(explicitState ? '.watch.json' : '__watch-pr.json'));
+          assert.ok(touched.length > 0);
+          assert.deepEqual([...new Set(touched)], [override ? heartbeat : `${d.writePath}.hb`]);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      });
+    }
+  }
+}
