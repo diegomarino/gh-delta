@@ -328,3 +328,7 @@ developer polling loops or webhook-driven automation.
   repeatedly.
 - If you need a different cadence, update the scheduler outside the tick. For
   session-scoped Claude Code crons, that means delete and recreate the cron.
+- `--watch-strict` does not bound total runtime by a consumer's 60-second
+  scheduler timeout. `--gh-timeout-ms` applies to each GitHub call, and
+  sequential batches can outlive the scheduler. The feature does not guarantee
+  delivery to the downstream consumer.

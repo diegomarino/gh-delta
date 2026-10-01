@@ -105,6 +105,14 @@ test('origin and upstream diverge -> origin wins, warning emitted', () => {
   assert.match(r.warnings[0].reason, /acme\/proj/);
 });
 
+test('localOnly declines when git remotes do not resolve and does not call gh', () => {
+  const exec = fakeExec({
+    'git remote get-url origin': noRemote(),
+    'git remote get-url upstream': noRemote(),
+  });
+  assert.deepEqual(resolveRepoFromGit({ exec, localOnly: true }), { status: 'declined' });
+});
+
 test('non-github origin declines git parsing and falls to gh', () => {
   const exec = fakeExec({
     'git remote get-url origin': 'git@gitlab.com:me/proj.git',
