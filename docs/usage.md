@@ -405,7 +405,19 @@ missing delta); a null result for an entry still watched follows the normal
 missing lifecycle. Re-adding a removed PR can therefore be `new` (or baseline
 on a fresh watch snapshot). A list containing an issue or more than ten entries
 falls back to the ordinary full fetch and ordinary snapshot; so does
-`--entities issue`. Use `--number
+`--entities issue`. Opt in with `--watch-strict` to keep the economical
+snapshot at every size. It batches PRs by ten, publishes only after every
+batch succeeds, and admits a floored batch only when remaining quota minus the
+floor covers the batches still needed. A finished last batch may drop below
+the floor. The stable configuration error is `--watch-strict requires an entity selection including pr`.
+
+```sh
+gh-delta --repo owner/repo --monitor-id scheduled --entities pr \
+  --state-dir ./state --watch-dir ./watch --watch-strict \
+  --rate-limit-floor 100 --format ndjson
+```
+
+Use `--number
 42,99` for one ephemeral tick instead. Terminal items emit their final delta,
 then are removed after snapshot publication.
 

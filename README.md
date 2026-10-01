@@ -52,11 +52,8 @@ done
 # Press Ctrl-C to stop.
 ```
 
-The first tick establishes the baseline; later ticks report only observed
-changes, such as pending CI becoming green or failed. The watch directory keeps
-the query economical by fetching that PR directly instead of scanning the
-repository's full PR history. Each tick still uses your shared GitHub GraphQL
-rate limit, so treat this as a short demo.
+The first tick is the baseline. Later ticks report changes to that one PR.
+Quiet ticks are normal. This demo still spends shared GraphQL quota.
 
 ```sh
 gh-delta watch add pr:3 --until merged --watch-dir ./watch \
@@ -166,6 +163,16 @@ the PR before proposing a next action. See the runnable,
 network-free [agent worker example](examples/agent-worker-wait/README.md) and
 the [fan-out coordinator](examples/coordinator-fanout/README.md) for one-fetch,
 many-worker operation.
+
+## Strict watch lists
+
+```sh
+gh-delta --repo owner/repo --monitor-id scheduled --entities pr \
+  --state-dir ./state --watch-dir ./watch --watch-strict \
+  --rate-limit-floor 100 --format ndjson
+```
+
+`--watch-strict requires an entity selection including pr`. Details: [Usage](docs/usage.md).
 
 ## Docs
 

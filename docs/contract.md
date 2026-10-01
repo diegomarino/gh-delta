@@ -284,6 +284,8 @@ monitorId>__<entities>.ndjson`, or `<state-file>.deltalog.ndjson` for an explici
   leaves the snapshot, log, outpost, and watch cleanup untouched. A malformed
   or failed rate-limit request remains the ordinary transient `github` error.
   Omitted means no rate-limit call and byte-identical legacy behavior.
+  `--watch-strict` uses a different admission line: `remaining - floor >= batchesStillNeeded`.
+  See [Watch-directory selection](#watch-directory-selection).
 - `--no-registry` skips the best-effort [run-registry](#run-registry) breadcrumb
   this run would otherwise leave for `gh-delta list`. Equivalent to setting
   `GH_DELTA_NO_REGISTRY=1`. It never affects the report, exit code, or snapshot.
@@ -1778,7 +1780,32 @@ the unique watched numbers (zero requests for an empty list), normalizes the
 same complete PR shape as broad polling, and never fetches issues. GraphQL
 errors, malformed aliases, and any nested connection overflow fail closed.
 `--number`, `--entities issue`, any issue entry, or more than ten entries retains
-broad fetching and the ordinary snapshot.
+broad fetching and the ordinary snapshot. `--watch-strict` is the explicit
+exception: it keeps this economical identity at every list size.
+
+`--watch-strict` requires `--watch-dir` and an entity selection that includes
+`pr`. The stable configuration error for a selection that does not include `pr`
+is `--watch-strict requires an entity selection including pr`. Both `pr` and
+`pr,issue` are valid selections, but only PRs are observed. An applicable issue
+watch entry, `--entities issue`, `--number`, a missing `--watch-dir`, and
+`wait --from-log --watch-strict` are configuration errors (exit 2) before
+network work or state mutation. Lists above ten without the flag keep broad
+fetching.
+
+Strict mode captures membership once, sorts unique positive PR numbers, and
+fetches sequential batches of at most ten with the same targeted query. It
+publishes only after every batch succeeds. Batch count `B = ceil(N / 10)` is a
+minimum cost, not an estimate or a cap: GitHub charges at least one point per
+request and cost prediction is approximate
+([rate limits and query limits](https://docs.github.com/en/graphql/overview/rate-limits-and-query-limits-for-the-graphql-api)).
+With `--rate-limit-floor F` and `B > 0`, one REST preflight runs after the
+state lock. A batch is admitted only when `remaining - floor >= batchesStillNeeded`.
+Refusal is `kind: "rate-limit"`, exit 1, and names remaining, floor, batches
+still needed, and `resetAt`. A completed final batch may finish below the floor
+and still publishes, because no further batch needs admission. An empty strict
+list makes no GitHub call, including no REST preflight. Without the floor,
+strict mode performs no REST preflight. Non-strict floor behavior stays the
+single `remaining < floor` comparison.
 
 Economical ticks use a separate identity: derived paths end in
 `__watch-pr.json`, while `--state-file x.json` becomes `x.json.watch.json`.
