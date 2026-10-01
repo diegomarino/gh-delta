@@ -13,6 +13,7 @@ repo documentation — none ship in the npm package.
 | [coordinator-fanout](coordinator-fanout/)                   | One fetch, independent consumers             | `--log`, `read`, per-worker cursors              |
 | [claude-code-hook](claude-code-hook/)                       | Spend context only for changes               | exit `10` + compact JSON                         |
 | [github-action](github-action/)                             | CI integration boundary                      | local action shape; external action pending      |
+| [scheduled-ndjson-omit-end](scheduled-ndjson-omit-end/)     | Scheduled stream with zero-byte quiet ticks  | `--format ndjson --omit-end`                     |
 
 Shared ground rules across all of them: the detector stays a dumb one-shot
 (the scheduler owns the clock), exit `2` means fix-your-config (never

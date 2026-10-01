@@ -123,8 +123,9 @@ full-size generated output.
 | [`json`](docs/img/json-output.svg): complete fingerprints and optional detail                                                        | [`text`](docs/img/text-output.svg): concise human-readable actions                                                                |
 | <a href="docs/img/json-output.svg"><img src="docs/img/json-output.svg" alt="Complete gh-delta JSON detail output" width="430"></a>   | <a href="docs/img/text-output.svg"><img src="docs/img/text-output.svg" alt="Complete gh-delta text output" width="430"></a>       |
 
-Schemas are generated from the runtime contract and available without GitHub
-access through `gh-delta schema --format compact|ndjson|json`.
+Generated contract schemas are available offline through `gh-delta schema --format compact|ndjson|json`.
+
+Quiet NDJSON ticks: `--omit-end` ([usage](docs/usage.md)).
 
 <p align="center">
   <a href="docs/img/schema-output.svg"><img src="docs/img/schema-output.svg" alt="gh-delta compact JSON Schema summary" width="720"></a>

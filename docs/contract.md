@@ -20,7 +20,7 @@ is no automatic v1 → v2 upgrade path; re-baseline the monitor instead.
 gh-delta [--repo <owner/name>] [--monitor-id <id>]
          [--state-file <path> | --state-dir <dir>]
          [--entities pr,issue] [--format json|text|compact|ndjson]
-         [--summary-line] [--detail] [--summaries] [--full]
+         [--omit-end] [--summary-line] [--detail] [--summaries] [--full]
          [--stale-after <duration>]
          [--only-classes <classes>] [--ignore-classes <classes>] [--ignore-authors <logins>] [--settled]
          [--baseline-emit-state]
@@ -84,7 +84,18 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
 - `--format` defaults to `json`. `text` is an operator/log mode; `compact` and
   `ndjson` are agent formats. Compact deltas are ordered by requested
   repository, PR before issue, then number; NDJSON finishes with exactly one
-  `end` record and newline.
+  `end` record and newline. Detector `--omit-end` (default false) is valid only
+  with effective format `ndjson`: stdout is the same delta lines without `end`
+  (empty string when there are zero deltas), and diagnostics that would have
+  lived on `end` are stderr text `gh-delta: error <compact JSON>` then
+  `gh-delta: warning <compact JSON>`, one LF per line, not NDJSON record types.
+  A quiet successful tick is zero stdout bytes and the original exit code.
+  Consumers must observe process completion and status because completeness,
+  counts, and `exitCode` are absent from the stream. `"omit-end"` is a Boolean
+  config key; `GH_DELTA_OMIT_END` accepts `true|false|1|0`. `read`, `wait`, and
+  other subcommands reject the flag. Invalid format pairings use that format's
+  ordinary error renderer (invalid format falls back to JSON) and do not get a
+  quiet-stdout guarantee.
 
 ### Project setup, configuration, and local DX commands
 
@@ -451,7 +462,9 @@ gh-delta wait --timeout <duration>
 ```
 
 `wait` supports only `--format json`; agent compact and NDJSON envelopes do not
-carry the wait command's required `reason` and `iterations` fields.
+carry the wait command's required `reason` and `iterations` fields. `wait`
+rejects `--omit-end` as an unknown option even when detector configuration
+enables omit-end.
 
 `wait` is a bounded worker loop. It runs a normal detector tick per iteration,
 so snapshots advance and each state-file lock is acquired and released within

@@ -76,6 +76,8 @@ The detector uses at-most-once delivery semantics: a successful detection writes
 the new snapshot before the agent acts on the printed deltas. Persist the tick
 output in scheduler logs before taking action. If you need at-least-once action
 delivery, wrap `gh-delta` with an external queue or acknowledgement layer.
+`--omit-end` does not acknowledge delivery. Its stderr diagnostics still count
+toward a consumer's output cap.
 
 Local watch labels are routing context, not proof of ownership. Upgrade every
 reader and writer of a shared watch directory before using labels: old binaries

@@ -55,6 +55,50 @@ test('no project, user, or GH_DELTA values preserves argv byte-for-byte', () => 
   assert.deepEqual(result, { ok: true, argv, source: null });
 });
 
+test('omit-end boolean config and env follow existing precedence', () => {
+  const files = new Map([
+    ['/repo/.gh-delta.json', JSON.stringify({ format: 'ndjson', 'omit-end': true })],
+  ]);
+  const readFileSync = (path) => {
+    if (!files.has(path)) {
+      const error = new Error('missing');
+      error.code = 'ENOENT';
+      throw error;
+    }
+    return files.get(path);
+  };
+  const envFalse = applyConfig(['--format', 'ndjson'], {
+    cwd: () => '/repo',
+    homedir: () => '/home',
+    env: { GH_DELTA_OMIT_END: 'false' },
+    readFileSync,
+  });
+  assert.equal(envFalse.ok, true);
+  assert.equal(envFalse.argv.includes('--omit-end'), false);
+
+  const envTrue = applyConfig(['--format', 'ndjson'], {
+    cwd: () => '/repo',
+    homedir: () => '/home',
+    env: { GH_DELTA_OMIT_END: 'true' },
+    readFileSync: () => {
+      const error = new Error('missing');
+      error.code = 'ENOENT';
+      throw error;
+    },
+  });
+  assert.equal(envTrue.ok, true);
+  assert.ok(envTrue.argv.includes('--omit-end'));
+
+  const stringValue = applyConfig([], {
+    cwd: () => '/repo',
+    homedir: () => '/home',
+    env: {},
+    readFileSync: () => JSON.stringify({ 'omit-end': 'true' }),
+  });
+  assert.equal(stringValue.ok, false);
+  assert.match(stringValue.error, /omit-end must be a boolean/);
+});
+
 test('configuration supplies detector outpost settings to the delivery boundary', async () => {
   let delivered = 0;
   const result = await runWithOutpost([], {
