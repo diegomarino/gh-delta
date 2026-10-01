@@ -6682,3 +6682,26 @@ test('watch sync manifests keep strict batching, omit-end output, labels, and te
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('watch sync missing input exits 1 without changing the watch set', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-sync-missing-input-'));
+  try {
+    const watch = join(dir, 'watch');
+    addWatch(watch, 'pr:3', 'merged');
+    const before = readWatch(watch);
+    const result = await runCommand([
+      'watch',
+      'sync',
+      '--from',
+      join(dir, 'missing.txt'),
+      '--watch-dir',
+      watch,
+    ]);
+    assert.equal(result.code, 1);
+    assert.equal(result.output, '');
+    assert.match(result.stderr, /watch sync:.*ENOENT/);
+    assert.deepEqual(readWatch(watch), before);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

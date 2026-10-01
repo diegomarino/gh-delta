@@ -270,3 +270,20 @@ test('markManifestTerminalIgnored rejects a stale generation', () => {
   );
   assert.equal(Object.hasOwn(readWatch(dir)[0], 'ignoredTerminalAt'), false);
 });
+
+test('manifest readers and sync reject duplicate identities without rewriting state', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-sync-duplicate-manifest-'));
+  syncWatch(dir, 'pr:3 until=merged\nend 1\n');
+  const path = join(dir, 'watch-set.json');
+  const manifest = JSON.parse(readFileSync(path, 'utf8'));
+  manifest.entries.push({ ...manifest.entries[0], until: 'closed' });
+  const damaged = JSON.stringify(manifest);
+  writeFileSync(path, damaged);
+  assert.throws(() => readWatch(dir), /invalid watch entry watch-set.json/);
+  assert.throws(() => readWatchGeneration(dir), /invalid watch entry watch-set.json/);
+  assert.throws(
+    () => syncWatch(dir, 'pr:3 until=merged\nend 1\n'),
+    /invalid watch entry watch-set.json/,
+  );
+  assert.equal(readFileSync(path, 'utf8'), damaged);
+});
