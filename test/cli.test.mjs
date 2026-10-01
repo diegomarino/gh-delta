@@ -2235,7 +2235,7 @@ test('a real concurrent watch add attempted during mark-and-publish fails fast, 
     ],
     d,
   );
-  assert.match(String(concurrentAddThrew?.message), /watch entry locked/);
+  assert.match(String(concurrentAddThrew?.message), /watch directory locked/);
   // The tick itself is unaffected by the OTHER process's failed attempt --
   // its own hold on the lock, not the contender's, is what mattered.
   assert.equal(code, 0);
@@ -6000,14 +6000,18 @@ test('detector accepts one watch version after an update between parsing and cap
   assert.equal(JSON.parse(readFileSync(join(watch, 'pr-42.json'), 'utf8')).labels.thread, 'newer');
 });
 
-test('a label replacement immediately before terminal marking aborts without publishing', () => {
+test('an external label replacement immediately before terminal marking aborts without publishing', () => {
   const root = mkdtempSync(join(tmpdir(), 'gd-label-mark-race-'));
   const watch = join(root, 'watch');
   addWatch(watch, 'pr:42', 'merged', { labels: { thread: 'earlier' } });
   const d = deps([], { existing: { pr: { 42: item(openFp) }, issue: {} } });
   d.fetchPRsByNumber = () => ({ rows: [{ ...basePr, state: 'merged' }], rateLimit: RATE_LIMIT });
   d.withTerminalMarkLocks = (_paths, fn) => {
-    addWatch(watch, 'pr:42', 'merged', { labels: { thread: 'newer' } });
+    // Cooperating add/rm now respect the directory lock. An external writer
+    // can still replace legacy bytes; the terminal-mark comparison must refuse it.
+    const path = join(watch, 'pr-42.json');
+    const current = JSON.parse(readFileSync(path, 'utf8'));
+    writeFileSync(path, JSON.stringify({ ...current, labels: { thread: 'newer' } }));
     return fn();
   };
   const result = run(
@@ -7180,5 +7184,175 @@ test('transient body enrichment renders escaped text and stays absent on durable
     assert.equal(replay.output, '|\n');
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('watch sync writes the success report and keeps stdout empty on rejection', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-sync-cli-'));
+  const from = join(dir, 'desired.txt');
+  writeFileSync(from, 'pr:3 until=merged repo=acme/widgets thread=t-0004\nend 1\n');
+  const ok = await runCommand(
+    ['watch', 'sync', '--from', from, '--watch-dir', join(dir, 'watch')],
+    { now: () => '2026-09-30T10:00:00.000Z' },
+  );
+  assert.equal(ok.code, 0);
+  assert.deepEqual(JSON.parse(ok.output), {
+    schemaVersion: 2,
+    command: 'watch sync',
+    added: [{ repo: 'acme/widgets', entity: 'pr', number: 3 }],
+    removed: [],
+    updated: [],
+    unchanged: [],
+  });
+  writeFileSync(from, 'pr:3 until=merged\n');
+  const bad = await runCommand(
+    ['watch', 'sync', '--from', from, '--watch-dir', join(dir, 'watch')],
+    { now: () => '2026-09-30T10:00:00.000Z' },
+  );
+  assert.equal(bad.code, 2);
+  assert.equal(bad.output, '');
+  assert.match(bad.stderr, /watch sync/);
+  const listed = JSON.parse(readFileSync(join(dir, 'watch', 'watch-set.json'), 'utf8'));
+  assert.equal(listed.entries.length, 1);
+  const empty = await runCommand(
+    ['watch', 'sync', '--from', '-', '--watch-dir', join(dir, 'watch')],
+    {
+      now: () => '2026-09-30T10:00:00.000Z',
+      stdin: 'end 0\n',
+    },
+  );
+  assert.equal(empty.code, 2);
+  assert.equal(empty.output, '');
+});
+
+test('generation change before publication writes no snapshot', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-sync-gen-abort-'));
+  writeFileSync(join(dir, 'desired.txt'), 'pr:42 until=merged\nend 1\n');
+  run(['watch', 'sync', '--from', join(dir, 'desired.txt'), '--watch-dir', join(dir, 'watch')], {
+    now: () => '2026-09-30T10:00:00.000Z',
+  });
+  let calls = 0;
+  const d = deps([[]]);
+  d.fetchPRsByNumber = () => ({ rows: [{ ...basePr }], rateLimit: RATE_LIMIT });
+  d.fetchPRs = () => {
+    throw new Error('broad fetch must not run');
+  };
+  d.readWatchGeneration = () => {
+    calls += 1;
+    return {
+      entries: [{ entity: 'pr', number: 42, until: 'merged', addedAt: '2026-09-30T10:00:00.000Z' }],
+      generation: calls === 1 ? 'g1' : 'g2',
+    };
+  };
+  const result = run(
+    ['--repo', 'o/r', '--state-file', join(dir, 'state.json'), '--watch-dir', join(dir, 'watch')],
+    d,
+  );
+  assert.equal(result.code, 1);
+  assert.equal(d.writes, 0);
+  assert.equal(calls, 2);
+});
+
+test('watch sync storage failures exit 1 with a watch sync prefix', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-sync-eacces-'));
+  const blocker = join(dir, 'not-a-dir');
+  writeFileSync(blocker, 'file');
+  const from = join(dir, 'desired.txt');
+  writeFileSync(from, 'pr:3 until=merged\nend 1\n');
+  const bad = await runCommand(
+    ['watch', 'sync', '--from', from, '--watch-dir', join(blocker, 'watch')],
+    { now: () => '2026-09-30T10:00:00.000Z' },
+  );
+  assert.equal(bad.code, 1);
+  assert.equal(bad.output, '');
+  assert.match(bad.stderr, /watch sync/);
+});
+
+test('watch sync manifests keep strict batching, omit-end output, labels, and terminal cleanup', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-sync-strict-output-'));
+  try {
+    const watch = join(dir, 'watch');
+    const desired = Array.from(
+      { length: 11 },
+      (_, i) => `pr:${i + 1} until=merged repo=o/r thread=t-${i + 1}`,
+    ).join('\n');
+    const synced = await runCommand(['watch', 'sync', '--from', '-', '--watch-dir', watch], {
+      stdin: `${desired}\nend 11\n`,
+    });
+    assert.equal(synced.code, 0);
+    const d = deps([[]]);
+    const batches = [];
+    let merged = false;
+    d.fetchPRs = d.fetchIssues = () => assert.fail('strict manifest must use targeted fetches');
+    d.fetchPRsByNumber = (_repo, numbers) => {
+      batches.push([...numbers]);
+      return {
+        rows: numbers.map((number) => ({
+          ...basePr,
+          number,
+          state: merged && number === 11 ? 'merged' : 'open',
+        })),
+        rateLimit: RATE_LIMIT,
+      };
+    };
+    const args = [
+      '--repo',
+      'o/r',
+      '--state-file',
+      join(dir, 'state.json'),
+      '--watch-dir',
+      watch,
+      '--watch-strict',
+      '--entities',
+      'pr',
+      '--format',
+      'ndjson',
+      '--omit-end',
+    ];
+    const baseline = await runCommand(args, d);
+    assert.equal(baseline.code, 0);
+    assert.equal(baseline.output, '');
+    assert.equal(baseline.stderr, '');
+    assert.deepEqual(batches, [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10], [11]]);
+    assert.equal(d.writePath, `${join(dir, 'state.json')}.watch.json`);
+    merged = true;
+    const tick = await runCommand(args, d);
+    assert.equal(tick.code, 10);
+    const records = tick.output.trimEnd().split('\n').map(JSON.parse);
+    assert.equal(records.length, 1);
+    assert.equal(records[0].type, 'delta');
+    assert.equal(records[0].number, 11);
+    assert.deepEqual(records[0].watch.labels, { thread: 't-11' });
+    assert.equal(tick.stderr, '');
+    assert.equal(readWatch(watch).length, 10);
+    assert.equal(
+      readWatch(watch).some((entry) => entry.number === 11),
+      false,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('watch sync missing input exits 1 without changing the watch set', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-sync-missing-input-'));
+  try {
+    const watch = join(dir, 'watch');
+    addWatch(watch, 'pr:3', 'merged');
+    const before = readWatch(watch);
+    const result = await runCommand([
+      'watch',
+      'sync',
+      '--from',
+      join(dir, 'missing.txt'),
+      '--watch-dir',
+      watch,
+    ]);
+    assert.equal(result.code, 1);
+    assert.equal(result.output, '');
+    assert.match(result.stderr, /watch sync:.*ENOENT/);
+    assert.deepEqual(readWatch(watch), before);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

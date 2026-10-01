@@ -60,7 +60,7 @@ gh-delta watch add pr:3 --until merged --watch-dir ./watch \
   --label thread=t-0004 --label package=F001-P05
 ```
 
-`--label` is local routing on `watch add` ([usage](docs/usage.md)).
+Labels and `watch sync`: [usage](docs/usage.md).
 
 ## Install
 

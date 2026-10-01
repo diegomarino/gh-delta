@@ -411,6 +411,19 @@ The second command replaces the entire label map, preserves `addedAt` and any
 remove and re-add to drop labels from the CLI, which resets lifecycle. API
 callers can pass `labels: {}`.
 
+`gh-delta watch sync --from desired.txt --watch-dir ./state/watch` reads a
+framed UTF-8 document (`pr:N`/`issue:N`, `until=`, optional `repo=` and labels,
+mandatory last record `end N`) and replaces the entire directory with one
+`watch-set.json` rename. `--repo` defaults unscoped input lines; it does not
+keep omitted repositories. Zero entries require `end 0` and `--allow-empty`.
+A truncated file without `end N` exits 2 and leaves membership unchanged.
+Redirect stdout away from a detector stream. Check the producer’s exit code
+before syncing: a complete frame does not reveal producer failure. After
+conversion, leftover `pr-*.json` files are ignored. Old binaries reject
+`watch-set.json`; mixed-version `add` can still write sidecars the new reader
+ignores. There is no automatic downgrade. `removeWatchUnchanged` and
+`markTerminalIgnored` throw in manifest mode; use `readWatch`/`listWatch`.
+
 A tick
 with an explicit `--watch-dir` automatically uses economical mode when
 `--entities` includes `pr` and the validated list has zero to ten PR entries: it makes one aliased GraphQL request
