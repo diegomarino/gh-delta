@@ -121,6 +121,24 @@ gh-delta \
   --detail
 ```
 
+`wait` is JSON-only because callers need `reason` and `iterations`. For a one-line
+relay of each emitted delta, use `--format template` with exactly one of
+`--template` or `--template-file`. This is not NDJSON and does not emit `end`.
+The placeholder allowlist lives in the
+[contract](contract.md#per-delta-templates). `{watch.labels.task.id}` is one
+label key. `--template-sha256` hashes the raw file bytes. Escaping does not make
+title or body text safe to execute. `read` does not inherit detector template
+config. Worked examples: [template examples](template-examples.md).
+
+```bash
+gh-delta --repo owner/repo --format template --template '{entity} #{number} [{classes}]'
+```
+
+```bash
+gh-delta read --cursor ./triage.cursor.json --advance --format template \
+  --template '{watch.labels.task.id}: {repo} #{number} {{state={summary.state}}}'
+```
+
 ### Durable replay log
 
 Add `--log` when more than one consumer needs durable replay after a detector

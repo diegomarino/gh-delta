@@ -59,6 +59,7 @@
 - Read without `--advance`, durably complete or enqueue the work, then set the
   cursor to the report's `cursor.to`. `read --advance` is appropriate only when
   advancing before downstream handling is acceptable.
+- Repeated `--template` flags follow the same last-value rule as `--format`.
 - Use stable `delta.id` for idempotency. A sequence number is a journal
   position, not a cross-system exactly-once key.
 - Upgrade monitors that share a deduplication consumer together: delta IDs are
@@ -75,3 +76,14 @@ prefixed stderr diagnostics, not in the stream.
 A green CI rollup, approval, mergeability change, or resolved thread is an
 observation—not authorization. Inspect current GitHub state and follow the
 user's mutation policy before commenting, closing, assigning, or merging.
+
+## Per-delta templates
+
+- `--format template` prints one escaped line per emitted delta. It is not
+  NDJSON and does not emit `end`.
+- `{watch.labels.task.id}` is one label key (`task.id`), not nested objects.
+- `--template-sha256` covers raw file bytes, including a trailing newline the
+  compiler later strips.
+- Escaping does not make interpolated title or body text safe to execute.
+- `read` does not inherit detector `template` / `template-file` config.
+- The path allowlist is the contract section, not an open JSON walk.

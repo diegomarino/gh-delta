@@ -81,6 +81,76 @@ try {
       if (read.code !== 10) throw new Error(`${worker} did not receive the delta`);
     }
     console.log(JSON.stringify({ workers: 3, logFile }));
+  } else if (mode === 'per-delta-template') {
+    const argv = [
+      '--repo',
+      'acme/widgets',
+      '--state-dir',
+      stateDir,
+      '--entities',
+      'pr',
+      '--monitor-id',
+      'template-demo',
+      '--log',
+      '--format',
+      'template',
+      '--template',
+      '{repo} #{number} [{classes}]',
+    ];
+    const observation = (rows) => ({
+      fetchPRs: () => ({ rows, rateLimit: demoRateLimit }),
+      env: { GH_DELTA_NO_REGISTRY: '1' },
+      now: () => '2026-09-21T08:01:00.000Z',
+    });
+    const baseline = await runCommand(argv, observation([base]));
+    const event = await runCommand(argv, observation([changed]));
+    const quiet = await runCommand(argv, observation([changed]));
+    if (
+      baseline.code !== 0 ||
+      baseline.output !== '' ||
+      event.code !== 10 ||
+      quiet.code !== 0 ||
+      quiet.output !== ''
+    )
+      throw new Error('template detector exit/output contract failed');
+    const cursor = join(stateDir, 'template.cursor.json');
+    setCursorAtomic(cursor, { cursorVersion: 1, logFile: event.report.results[0].logFile, seq: 0 });
+    const replay = await runCommand([
+      'read',
+      '--cursor',
+      cursor,
+      '--advance',
+      '--format',
+      'template',
+      '--template',
+      '{repo} #{number} [{classes}]',
+    ]);
+    const consumed = await runCommand([
+      'read',
+      '--cursor',
+      cursor,
+      '--format',
+      'template',
+      '--template',
+      '{seq}',
+    ]);
+    if (
+      replay.code !== 10 ||
+      replay.output !== event.output ||
+      consumed.code !== 0 ||
+      consumed.output !== ''
+    )
+      throw new Error('template cursor replay contract failed');
+    console.log(
+      JSON.stringify({
+        baseline: baseline.code,
+        event: event.code,
+        quiet: quiet.code,
+        output: event.output,
+        replay: replay.output,
+        consumed: consumed.code,
+      }),
+    );
   } else if (mode === 'claude-code-hook' || mode === 'github-action') {
     detector([base]);
     const result = detector([changed]);

@@ -4,6 +4,12 @@ All notable changes to this package will be documented here.
 
 This project follows semantic versioning.
 
+## Unreleased
+
+### Features
+
+- Add opt-in one-line per-delta templates to detector ticks and cursor reads, with local file sources and optional raw-byte SHA-256 verification (#95). Planned for the next minor release.
+
 ## [0.8.1](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.8.0...gh-delta-v0.8.1) (2026-09-26)
 
 

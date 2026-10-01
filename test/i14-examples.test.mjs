@@ -6,7 +6,13 @@ import { fileURLToPath } from 'node:url';
 
 const root = new URL('../', import.meta.url);
 const path = (relative) => new URL(relative, root);
-const examples = ['agent-worker-wait', 'coordinator-fanout', 'claude-code-hook', 'github-action'];
+const examples = [
+  'agent-worker-wait',
+  'coordinator-fanout',
+  'claude-code-hook',
+  'github-action',
+  'per-delta-template',
+];
 
 test('I-14 agent examples are executable deterministic local smokes', () => {
   for (const name of examples) {
