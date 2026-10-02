@@ -224,6 +224,30 @@ test('canonicalLabels accepts a bounded sorted map and rejects the grammar bound
   assert.throws(() => canonicalLabels(labeled('constructor', 'x')), /label/i);
   assert.throws(() => canonicalLabels(labeled('prototype', 'x')), /label/i);
   assert.deepEqual(canonicalLabels({ [key32]: value128 }), { [key32]: value128 });
+  const hiddenValid = {};
+  Object.defineProperty(hiddenValid, 'thread', {
+    value: 't1',
+    enumerable: false,
+    configurable: true,
+  });
+  assert.deepEqual(canonicalLabels(hiddenValid), { thread: 't1' });
+  const hiddenReserved = { thread: 't1' };
+  Object.defineProperty(hiddenReserved, 'until', {
+    value: 'merged',
+    enumerable: false,
+    configurable: true,
+  });
+  assert.throws(() => canonicalLabels(hiddenReserved), /label/i);
+  const withSymbol = { thread: 't1' };
+  Object.defineProperty(withSymbol, Symbol('meta'), { value: 'x' });
+  assert.throws(() => canonicalLabels(withSymbol), /label/i);
+  const nineWithHidden = Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`k${i}`, 'v0']));
+  Object.defineProperty(nineWithHidden, 'until', {
+    value: 'merged',
+    enumerable: false,
+    configurable: true,
+  });
+  assert.throws(() => canonicalLabels(nineWithHidden), /at most 8 labels/);
 });
 
 const NOW = '2026-09-30T10:00:00.000Z';
@@ -293,6 +317,56 @@ test('changing until carries existing labels unless an explicit map is given', (
   });
   assert.deepEqual(explicit.entry.labels, { package: 'F001-P05' });
   assert.equal(Object.hasOwn(explicit.entry, 'ignoredTerminalAt'), false);
+});
+
+test('non-enumerable reserved own labels are rejected before any watch write', () => {
+  const poisoned = { thread: 't1' };
+  Object.defineProperty(poisoned, 'until', {
+    value: 'merged',
+    enumerable: false,
+    configurable: true,
+  });
+  const missing = join(tmpdir(), `gd-watch-labels-hidden-${process.pid}-${Date.now()}`);
+  assert.throws(
+    () => addWatch(missing, 'pr:3', 'merged', { now: () => NOW, labels: poisoned }),
+    /label/i,
+  );
+  assert.equal(existsSync(missing), false);
+
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-labels-hidden-existing-'));
+  addWatch(dir, 'pr:3', 'merged', { now: () => NOW, labels: { thread: 't-0004' } });
+  const before = bytes(dir, 'pr-3.json');
+  assert.throws(
+    () => addWatch(dir, 'pr:3', 'merged', { now: () => LATER, labels: poisoned }),
+    /label/i,
+  );
+  assert.equal(bytes(dir, 'pr-3.json'), before);
+
+  const symbolic = { thread: 't1' };
+  Object.defineProperty(symbolic, Symbol('meta'), { value: 'x' });
+  assert.throws(
+    () => addWatch(dir, 'pr:3', 'merged', { now: () => LATER, labels: symbolic }),
+    /label/i,
+  );
+  assert.equal(bytes(dir, 'pr-3.json'), before);
+});
+
+test('addWatch persists a valid non-enumerable label as a canonical enumerable map', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-labels-hidden-valid-'));
+  const hidden = {};
+  Object.defineProperty(hidden, 'thread', {
+    value: 't1',
+    enumerable: false,
+    configurable: true,
+  });
+  const created = addWatch(dir, 'pr:3', 'merged', { now: () => NOW, labels: hidden });
+  assert.equal(created.added, true);
+  assert.deepEqual(created.entry.labels, { thread: 't1' });
+  assert.deepEqual(Object.keys(created.entry.labels), ['thread']);
+  assert.equal(
+    bytes(dir, 'pr-3.json'),
+    '{"entity":"pr","number":3,"until":"merged","addedAt":"2026-09-30T10:00:00.000Z","labels":{"thread":"t1"}}\n',
+  );
 });
 
 test('invalid labels and malformed label-bearing entries do not change bytes', () => {
