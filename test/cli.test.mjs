@@ -1,4 +1,5 @@
 // CLI contract tests: detector exits, snapshots, rate-limit floor, and timeouts.
+// Neighboring CLI behavior stays in focused siblings: test/cli-*.test.mjs.
 process.env.GH_DELTA_NO_REGISTRY = '1';
 
 import { test } from 'node:test';
