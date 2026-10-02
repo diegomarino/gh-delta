@@ -424,30 +424,73 @@ conversion, leftover `pr-*.json` files are ignored. Old binaries reject
 ignores. There is no automatic downgrade. `removeWatchUnchanged` and
 `markTerminalIgnored` throw in manifest mode; use `readWatch`/`listWatch`.
 
-A tick
-with an explicit `--watch-dir` automatically uses economical mode when
-`--entities` includes `pr` and the validated list has zero to ten PR entries: it makes one aliased GraphQL request
-for unique PR numbers (or no GitHub request for an empty list), never fetches
-issues, and writes an independent watch snapshot. Its log is derived from that
-same selected snapshot path. Derived paths end in
-`__watch-pr.json`; an explicit `--state-file x.json` uses
-`x.json.watch.json`. Removing an entry projects it out before diffing (no
+A tick with an explicit `--watch-dir` automatically uses economical mode when
+`--entities` includes `pr` and the validated list has zero to ten PR-only
+entries: it makes one aliased GraphQL request for unique PR numbers (or no
+GitHub request for an empty list), never fetches issues, and writes an
+independent watch snapshot. Its log is derived from that same selected snapshot
+path. Derived paths end in `__watch-pr.json`; an explicit `--state-file x.json`
+uses `x.json.watch.json`. Removing an entry projects it out before diffing (no
 missing delta); a null result for an entry still watched follows the normal
-missing lifecycle. Re-adding a removed PR can therefore be `new` (or baseline
-on a fresh watch snapshot). A list containing an issue or more than ten entries
-falls back to the ordinary full fetch and ordinary snapshot; so does
-`--entities issue`. Opt in with `--watch-strict` to keep the economical
-snapshot at every size. It batches PRs by ten, publishes only after every
-batch succeeds, and admits a floored batch only when remaining quota minus the
-floor covers the batches still needed. A finished last batch may drop below
-the floor. A later batch failure or admission refusal still publishes nothing,
-but keeps already validated GraphQL costs in `results[].rateLimit`. The stable
-configuration error is `--watch-strict requires an entity selection including pr`.
+missing lifecycle. Re-adding a removed item can therefore be `new` (or baseline
+on a fresh watch snapshot). Without `--watch-strict`, a list containing an
+issue, more than ten entries, or `--entities issue` keeps the ordinary full
+fetch and ordinary snapshot.
+
+`--watch-strict` keeps that targeted behavior at every list size and extends it
+to issues. `--entities pr` rejects applicable issue entries. `--entities issue`
+rejects applicable PR entries, fetches `repository.issue(number:)` through the
+existing issue normalizer, and writes `__watch-issue.json` (or
+`<state-file>.watch-issue.json`). `--entities pr,issue` accepts both. A
+selection that still contains only PRs, including an empty list, keeps the
+existing `watch-pr` snapshot. The first applicable issue uses a new
+`watch-pr-issue` snapshot (`__watch-pr-issue.json`, or
+`<state-file>.watch-pr-issue.json`) and does not migrate or delete `watch-pr`.
+That first mixed tick is a fresh baseline.
+
+Strict mode captures membership once, orders it by entity (`pr` then `issue`)
+then number, and fetches batches of at most ten. A batch may contain both PR
+and issue aliases. It publishes a repository only after every batch for that
+repository succeeds. A later batch failure or admission refusal still publishes
+nothing for that repository, but keeps already validated GraphQL costs in
+`results[].rateLimit`. Other repositories in the same invocation keep their
+own success or failure. With `--rate-limit-floor`, a batch starts only when
+remaining quota minus the floor covers the batches still needed. A finished
+last batch may drop below the floor. An empty list makes no GitHub request,
+including no quota preflight. `--watch-strict` still requires `--watch-dir`
+and remains incompatible with `--number`.
+
+Issue closure, assignment, labels, and comments use the existing issue
+classifier. `issue --until closed` retires the entry after that observation; it
+does not keep watching a later reopening unless the entry is added again.
+Removing an entry projects it out of the strict snapshot instead of emitting a
+false missing event.
 
 ```sh
 gh-delta --repo owner/repo --monitor-id scheduled --entities pr \
   --state-dir ./state --watch-dir ./watch --watch-strict \
   --rate-limit-floor 100 --format ndjson
+```
+
+```sh
+gh-delta watch add issue:42 --repo owner/repo --until closed \
+  --watch-dir ./watch-issues \
+  --label project=example --label task=design-voice
+gh-delta --repo owner/repo --monitor-id project-issues \
+  --state-dir ./state --watch-dir ./watch-issues \
+  --watch-strict --entities issue \
+  --format ndjson --omit-end --log
+```
+
+```sh
+gh-delta watch add pr:3 --repo owner/repo --until merged \
+  --watch-dir ./watch-mixed --label thread=t-0004
+gh-delta watch add issue:42 --repo owner/repo --until closed \
+  --watch-dir ./watch-mixed --label task=design-voice
+gh-delta --repo owner/repo --monitor-id project-mixed \
+  --state-dir ./state --watch-dir ./watch-mixed \
+  --watch-strict --entities pr,issue \
+  --format ndjson --omit-end --log
 ```
 
 Use `--number

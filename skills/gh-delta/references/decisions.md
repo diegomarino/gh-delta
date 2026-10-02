@@ -24,7 +24,12 @@
 - Ask whether the user wants PRs, issues, both, or a selected set before the
   first baseline. Changing entities later changes monitor identity.
 - Prefer the smallest universe that answers the question. A PR-only watch list
-  containing at most ten entries uses a targeted GraphQL query.
+  containing at most ten entries uses a targeted GraphQL query. `--watch-strict`
+  is the same targeted fetch for any count of PRs, for issue-only lists, and
+  for mixed lists. It never scans the repository issue or PR connection.
+  Issue-only and mixed-with-issues histories are separate snapshots
+  (`watch-issue`, `watch-pr-issue`) and start a fresh baseline. A `pr,issue`
+  selection that still contains only PRs keeps the existing `watch-pr` history.
 - `--number` filters results after the ordinary fetch. It does not make a large
   repository cheaper or avoid broad-query failures.
 - Broad fetching fails closed above 1,000 open items per entity family or 3,000

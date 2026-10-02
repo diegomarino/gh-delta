@@ -160,6 +160,8 @@ test('watch-strict at 11 PRs uses the economical snapshot and rejects issue entr
       '--watch-dir',
       dir,
       '--watch-strict',
+      '--entities',
+      'pr',
     ],
     d,
   );
@@ -198,7 +200,7 @@ test('watch-strict at 11 PRs uses the economical snapshot and rejects issue entr
   assert.equal(issuesOnly.code, 2);
   assert.match(
     issuesOnly.report.results?.[0]?.error?.message ?? issuesOnly.report.error,
-    /--watch-strict requires an entity selection including pr/,
+    /--watch-strict cannot include pr watch entries/,
   );
   assert.equal(called, false);
 
@@ -609,7 +611,7 @@ test('status --watch-strict rejects issue entries and illegal selections before 
     d,
   );
   assert.equal(issuesOnly.code, 2);
-  assert.match(issuesOnly.report.error, /--watch-strict requires an entity selection including pr/);
+  assert.match(issuesOnly.report.error, /--watch-strict cannot include pr watch entries/);
   assert.equal(fetched, 0);
 });
 
@@ -638,7 +640,7 @@ test('strict config errors do not resolve a repository', () => {
     d,
   );
   assert.equal(issuesOnly.code, 2);
-  assert.match(issuesOnly.report.error, /--watch-strict requires an entity selection including pr/);
+  assert.match(issuesOnly.report.error, /--watch-strict cannot include pr watch entries/);
   const numbered = run(
     ['--watch-strict', '--number', '1', '--entities', 'pr', '--state-file', join(dir, 's.json')],
     d,
@@ -1057,7 +1059,11 @@ test('invalid strict waits fail before heartbeat or detector state mutation', as
     mkdirSync(watch);
     const cases = [
       { args: [], error: /requires --watch-dir/ },
-      { args: ['--watch-dir', watch, '--entities', 'issue'], error: /including pr/ },
+      {
+        args: ['--watch-dir', watch, '--entities', 'issue'],
+        entry: { entity: 'pr', number: 2, until: 'merged' },
+        error: /cannot include pr watch entries/,
+      },
       { args: ['--watch-dir', watch, '--number', '1'], error: /mutually exclusive/ },
       {
         args: ['--watch-dir', watch],

@@ -80,7 +80,11 @@ gh-delta [--repo <owner/name>] [--monitor-id <id>]
   path scoped by repo, monitor id, and selected entities (see
   [Snapshot Semantics](#snapshot-semantics)). Both together exit `2` (config).
   An eligible economical `--watch-dir` tick deliberately selects an independent
-  derived `__watch-pr.json` path (or `<state-file>.watch.json`) instead.
+  derived `__watch-pr.json` path (or `<state-file>.watch.json`) instead. Strict
+  issue-only and mixed-with-issues ticks use `__watch-issue.json` and
+  `__watch-pr-issue.json` (explicit siblings `.watch-issue.json` and
+  `.watch-pr-issue.json`). Those files are new baselines; they do not replace
+  `watch-pr` or a poll snapshot.
 - `--entities` defaults to `pr,issue`. Accepted: `pr`, `issue`, `pr,issue`.
 - `--format` defaults to `json`. `text` is an operator/log mode; `compact` and
   `ndjson` are agent formats. Compact deltas are ordered by requested
@@ -240,7 +244,8 @@ tick before the local read, while the final status command still exits `0` on
 success. A refresh preserves existing stale bookkeeping for unchanged items; a
 real fingerprint change resets it. `--number` filters every returned entity. With `--watch-dir`, a local
 0-10 PR-only watch universe reads the detector's separate economical watch
-snapshot; all other watch lists use the normal snapshot. `text` renders the same
+snapshot. `--watch-strict` reads `watch-pr`, `watch-issue`, or `watch-pr-issue`
+for that same selection. Every other watch list uses the normal snapshot. `text` renders the same
 returned items as the JSON report.
 
 `--stale-after <duration>` uses the shared duration grammar. An open item whose
@@ -421,7 +426,8 @@ entries, so it is safe to run at any time, including while monitors tick.
   monitor id, and entities), or — for arbitrary filenames — the identity the
   detector stamps inside the snapshot (`meta.repo`, `meta.monitorId`,
   `meta.entities`; see [Snapshot Semantics](#snapshot-semantics)). Economical
-  PR-watch entries additionally expose `scope: "watch-pr"`. Files
+  Targeted watch entries additionally expose `scope: "watch-pr"`, `"watch-issue"`,
+  or `"watch-pr-issue"`. Files
   identified neither way are counted in `skippedFiles`.
 - A missing state directory or registry is an empty inventory (exit `0`), not
   an error.
@@ -504,19 +510,22 @@ gh-delta reset --repo <owner/name> --monitor-id <id>
 Deletes one monitor's snapshot and durable log to start a clean baseline. This
 is the documented recovery for a monitor stuck on an unreadable or
 pre-schema-v2 snapshot/log — schema v1 is never migrated (see the note at the
-top of this document). With `--state-dir`, reset resolves both the selected
-poll snapshot and the independent economical `watch-pr` snapshot, locks both
-in stable path order, and releases the locks last. A concurrent tick against
-either identity therefore sees the fully intact pre-reset state or the fully
-clean post-reset state, never a half-deleted monitor. `--state-file` remains
-an exact explicit target. Each target deletes its snapshot file, published log
+top of this document). With `--state-dir`, reset resolves the selected poll snapshot and the strict
+watch snapshots that belong to that entity selection: `pr` also deletes
+`watch-pr`; `issue` also deletes `watch-issue` and does not delete `watch-pr`;
+`pr,issue` also deletes `watch-pr` and `watch-pr-issue` and does not delete
+`watch-issue`. It locks every target in stable path order and releases the
+locks last. A concurrent tick against any of those identities therefore sees
+the fully intact pre-reset state or the fully clean post-reset state, never a
+half-deleted monitor. `--state-file` remains an exact explicit target and does
+not follow strict siblings. Each target deletes its snapshot file, published log
 manifest, and log data file. `--yes` is required; without it, reset is refused
 before any lock is acquired. A monitor with nothing on disk resets
 successfully as a no-op.
 
 The success report retains the primary `stateFile` and `logFile` paths and
 adds `targets`: each `{scope,stateFile,logFile,removed,missing}` records the
-poll or `watch-pr` target and the exact paths removed or found absent (see
+poll or watch target and the exact paths removed or found absent (see
 `RESET_REPORT_FIELDS` and `RESET_TARGET_FIELDS` in `gh-delta/contract`).
 
 **External cursor behavior after reset.** An external consumer cursor bound to
@@ -1517,7 +1526,12 @@ object }` shape with numeric object keys and current `meta.schemaVersion` is
 - An eligible economical watch list is intentionally a separate PR-only history:
   its derived path ends `__watch-pr.json` and its explicit-file path appends
   `.watch.json`. Its metadata carries `scope: "watch-pr"`, so `list` reports it
-  instead of treating it as an unknown filename.
+  instead of treating it as an unknown filename. Strict issue-only history ends
+  `__watch-issue.json` (explicit `.watch-issue.json`, `scope: "watch-issue"`).
+  Strict mixed history that contains an issue ends `__watch-pr-issue.json`
+  (explicit `.watch-pr-issue.json`, `scope: "watch-pr-issue"`). A `pr,issue`
+  selection with no issue entry keeps using `watch-pr`. None of these paths is
+  deleted or rewritten when another scope is created.
 - Filename segments are encoded with `encodeURIComponent` **plus `_` additionally
   encoded as `%5F`**, making derived names injective for CLI inputs. Library
   callers passing raw entity strings containing `__` to `snapshotPath` directly
@@ -1903,24 +1917,48 @@ exactly one GraphQL request using `repository.pullRequest(number:)` aliases for
 the unique watched numbers (zero requests for an empty list), normalizes the
 same complete PR shape as broad polling, and never fetches issues. GraphQL
 errors, malformed aliases, and any nested connection overflow fail closed.
-`--number`, `--entities issue`, any issue entry, or more than ten entries retains
-broad fetching and the ordinary snapshot. `--watch-strict` is the explicit
-exception: it keeps this economical identity at every list size.
+Without `--watch-strict`, `--number`, `--entities issue`, any issue entry, or
+more than ten entries retains broad fetching and the ordinary snapshot.
 
-`--watch-strict` requires `--watch-dir` and an entity selection that includes
-`pr`. The stable configuration error for a selection that does not include `pr`
-is `--watch-strict requires an entity selection including pr`. Both `pr` and
-`pr,issue` are valid selections, but only PRs are observed. An applicable issue
-watch entry, `--entities issue`, `--number`, a missing `--watch-dir`, and
-`wait --from-log --watch-strict` are configuration errors (exit 2) before
-network work or state mutation. Lists above ten without the flag keep broad
-fetching.
+`--watch-strict` requires `--watch-dir` and rejects `--number` and
+`wait --from-log`. It observes exactly the applicable watched entities:
 
-Strict mode captures membership once, sorts unique positive PR numbers, and
-fetches sequential batches of at most ten with the same targeted query. It
-publishes only after every batch succeeds. Batch count `B = ceil(N / 10)` is a
-minimum cost, not an estimate or a cap: GitHub charges at least one point per
-request and cost prediction is approximate
+- `--entities pr` rejects an applicable issue entry with
+  `--watch-strict cannot include issue watch entries` and keeps the `watch-pr`
+  universe at every list size.
+- `--entities issue` rejects an applicable PR entry with
+  `--watch-strict cannot include pr watch entries`. Issues are fetched with
+  `repository.issue(number:)` and normalized by the same issue path as broad
+  polling, including closure, assignment, label, and comment classes. This is
+  a new `watch-issue` baseline. Before this release, `--entities issue` was a
+  configuration error (`--watch-strict requires an entity selection including pr`);
+  that error is gone.
+- `--entities pr,issue`, including the default selection, accepts both. If no
+  applicable entry is an issue, including an empty list, the tick stays on the
+  historical `watch-pr` snapshot. Previously an applicable issue entry was
+  rejected even under this selection. It now starts a separate `watch-pr-issue`
+  baseline. The previous `watch-pr` file is not deleted, migrated, or reset.
+
+Callers that want the old rejection of stray issue entries must pass
+`--entities pr`. A mismatch, duplicate effective identity, or invalid watch
+entry fails before network work or state mutation (exit 2).
+
+Strict mode captures membership once per repository and orders it by entity
+(`pr`, then `issue`) and number. Identity is `(repo, entity, number)`, so equal
+numbers do not collide across entities or repositories. It fetches sequential
+batches of at most ten items. A batch that contains an issue uses PR and issue
+aliases in that one request; a `watch-pr` batch keeps the existing targeted PR
+query. It does not read `pullRequests` or `issues` connections. A null alias is
+the ordinary missing item. A missing alias, wrong `__typename`, wrong number,
+GraphQL error, or nested connection overflow fails the batch and is not a
+successful observation. It publishes a repository only after every required
+batch for that repository succeeds. A later issue batch cannot publish an
+earlier PR batch from the same repository. Other repositories keep the existing
+per-repository success and failure split; there is no global atomicity across
+repositories.
+
+Batch count `B = ceil(N / 10)` is a minimum cost, not an estimate or a cap:
+GitHub charges at least one point per request and cost prediction is approximate
 ([rate limits and query limits](https://docs.github.com/en/graphql/overview/rate-limits-and-query-limits-for-the-graphql-api)).
 With `--rate-limit-floor F` and `B > 0`, one REST preflight runs after the
 state lock. A batch is admitted only when `remaining - floor >= batchesStillNeeded`.
@@ -1930,16 +1968,24 @@ publishes nothing for that repository, but `results[].rateLimit` retains already
 validated costs and the last remaining/reset values. A completed final batch
 may finish below the floor and still publishes, because no further batch needs
 admission. An empty strict list makes no GitHub call, including no REST
-preflight. Without the floor, strict mode performs no REST preflight.
-Non-strict floor behavior stays the single `remaining < floor` comparison.
+preflight, for every strict entity selection. Without the floor, strict mode
+performs no REST preflight. Non-strict floor behavior stays the single
+`remaining < floor` comparison.
 
-Economical ticks use a separate identity: derived paths end in
-`__watch-pr.json`, while `--state-file x.json` becomes `x.json.watch.json`.
-Locks, logs (the selected state file plus `.deltalog.ndjson`), registry entries,
-reports, and writes use that selected path, so
-crossing the eligibility boundary never reads or overwrites the other history.
-Before diffing, the old economical snapshot is projected to current watch
-membership: removing an entry is silent and prunes it on the next write; a null
-alias for an entry that remains watched enters the regular missing lifecycle.
-Re-adding a previously removed PR may consequently be `new` (or baseline on a
-fresh economical snapshot).
+Strict ticks use a separate identity from poll snapshots. `watch-pr` derived
+paths end in `__watch-pr.json`, and `--state-file x.json` becomes
+`x.json.watch.json`. `watch-issue` uses `__watch-issue.json` and
+`x.json.watch-issue.json`. `watch-pr-issue` uses `__watch-pr-issue.json` and
+`x.json.watch-pr-issue.json`. Locks, logs (the selected state file plus
+`.deltalog.ndjson`), registry entries, reports, and writes use that selected
+path, so a new scope never reads or overwrites another observation universe.
+Creating `watch-issue` or `watch-pr-issue` does not delete or reset existing
+state. The first successful tick of a new scope is a quiet baseline.
+Before diffing, the old strict snapshot is projected to current watch
+membership: removing an entry is silent and prunes that entity's number on the
+next write; a null alias for an entry that remains watched enters the regular
+missing lifecycle. Re-adding a previously projected item may consequently be
+`new`. `issue --until closed` retires the entry after the closing observation
+and does not keep watching a later reopening. Attention filters such as
+`--settled` are not a delay queue: a filtered delta is not replayed for that
+consumer, and the snapshot can still advance.

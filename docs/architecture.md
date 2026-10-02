@@ -373,9 +373,14 @@ GitHub entirely. The targeted universe has its own `__watch-pr.json` (or
 `.watch.json` explicit-file sibling), so its lock, delta log, registry record,
 report and snapshot never collide with broad polling. Before detection, old
 targeted state is projected to current membership: removal is silent, but a
-still-watched null alias follows the ordinary missing lifecycle. Lists with an
-issue, over ten entries, or `--entities issue` retain broad repository fetches. Terminal cleanup
-compares bytes read at tick start before unlinking after snapshot publication.
+still-watched null alias follows the ordinary missing lifecycle. Without
+`--watch-strict`, lists with an issue, over ten entries, or `--entities issue`
+retain broad repository fetches. `--watch-strict` batches any supported
+membership by ten and, for issues, uses `repository.issue(number:)` plus
+`normalizeIssue`. Issue-only state is `__watch-issue.json`; a mixed list that
+contains an issue is `__watch-pr-issue.json`. Neither replaces `watch-pr` or a
+poll snapshot. Terminal cleanup compares bytes read at tick start before
+unlinking after snapshot publication.
 
 The public contract currently supports only `pr`, `issue`, and `pr,issue`.
 Research notes under `docs/entities-research/` inventory future entities and

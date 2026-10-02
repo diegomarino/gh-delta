@@ -78,6 +78,19 @@ test('parseSnapshotFilename recognizes economical watch snapshots as a separate 
     entities: ['pr'],
     scope: 'watch-pr',
   });
+  assert.deepEqual(parseSnapshotFilename('repo-o%2Fr__monitor-main__watch-issue.json'), {
+    repo: 'o/r',
+    monitorId: 'main',
+    entities: ['issue'],
+    scope: 'watch-issue',
+  });
+  assert.deepEqual(parseSnapshotFilename('repo-o%2Fr__monitor-main__watch-pr-issue.json'), {
+    repo: 'o/r',
+    monitorId: 'main',
+    entities: ['pr', 'issue'],
+    scope: 'watch-pr-issue',
+  });
+  assert.equal(parseSnapshotFilename('repo-o%2Fr__monitor-main__pr-issue.json').scope, undefined);
 });
 
 test('parseSnapshotFilename rejects files that are not derived snapshots', () => {
