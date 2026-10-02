@@ -1,5 +1,18 @@
 # Decision boundaries and best practices
 
+<!-- toc -->
+
+**Contents**
+
+- [Identity and ownership](#identity-and-ownership)
+- [Scope and cost](#scope-and-cost)
+- [Baselines and failures](#baselines-and-failures)
+- [Logs and acknowledgement](#logs-and-acknowledgement)
+- [Safety boundary](#safety-boundary)
+- [Per-delta templates](#per-delta-templates)
+
+<!-- /toc -->
+
 ## Identity and ownership
 
 - One recurring producer owns one snapshot identity: repository,

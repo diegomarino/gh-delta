@@ -38,8 +38,11 @@ test('I-14 agent examples are executable deterministic local smokes', () => {
 test('README is a short agent-first entrypoint and recipes cover ten decisions', () => {
   const readme = readFileSync(path('README.md'), 'utf8');
   assert.ok(
-    readme.trim().split(/\s+/).length <= 1052,
-    'README must remain at most half its prior 2104 words',
+    readme
+      .replace(/<!-- toc -->[\s\S]*?<!-- \/toc -->/, '')
+      .trim()
+      .split(/\s+/).length <= 1052,
+    'README body (excluding navigation) must remain at most half its prior 2104 words',
   );
   assert.match(readme, /## Install/);
   assert.match(readme, /## Quick start/);

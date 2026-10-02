@@ -7,6 +7,20 @@ GitHub CLI version: 2.95.0
 GitHub CLI marks discussion support as preview and subject to change without
 notice. Treat this surface as experimental.
 
+<!-- toc -->
+
+**Contents**
+
+- [Fetch Surface](#fetch-surface)
+- [Discoverable JSON Fields](#discoverable-json-fields)
+- [Candidate Stable Identity](#candidate-stable-identity)
+- [Candidate Delta Fingerprint](#candidate-delta-fingerprint)
+- [Pagination And Scope Notes](#pagination-and-scope-notes)
+- [Risks And Unknowns](#risks-and-unknowns)
+- [Contract Recommendation](#contract-recommendation)
+
+<!-- /toc -->
+
 ## Fetch Surface
 
 Primary command(s):

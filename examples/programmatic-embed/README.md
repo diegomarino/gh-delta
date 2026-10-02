@@ -48,7 +48,7 @@ produces — the fingerprint reads these exact fields:
   lifecycle (`missing` → `still-missing` → `presumed-deleted`, then silence).
   For a label-scoped watcher that reading is arguably correct — "no longer an
   incident" — but know it's there. See
-  [delta classes](../../docs/contract.md#delta-classes).
+  [delta classes](../../docs/contract/delta-classes.md#delta-classes).
 - **Contract constants keep you honest**: the script checks emitted classes
   against `DELTA_CLASSES` and follows the forward-compat clause (unknown
   classes are a note, never an error).

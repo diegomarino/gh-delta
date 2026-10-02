@@ -61,7 +61,18 @@ test('agent skill routes real monitoring workflows instead of restating flags', 
   assert.match(skill, /references\/troubleshooting\.md/);
   assert.match(skill, /agent-type.*last8.*session.*purpose/i);
 
-  const patterns = readFileSync(path('skills/gh-delta/references/patterns.md'), 'utf8');
+  const patterns = [
+    'ownership',
+    'repository-monitor',
+    'wait-for-pr',
+    'watch-selection',
+    'log-consumers',
+    'inactive-work',
+    'retire-monitor',
+    'consume-output',
+  ]
+    .map((name) => readFileSync(path(`skills/gh-delta/references/patterns/${name}.md`), 'utf8'))
+    .join('\n');
   assert.match(patterns, /gh repo view/);
   assert.match(patterns, /watch add/);
   assert.match(patterns, /--watch-dir/);

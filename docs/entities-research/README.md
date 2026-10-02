@@ -41,20 +41,20 @@ verified" date.
 
 ## Research Files
 
-| File                                         | Purpose                                                                             |
-| -------------------------------------------- | ----------------------------------------------------------------------------------- |
-| [_template.md](_template.md)                 | Template for future entity research pages.                                          |
-| [pr.md](pr.md)                               | Pull request list/view fields and current detector implications.                    |
-| [issue.md](issue.md)                         | Issue list/view fields and hierarchy/state fields not yet fingerprinted.            |
-| [workflow-run.md](workflow-run.md)           | GitHub Actions run fields and run-scoped filters.                                   |
-| [check.md](check.md)                         | PR check/status surfaces and commit-check gaps.                                     |
-| [release.md](release.md)                     | Release list/view fields.                                                           |
-| [discussion.md](discussion.md)               | Discussion preview command fields and risks.                                        |
-| [commit.md](commit.md)                       | Commit search and API-only repository commit enumeration.                           |
-| [branch.md](branch.md)                       | Branch API surfaces and branch selector caveats.                                    |
-| [repo-metadata.md](repo-metadata.md)         | Repository metadata surfaces that are useful context but risky as deltas.           |
-| [api-only-surfaces.md](api-only-surfaces.md) | Surfaces that likely require `gh api` rather than first-class `gh --json`.          |
-| [selectors.md](selectors.md)                 | Applicability matrix for future selectors such as branch, label, workflow, and tag. |
+| File                                                                                                  | Purpose                                                                             |
+| ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| [_template.md](https://github.com/diegomarino/gh-delta/blob/main/docs/entities-research/_template.md) | Template for future entity research pages.                                          |
+| [pr.md](pr.md)                                                                                        | Pull request list/view fields and current detector implications.                    |
+| [issue.md](issue.md)                                                                                  | Issue list/view fields and hierarchy/state fields not yet fingerprinted.            |
+| [workflow-run.md](workflow-run.md)                                                                    | GitHub Actions run fields and run-scoped filters.                                   |
+| [check.md](check.md)                                                                                  | PR check/status surfaces and commit-check gaps.                                     |
+| [release.md](release.md)                                                                              | Release list/view fields.                                                           |
+| [discussion.md](discussion.md)                                                                        | Discussion preview command fields and risks.                                        |
+| [commit.md](commit.md)                                                                                | Commit search and API-only repository commit enumeration.                           |
+| [branch.md](branch.md)                                                                                | Branch API surfaces and branch selector caveats.                                    |
+| [repo-metadata.md](repo-metadata.md)                                                                  | Repository metadata surfaces that are useful context but risky as deltas.           |
+| [api-only-surfaces.md](api-only-surfaces.md)                                                          | Surfaces that likely require `gh api` rather than first-class `gh --json`.          |
+| [selectors.md](selectors.md)                                                                          | Applicability matrix for future selectors such as branch, label, workflow, and tag. |
 
 ## Promotion Checklist
 

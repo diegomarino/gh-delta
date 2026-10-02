@@ -9,7 +9,11 @@ import { compileTemplate, renderTemplateLines } from '../lib/template.mjs';
 import { setCursorAtomic, appendDeltaLog, compactDeltaLog } from '../lib/deltalog.mjs';
 import { acquireLock, releaseLock } from '../lib/lock.mjs';
 
-const guide = readFileSync(new URL('../docs/template-examples.md', import.meta.url), 'utf8');
+const guide = ['presentation', 'files-and-verification', 'replay-and-errors']
+  .map((name) =>
+    readFileSync(new URL(`../docs/guides/templates/${name}.md`, import.meta.url), 'utf8'),
+  )
+  .join('\n');
 const sample = JSON.parse(guide.match(/```json\n([\s\S]*?)\n```/)[1]);
 const cli = fileURLToPath(new URL('../gh-delta.mjs', import.meta.url));
 const pinned = 'thread={watch.labels.thread} {repo} #{number} [{classes}]';

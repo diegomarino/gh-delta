@@ -11,7 +11,7 @@ second GitHub query, schedule step 1 with `--format compact` instead: compact
 includes the semantic summary and a bounded changed diff. Use `--detail` only
 when structured diagnostic rows are needed; `--format json --detail`'s
 `checks`/`reviews` details then name the added/removed/changed entries (see
-[the contract](contract.md#report-shape)). A detail marked `opaque: true`
+[the contract](contract/report.md#report-shape)). A detail marked `opaque: true`
 cannot name the change — inspect GitHub in that case. Pick the format up front:
 a tick advances the snapshot, so a re-run cannot recover the details.
 

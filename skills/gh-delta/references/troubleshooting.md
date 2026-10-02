@@ -46,7 +46,7 @@ does not mean rewriting their version fields.
    open items and can trigger downstream work.
 
 For exact reset and cursor behavior, consult the
-[reset contract](https://github.com/diegomarino/gh-delta/blob/main/docs/contract.md#gh-delta-reset).
+[reset contract](https://github.com/diegomarino/gh-delta/blob/main/docs/contract/reset.md#gh-delta-reset).
 
 ## `gh: HTTP 502`
 

@@ -4,6 +4,20 @@ Status: research only, not public contract
 Last verified: YYYY-MM-DD
 GitHub CLI version: x.y.z
 
+<!-- toc -->
+
+**Contents**
+
+- [Fetch Surface](#fetch-surface)
+- [Discoverable JSON Fields](#discoverable-json-fields)
+- [Candidate Stable Identity](#candidate-stable-identity)
+- [Candidate Delta Fingerprint](#candidate-delta-fingerprint)
+- [Pagination And Scope Notes](#pagination-and-scope-notes)
+- [Risks And Unknowns](#risks-and-unknowns)
+- [Contract Recommendation](#contract-recommendation)
+
+<!-- /toc -->
+
 ## Fetch Surface
 
 Primary command(s):

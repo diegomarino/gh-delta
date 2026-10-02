@@ -33,7 +33,7 @@ journalctl --user -fu gh-delta-watch                    # watch the ticks
 - **`SuccessExitStatus=1 10`** is the whole trick: deltas (`10`) are a normal
   outcome, transient errors (`1`) are the next tick's problem, and only a
   permanent error (`2` — bad flags, unreadable snapshot) fails the unit and
-  fires `OnFailure`. See [exit codes](../../docs/contract.md#exit-codes).
+  fires `OnFailure`. See [exit codes](../../docs/contract/exit-codes.md#exit-codes).
 - **The blind spot, on purpose**: a _sustained_ run of exit-1 ticks (broken
   `gh` auth, long rate-limit) stays "success" and never alerts. Spot it in the
   journal: `journalctl --user -u gh-delta-watch --since -1h | grep 'gh-delta error'`.

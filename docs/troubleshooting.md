@@ -36,11 +36,11 @@ check that field first. `<system temp dir>` is `/tmp` on Linux,
 differently per platform, so the `stateFile` echo is the authoritative
 answer. Windows-specific
 behavior (permissions, atomicity, path casing, registry location) is specified
-in [Platform Notes](contract.md#platform-notes).
+in [Platform Notes](contract/platforms.md#platform-notes).
 
 **Which monitors have run on this machine?**
 Run `gh-delta list` (read-only). Without flags it merges the
-[run registry](contract.md#run-registry) with the temp-dir default location, so
+[run registry](contract/registry.md#run-registry) with the temp-dir default location, so
 monitors using any `--state-dir` or `--state-file` appear with their repo,
 monitor id, entities, and last run. `--since 24h` narrows to recent runs;
 `--state-dir <dir>` narrows to one directory. A `stale: true` entry means the
@@ -53,7 +53,7 @@ list` can inventory monitors in any state location. It is an index, not
 detector state — deleting the directory is always safe (it rebuilds as monitors
 run) and never causes false deltas or re-baselines. Opt out per run with
 `--no-registry`, or globally with `GH_DELTA_NO_REGISTRY=1` (hermetic CI,
-ephemeral containers). See [Run Registry](contract.md#run-registry).
+ephemeral containers). See [Run Registry](contract/registry.md#run-registry).
 
 **`gh` is not authenticated — exit `1` on first run.**
 Run `gh auth status` to verify authentication. `gh-delta` delegates all GitHub
