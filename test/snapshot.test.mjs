@@ -46,11 +46,33 @@ const meta = (overrides = {}) => ({
 test('economical snapshot paths are distinct for derived and explicit state', () => {
   const ordinary = snapshotPath('owner/repo', 'main', 'pr-issue', '/tmp/state');
   const economical = economicalSnapshotPath('owner/repo', 'main', 'pr-issue', '/tmp/state');
+  const issue = economicalSnapshotPath('owner/repo', 'main', 'issue', '/tmp/state', {
+    scope: 'watch-issue',
+  });
+  const mixed = economicalSnapshotPath('owner/repo', 'main', 'pr-issue', '/tmp/state', {
+    scope: 'watch-pr-issue',
+  });
   assert.match(economical, /__watch-pr\.json$/);
-  assert.notEqual(economical, ordinary);
+  assert.match(issue, /__watch-issue\.json$/);
+  assert.match(mixed, /__watch-pr-issue\.json$/);
+  assert.equal(new Set([ordinary, economical, issue, mixed]).size, 4);
   assert.equal(
     economicalSnapshotPath(null, null, null, null, { stateFile: '/tmp/custom.json' }),
     '/tmp/custom.json.watch.json',
+  );
+  assert.equal(
+    economicalSnapshotPath(null, null, null, null, {
+      stateFile: '/tmp/custom.json',
+      scope: 'watch-issue',
+    }),
+    '/tmp/custom.json.watch-issue.json',
+  );
+  assert.equal(
+    economicalSnapshotPath(null, null, null, null, {
+      stateFile: '/tmp/custom.json',
+      scope: 'watch-pr-issue',
+    }),
+    '/tmp/custom.json.watch-pr-issue.json',
   );
 });
 
@@ -164,6 +186,12 @@ test('snapshots round-trip the full mandatory schema-v2 meta', () => {
   const data = { pr: {}, issue: {}, meta: meta({ scope: 'watch-pr', entities: ['pr'] }) };
   writeSnapshotAtomic(p, data);
   assert.deepEqual(readSnapshot(p), data);
+  for (const scope of ['watch-issue', 'watch-pr-issue']) {
+    const scoped = join(dir, `${scope}.json`);
+    const body = { pr: {}, issue: {}, meta: meta({ scope, entities: ['issue'] }) };
+    writeSnapshotAtomic(scoped, body);
+    assert.deepEqual(readSnapshot(scoped), body);
+  }
 });
 
 test('snapshots reject an invalid meta.horizon', () => {

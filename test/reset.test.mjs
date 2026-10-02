@@ -4,7 +4,7 @@
 // observe a half-deleted monitor.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdtempSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { run } from '../lib/cli.mjs';
@@ -176,11 +176,46 @@ test('reset --state-dir --entities issue preserves an economical PR watch snapsh
   assert.equal(result.code, 0);
   assert.deepEqual(
     result.report.targets.map((target) => target.scope),
-    ['poll'],
+    ['poll', 'watch-issue'],
   );
   assert.equal(existsSync(stateFile), true);
   assert.equal(existsSync(logFile), true);
   assert.equal(existsSync(manifestFile), true);
+});
+
+test('reset --state-dir --entities pr,issue removes mixed strict state and leaves issue-only state', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-reset-mixed-'));
+  const watchPr = economicalSnapshotPath(REPO, MONITOR, 'pr', dir);
+  const watchIssue = economicalSnapshotPath(REPO, MONITOR, 'issue', dir, { scope: 'watch-issue' });
+  const watchMixed = economicalSnapshotPath(REPO, MONITOR, 'pr-issue', dir, {
+    scope: 'watch-pr-issue',
+  });
+  writeFileSync(watchPr, '{}\n');
+  writeFileSync(watchIssue, '{}\n');
+  writeFileSync(watchMixed, '{}\n');
+  const result = run(
+    [
+      'reset',
+      '--repo',
+      REPO,
+      '--monitor-id',
+      MONITOR,
+      '--state-dir',
+      dir,
+      '--entities',
+      'pr,issue',
+      '--yes',
+    ],
+    { now: () => '2026-09-20T12:00:00.000Z' },
+  );
+  assert.equal(result.code, 0);
+  assert.deepEqual(
+    result.report.targets.map((target) => target.scope),
+    ['poll', 'watch-pr', 'watch-pr-issue'],
+  );
+  assert.equal(existsSync(watchPr), false);
+  assert.equal(existsSync(watchMixed), false);
+  assert.equal(existsSync(watchIssue), true);
 });
 
 test('reset --yes on a clean/never-run monitor is a no-op that still exits 0', () => {

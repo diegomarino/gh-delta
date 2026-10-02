@@ -26,7 +26,9 @@ does not mean rewriting their version fields.
 
    Match `--entities` to the existing producer. For an explicit snapshot,
    replace `--state-dir` with `--state-file` and the exact path. An economical
-   watch uses a separate snapshot (`__watch-pr.json` or `.watch.json`);
+   watch uses a separate snapshot (`__watch-pr.json` or `.watch.json`; strict
+   issues use `__watch-issue.json`, and a mixed list that contains an issue
+   uses `__watch-pr-issue.json`);
    `reset` does not accept `--watch-dir`. Pass the watch's actual snapshot
    path with `--state-file` and verify that its derived log matches the
    producer's recorded log path. `--yes` confirms deletion of the selected snapshot,

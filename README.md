@@ -172,7 +172,7 @@ gh-delta --repo owner/repo --monitor-id scheduled --entities pr \
   --rate-limit-floor 100 --format ndjson
 ```
 
-`--watch-strict requires an entity selection including pr`. Details: [Usage](docs/usage.md).
+Also `--entities issue` and `pr,issue`. [Usage](docs/usage.md).
 
 ## Docs
 

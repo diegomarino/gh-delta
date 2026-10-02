@@ -60,7 +60,12 @@ authentication, rate limits, page caps, locks, and snapshot recovery.
 ## Invariants
 
 - Choose the smallest observation universe. `--watch-dir` with one to ten PRs
-  performs a targeted fetch; `--number` is only a post-fetch filter.
+  performs a targeted fetch. `--watch-strict` extends that targeted fetch to
+  any number of explicitly watched PRs, issues, or both, in batches of ten,
+  without scanning the repository. `--number` is only a post-fetch filter.
+  `--entities pr` rejects issue entries. Issue-only state is `watch-issue`;
+  a mixed list that contains an issue is a new `watch-pr-issue` baseline and
+  does not replace an existing `watch-pr` snapshot.
 - Give every recurring producer an explicit `--monitor-id` and durable
   `--state-dir`. Never overlap producers that own the same snapshot.
 - The first successful tick normally establishes a quiet baseline. Do not call

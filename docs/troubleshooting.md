@@ -96,7 +96,9 @@ operation and deletes the snapshot file, the log's published manifest, and
 the log's data file in one lock-scoped step, so a concurrent tick sees either
 the fully intact pre-reset state or the fully clean post-reset state, never a
 half-deleted monitor. With `--state-dir`, it also locks and resets the
-economical `watch-pr` sibling; inspect `targets[].removed` and
+strict watch sibling for that `--entities` selection (`watch-pr`, and for
+`pr,issue` also `watch-pr-issue`; `issue` resets `watch-issue` instead of
+`watch-pr`); inspect `targets[].removed` and
 `targets[].missing` to see exactly what happened. The next run then seeds a
 fresh baseline. This is also the upgrade path for every pre-schema-v2 (v1)
 monitor — there is nothing to migrate in place.
