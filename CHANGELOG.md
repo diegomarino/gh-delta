@@ -10,6 +10,23 @@ This project follows semantic versioning.
 
 - Add opt-in one-line per-delta templates to detector ticks and cursor reads, with local file sources and optional raw-byte SHA-256 verification (#95). Planned for the next minor release.
 
+## [0.9.0](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.8.1...gh-delta-v0.9.0) (2026-10-02)
+
+
+### Features
+
+* **output:** add one-line per-delta templates ([#100](https://github.com/diegomarino/gh-delta/issues/100)) ([021e74b](https://github.com/diegomarino/gh-delta/commit/021e74b6976289f3af6d1e4dee601769db1ea780))
+* **output:** support NDJSON detector ticks without end records ([#98](https://github.com/diegomarino/gh-delta/issues/98)) ([c6aece5](https://github.com/diegomarino/gh-delta/commit/c6aece5b682ba6d4c136a5356844cdf3b92cec90))
+* **watch:** add atomic desired-set synchronization ([#102](https://github.com/diegomarino/gh-delta/issues/102)) ([e5a214f](https://github.com/diegomarino/gh-delta/commit/e5a214f0cf1e444f807fc6bf97f94b2862881a2b))
+* **watch:** add strict targeted PR watching beyond ten entries ([#99](https://github.com/diegomarino/gh-delta/issues/99)) ([5368277](https://github.com/diegomarino/gh-delta/commit/53682772b21f4d6dd2014d2254a0585fd2336f08))
+* **watch:** preserve local labels on emitted deltas ([#96](https://github.com/diegomarino/gh-delta/issues/96)) ([1baa75c](https://github.com/diegomarino/gh-delta/commit/1baa75c777265a7fa0e1c0a6122c838f1214ce66))
+
+
+### Bug Fixes
+
+* **watch:** reject non-enumerable own label entries ([#104](https://github.com/diegomarino/gh-delta/issues/104)) ([ae8144a](https://github.com/diegomarino/gh-delta/commit/ae8144af35b9c77456fc13bd9ae7851306c08118))
+* **watch:** retain validated rate-limit accounting on later strict-batch failure ([#105](https://github.com/diegomarino/gh-delta/issues/105)) ([0c8a5c4](https://github.com/diegomarino/gh-delta/commit/0c8a5c4a3d0cecec9b038a70020ec251736875c4))
+
 ## [0.8.1](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.8.0...gh-delta-v0.8.1) (2026-09-26)
 
 
