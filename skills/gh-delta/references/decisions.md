@@ -32,7 +32,9 @@
 - Use `--rate-limit-floor` when several monitors share one GitHub token and
   exhausting the shared GraphQL budget would be worse than a delayed tick.
 - Measure actual query cost from JSON `results[].rateLimit`, which accumulates
-  the repository's GraphQL calls. It can be null when no query was made.
+  the repository's GraphQL calls. It can be null when no query was made. On an
+  incomplete `--watch-strict` observation it still reports already validated
+  batch costs; it does not invent a cost for a failed or refused request.
 
 ## Baselines and failures
 

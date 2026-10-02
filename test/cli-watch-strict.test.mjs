@@ -266,7 +266,7 @@ test('strict mode publishes nothing when the second batch fails', () => {
     if (calls === 2) throw new Error('batch failed');
     return {
       rows: batch.map((number) => ({ ...basePr, number })),
-      rateLimit: { cost: 1, remaining: 4000, resetAt: '2026-07-01T13:00:00Z' },
+      rateLimit: { cost: 3, remaining: 4997, resetAt: '2026-07-01T13:00:00Z' },
     };
   };
   const result = run(
@@ -288,6 +288,11 @@ test('strict mode publishes nothing when the second batch fails', () => {
   assert.equal(calls, 2);
   assert.equal(d.writes, 0);
   assert.equal(logged, false);
+  assert.deepEqual(result.report.results[0].rateLimit, {
+    cost: 3,
+    remaining: 4997,
+    resetAt: '2026-07-01T13:00:00Z',
+  });
 });
 
 test('strict floor refuses before the first batch', () => {
@@ -321,6 +326,7 @@ test('strict floor refuses before the first batch', () => {
   assert.match(denied.report.results[0].error.message, /100/);
   assert.match(denied.report.results[0].error.message, /2/);
   assert.equal(denied.report.results[0].error.resetAt, '2026-07-01T13:00:00Z');
+  assert.equal(denied.report.results[0].rateLimit, null);
 });
 
 test('strict floor refuses the second batch after an expensive first batch and publishes nothing', () => {
@@ -354,6 +360,14 @@ test('strict floor refuses the second batch after an expensive first batch and p
   assert.equal(result.code, 1);
   assert.equal(calls, 1);
   assert.equal(d.writes, 0);
+  assert.deepEqual(result.report.results[0].rateLimit, {
+    cost: 2,
+    remaining: 100,
+    resetAt: '2026-07-01T13:00:00Z',
+  });
+  assert.equal(result.report.results[0].error.kind, 'rate-limit');
+  assert.equal(result.report.results[0].error.cost, 2);
+  assert.equal(result.report.results[0].error.remaining, 100);
 });
 
 test('strict floor admits the last batch and publishes when that batch finishes below the floor', () => {
