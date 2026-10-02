@@ -14,7 +14,7 @@ This guide targets gh-delta 0.7.0 and report schema v2. Before resuming a
 pre-0.7 monitor, read
 [references/troubleshooting.md](references/troubleshooting.md#upgrade-from-pre-07-state).
 Before parsing reports or adapting a consumer, read
-[references/patterns.md](references/patterns.md#consume-schema-v2-output).
+[references/patterns.md](references/patterns/consume-output.md#consume-schema-v2-output).
 
 ## Check CLI availability
 
@@ -42,16 +42,17 @@ the answer changes the design; do not make the user choose CLI flags.
 
 ## Choose the operating pattern
 
-| Need                                     | Pattern                                                                                          |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Recurring repository monitor             | One scheduler-owned detector tick with stable identity and durable state                         |
-| One PR until CI/review/lifecycle changes | A targeted watch entry plus bounded `wait`                                                       |
-| A search or up to ten selected PRs       | Resolve the selection, persist it with `watch add` or `watch sync`, then tick with `--watch-dir` |
-| Several independent consumers            | One producer with `--log`; one durable cursor per consumer                                       |
-| Inactive work                            | Normal ticks with `--stale-after`, then local `status`                                           |
-| Explain an old notification              | Local `explain` using the report or delta log                                                    |
+| Need                                                                           | Pattern                                                                                          |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| [Recurring repository monitor](references/patterns/repository-monitor.md)      | One scheduler-owned detector tick with stable identity and durable state                         |
+| [One PR until CI/review/lifecycle changes](references/patterns/wait-for-pr.md) | A targeted watch entry plus bounded `wait`                                                       |
+| [A search or up to ten selected PRs](references/patterns/watch-selection.md)   | Resolve the selection, persist it with `watch add` or `watch sync`, then tick with `--watch-dir` |
+| [Several independent consumers](references/patterns/log-consumers.md)          | One producer with `--log`; one durable cursor per consumer                                       |
+| [Inactive work](references/patterns/inactive-work.md)                          | Normal ticks with `--stale-after`, then local `status`                                           |
+| Explain an old notification                                                    | Local `explain` using the report or delta log                                                    |
 
-Read [references/patterns.md](references/patterns.md) for complete commands,
+Read [references/patterns.md](references/patterns.md) to choose a procedure, and
+[scenario ownership](references/patterns/ownership.md) for complete commands,
 `<agent-type>-<last8(session-id)>-<purpose>` scenario ownership, and safe
 retirement. Read
 [references/troubleshooting.md](references/troubleshooting.md) for `HTTP 502`,

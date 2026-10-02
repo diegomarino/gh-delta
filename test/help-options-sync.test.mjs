@@ -55,7 +55,7 @@ test('watch add --label names reserved __proto__ after skill generation', () => 
   );
   assert.match(label.description, /`__proto__`/);
   const flags = readFileSync(
-    new URL('../skills/gh-delta/references/flags.md', import.meta.url),
+    new URL('../skills/gh-delta/references/flags/watch-add.md', import.meta.url),
     'utf8',
   );
   assert.match(flags, /reserved keys are until, repo, `__proto__`/);

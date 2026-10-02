@@ -8,11 +8,26 @@ Pull requests are already part of the public `--entities` contract. This page
 tracks the broader data surface so future scope and filter decisions do not
 accidentally weaken the current missing-object and closed-state guarantees.
 
+<!-- toc -->
+
+**Contents**
+
+- [Current Implementation Fetch Surface](#current-implementation-fetch-surface)
+- [Historical GitHub CLI Field Discovery](#historical-github-cli-field-discovery)
+- [Discoverable JSON Fields](#discoverable-json-fields)
+- [Candidate Stable Identity](#candidate-stable-identity)
+- [Candidate Delta Fingerprint](#candidate-delta-fingerprint)
+- [Pagination And Scope Notes](#pagination-and-scope-notes)
+- [Risks And Unknowns](#risks-and-unknowns)
+- [Contract Recommendation](#contract-recommendation)
+
+<!-- /toc -->
+
 ## Current Implementation Fetch Surface
 
 The detector's current implementation fetches PRs through `gh api graphql`, not
 through `gh pr list`. Keep this aligned with
-[`docs/architecture.md`](../architecture.md#github-fetch-strategy).
+[`docs/architecture.md`](../architecture/identity-and-fetch.md#github-fetch-strategy).
 
 Current behavior:
 

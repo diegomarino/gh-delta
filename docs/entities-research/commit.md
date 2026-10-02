@@ -7,6 +7,20 @@ GitHub CLI version: 2.95.0
 Commits are likely future entities, but the high-level `gh` surface observed so
 far is search-oriented rather than repository snapshot-oriented.
 
+<!-- toc -->
+
+**Contents**
+
+- [Fetch Surface](#fetch-surface)
+- [Discoverable JSON Fields](#discoverable-json-fields)
+- [Candidate Stable Identity](#candidate-stable-identity)
+- [Candidate Delta Fingerprint](#candidate-delta-fingerprint)
+- [Pagination And Scope Notes](#pagination-and-scope-notes)
+- [Risks And Unknowns](#risks-and-unknowns)
+- [Contract Recommendation](#contract-recommendation)
+
+<!-- /toc -->
+
 ## Fetch Surface
 
 Primary observed command:

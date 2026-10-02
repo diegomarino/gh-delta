@@ -3,14 +3,14 @@
 // documented or not. This has already gone wrong once (round 14):
 // lib/watch.mjs re-exported three implementation helpers, one of them
 // (writeTerminalIgnoredLocked) unsafe to call without a lock the published
-// signature gives no hint of, none of them in docs/contract.md's own table.
+// signature gives no hint of, none of them in docs/contract/programmatic-api.md's own table.
 //
 // Same lesson as the last three review rounds: a guard that compares real
 // output against a hand-copied expectation can stay green on exactly the
 // drift it exists to catch. So neither side here is hand-written -- the
 // "actual" side comes from really importing each exports-mapped module, and
 // the "documented" side comes from actually parsing the Programmatic API
-// Surface table in docs/contract.md, not a second list retyped from it.
+// Surface table in docs/contract/programmatic-api.md, not a second list retyped from it.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -28,16 +28,19 @@ const PUBLISHED_SUBPATHS = Object.entries(packageJson.exports)
     file: target.import,
   }));
 
-// Parse docs/contract.md's own "## Programmatic API Surface" markdown table:
+// Parse docs/contract/programmatic-api.md's own "# Programmatic API Surface" markdown table:
 // each data row is `| `gh-delta/x`    | `sym1`, `sym2`, ...    | purpose |`.
 // Stops at the first line that isn't a `|`-prefixed table row after the
 // section starts, so this only ever reads the one real table, not prose
 // below it that happens to mention a symbol name.
 function parseDocumentedApiSurface() {
-  const text = readFileSync(new URL('docs/contract.md', root), 'utf8');
-  const heading = '## Programmatic API Surface';
+  const text = readFileSync(new URL('docs/contract/programmatic-api.md', root), 'utf8');
+  const heading = '# Programmatic API Surface';
   const start = text.indexOf(heading);
-  assert.ok(start >= 0, 'docs/contract.md must have a Programmatic API Surface section');
+  assert.ok(
+    start >= 0,
+    'docs/contract/programmatic-api.md must have a Programmatic API Surface section',
+  );
   const lines = text.slice(start).split('\n');
   const documented = new Map();
   let sawHeaderSeparator = false;

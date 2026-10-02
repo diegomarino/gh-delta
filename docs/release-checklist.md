@@ -2,12 +2,25 @@
 
 Use this checklist before publishing `gh-delta` to npm.
 
+<!-- toc -->
+
+**Contents**
+
+- [Release Process](#release-process)
+- [Local Gate](#local-gate)
+- [Example Artifacts](#example-artifacts)
+- [Publish Safety](#publish-safety)
+- [Metadata](#metadata)
+- [Package Contents](#package-contents)
+
+<!-- /toc -->
+
 ## Release Process
 
 This is the end-to-end flow that ships a release, from commit to npm:
 
 1. **Conventional Commits land on `main`.** Every merged PR's commits follow the
-   [Conventional Commits](../CONTRIBUTING.md#commit-convention) format
+   [Conventional Commits](https://github.com/diegomarino/gh-delta/blob/main/CONTRIBUTING.md#commit-convention) format
    (`feat:`, `fix:`, etc.). release-please reads these to decide the next
    version and changelog section; a non-conforming message is invisible to
    the pipeline.

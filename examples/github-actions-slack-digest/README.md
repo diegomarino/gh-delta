@@ -32,7 +32,7 @@ actions/cache save (skip exit 2)
   (transient) is a `::warning::` annotation and the next schedule retries;
   exit `2` (permanent config error) **fails the job** so it shows red instead
   of silently retrying a broken configuration forever. See
-  [exit codes](../../docs/contract.md#exit-codes).
+  [exit codes](../../docs/contract/exit-codes.md#exit-codes).
 - **`--detail` is load-bearing**: the digest reads `.deltas[].summaryLine`,
   which is only present with `--detail` (or `--summary-line`).
 - **Cache as state, honestly**: `actions/cache` evicts entries after ~7 days

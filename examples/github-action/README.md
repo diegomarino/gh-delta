@@ -2,7 +2,7 @@
 
 An official reusable action belongs in the separate `gh-delta-action` repository.
 Until that external publication exists, use the local workflow example in
-[`../github-actions-slack-digest`](../github-actions-slack-digest/) or call the
+[`../github-actions-slack-digest`](../github-actions-slack-digest) or call the
 CLI directly. This complete local workflow shape restores and saves durable
 state, publishes `changed` and JSON `report` outputs, and keeps all exit paths
 explicit:

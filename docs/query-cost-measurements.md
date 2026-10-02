@@ -1,7 +1,7 @@
 # GraphQL query cost measurements
 
 Status: historical measurement log, not public contract. `docs/contract.md`'s
-[Measured query costs](contract.md#measured-query-costs) table is the
+[Measured query costs](contract/query-costs.md#measured-query-costs) table is the
 published source of truth; this file is the raw measurement behind it, kept
 for provenance rather than duplicated maintenance.
 
@@ -40,6 +40,6 @@ scale; it may become visible on a repository with materially more open PRs
 and/or review threads per PR, where the formula's per-node multiplication
 would surface the added nested field's weight. Task E0 published the
 measured 8→8 result with this caveat in
-[Measured query costs](contract.md#measured-query-costs); re-run
+[Measured query costs](contract/query-costs.md#measured-query-costs); re-run
 `test/e2e/rate-limit-benchmark.mjs` against a higher-volume repository if this
 caveat ever needs to be resolved.

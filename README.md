@@ -16,7 +16,23 @@ CI, and a final quiet tick that does not replay the change.
   <img src="docs/img/common-loop.svg" alt="Animated one-minute gh-delta PR loop from pull request creation through failed and green CI" width="820">
 </p>
 
-### Try it live
+<!-- toc -->
+
+**Contents**
+
+- [Try it live](#try-it-live)
+- [Install](#install)
+- [Quick start](#quick-start)
+- [Output formats](#output-formats)
+- [What an agent usually does](#what-an-agent-usually-does)
+- [One agent pattern](#one-agent-pattern)
+- [Strict watch lists](#strict-watch-lists)
+- [Docs](#docs)
+- [License](#license)
+
+<!-- /toc -->
+
+## Try it live
 
 Pick the most recently updated open PR with pending CI in a high-activity public
 repository, then poll only that PR once a minute:
@@ -160,8 +176,8 @@ gh-delta wait --repo owner/repo --monitor-id worker-42 \
 
 On exit `10`, inspect the JSON `reason` (`until` or `already-satisfied`) and
 the PR before proposing a next action. See the runnable,
-network-free [agent worker example](examples/agent-worker-wait/README.md) and
-the [fan-out coordinator](examples/coordinator-fanout/README.md) for one-fetch,
+network-free [agent worker example](https://github.com/diegomarino/gh-delta/blob/main/examples/agent-worker-wait/README.md) and
+the [fan-out coordinator](https://github.com/diegomarino/gh-delta/blob/main/examples/coordinator-fanout/README.md) for one-fetch,
 many-worker operation.
 
 ## Strict watch lists
@@ -176,11 +192,13 @@ Also `--entities issue` and `pr,issue`. [Usage](docs/usage.md).
 
 ## Docs
 
+[Documentation map](docs/README.md).
+
 - [Usage](docs/usage.md): installation variants, state identity, watch/outpost
   operation, and programmatic use.
 - [Recipes](docs/recipes.md): ten copyable situation → command → response flows.
 - [Troubleshooting](docs/troubleshooting.md): auth, snapshots, logs, and errors.
-- [Examples](examples/README.md): deterministic local example smokes and
+- [Examples](https://github.com/diegomarino/gh-delta/blob/main/examples/README.md): deterministic local example smokes and
   integration shapes.
 - [Agent watch-loop prompt](docs/watch-loop-prompt.md): scheduler-owned loop.
 - [Architecture](docs/architecture.md) and [release checklist](docs/release-checklist.md): maintainers.
