@@ -351,6 +351,24 @@ test('non-enumerable reserved own labels are rejected before any watch write', (
   assert.equal(bytes(dir, 'pr-3.json'), before);
 });
 
+test('addWatch persists a valid non-enumerable label as a canonical enumerable map', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-watch-labels-hidden-valid-'));
+  const hidden = {};
+  Object.defineProperty(hidden, 'thread', {
+    value: 't1',
+    enumerable: false,
+    configurable: true,
+  });
+  const created = addWatch(dir, 'pr:3', 'merged', { now: () => NOW, labels: hidden });
+  assert.equal(created.added, true);
+  assert.deepEqual(created.entry.labels, { thread: 't1' });
+  assert.deepEqual(Object.keys(created.entry.labels), ['thread']);
+  assert.equal(
+    bytes(dir, 'pr-3.json'),
+    '{"entity":"pr","number":3,"until":"merged","addedAt":"2026-09-30T10:00:00.000Z","labels":{"thread":"t1"}}\n',
+  );
+});
+
 test('invalid labels and malformed label-bearing entries do not change bytes', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gd-watch-labels-reject-'));
   addWatch(dir, 'pr:3', 'merged', { now: () => NOW, labels: { thread: 't-0004' } });
