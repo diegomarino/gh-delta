@@ -342,4 +342,6 @@ developer polling loops or webhook-driven automation.
 - `--watch-strict` does not bound total runtime by a consumer's 60-second
   scheduler timeout. `--gh-timeout-ms` applies to each GitHub call, and
   sequential batches can outlive the scheduler. The feature does not guarantee
-  delivery to the downstream consumer.
+  delivery to the downstream consumer. A later batch failure or admission
+  refusal still publishes nothing; inspect `results[].rateLimit` for already
+  validated GraphQL costs from earlier batches.

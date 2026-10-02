@@ -928,7 +928,10 @@ Field guarantees:
     `deltas` is empty.
   - `rateLimit` (object|null): `{cost, remaining, resetAt}` accumulated across
     every GraphQL call this tick for this repo, or `null` if none was made
-    (e.g. an economical watch tick with zero watched PRs).
+    (e.g. an economical watch tick with zero watched PRs). An incomplete
+    observation that already validated one or more GraphQL responses still
+    reports those validated costs here; it never invents the cost of an
+    unsuccessful request.
   - `error` (object, optional): present only on a per-repo failure —
     `{kind, message, hint, resetAt?}`. A partial multi-repo failure is visible
     only here; other repos' rows still report their own successful results.
@@ -1922,11 +1925,13 @@ request and cost prediction is approximate
 With `--rate-limit-floor F` and `B > 0`, one REST preflight runs after the
 state lock. A batch is admitted only when `remaining - floor >= batchesStillNeeded`.
 Refusal is `kind: "rate-limit"`, exit 1, and names remaining, floor, batches
-still needed, and `resetAt`. A completed final batch may finish below the floor
-and still publishes, because no further batch needs admission. An empty strict
-list makes no GitHub call, including no REST preflight. Without the floor,
-strict mode performs no REST preflight. Non-strict floor behavior stays the
-single `remaining < floor` comparison.
+still needed, and `resetAt`. A later batch failure or admission refusal still
+publishes nothing for that repository, but `results[].rateLimit` retains already
+validated costs and the last remaining/reset values. A completed final batch
+may finish below the floor and still publishes, because no further batch needs
+admission. An empty strict list makes no GitHub call, including no REST
+preflight. Without the floor, strict mode performs no REST preflight.
+Non-strict floor behavior stays the single `remaining < floor` comparison.
 
 Economical ticks use a separate identity: derived paths end in
 `__watch-pr.json`, while `--state-file x.json` becomes `x.json.watch.json`.
