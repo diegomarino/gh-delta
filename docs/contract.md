@@ -245,7 +245,9 @@ success. A refresh preserves existing stale bookkeeping for unchanged items; a
 real fingerprint change resets it. `--number` filters every returned entity. With `--watch-dir`, a local
 0-10 PR-only watch universe reads the detector's separate economical watch
 snapshot. `--watch-strict` reads `watch-pr`, `watch-issue`, or `watch-pr-issue`
-for that same selection. Every other watch list uses the normal snapshot. `text` renders the same
+for that same selection. `--refresh` then reads the snapshot file that tick
+published, so a terminal cleanup that changes the strict universe does not
+redirect the local read. Every other watch list uses the normal snapshot. `text` renders the same
 returned items as the JSON report.
 
 `--stale-after <duration>` uses the shared duration grammar. An open item whose

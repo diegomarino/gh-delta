@@ -914,6 +914,61 @@ test('status reads the issue and mixed strict snapshots and a mixed tick leaves 
   );
 });
 
+test('status --refresh reads the snapshot published before the last issue is retired', () => {
+  const dir = watchDir('gd-strict-refresh-retire-', [
+    { entity: 'pr', number: 3, until: 'merged' },
+    { entity: 'issue', number: 42, until: 'closed' },
+  ]);
+  const state = join(dir, 'state.json');
+  const fresh = `${state}.watch-pr-issue.json`;
+  const stale = `${state}.watch.json`;
+  const snapshots = new Map([
+    [
+      stale,
+      {
+        pr: {
+          3: {
+            fingerprint: { state: 'open' },
+            context: { title: 'stale pr' },
+            meta: {},
+          },
+        },
+        issue: {},
+      },
+    ],
+  ]);
+  const d = deps([[]]);
+  guard(d);
+  let tick = 0;
+  d.fetchWatchedItems = () => {
+    tick += 1;
+    return {
+      pr: [{ ...basePr, number: 3, title: 'current pr' }],
+      issue: [
+        issueRow(42, tick === 1 ? {} : { state: 'closed', updatedAt: '2026-07-01T11:00:00Z' }),
+      ],
+      rateLimit: RATE_LIMIT,
+    };
+  };
+  d.readSnapshot = (path) => snapshots.get(path) ?? null;
+  d.writeSnapshotAtomic = (path, data) => {
+    snapshots.set(path, data);
+  };
+  assert.equal(run(strictArgs(dir, state, 'pr,issue'), d).code, 0);
+  const status = run(['status', '--refresh', ...strictArgs(dir, state, 'pr,issue')], d);
+  assert.equal(
+    status.code,
+    0,
+    status.report?.error?.message ?? status.report?.results?.[0]?.error?.message,
+  );
+  assert.equal(existsSync(join(dir, 'issue-42.json')), false);
+  assert.equal(status.report.stateFile, fresh);
+  assert.deepEqual(
+    status.report.items.map((item) => [item.entity, item.number, item.title]),
+    [['pr', 3, 'current pr']],
+  );
+});
+
 test('strict help names the issue and mixed snapshot identities', async () => {
   const help = await runCommand(['--help-json']);
   assert.match(help.output, /watch-issue/);
