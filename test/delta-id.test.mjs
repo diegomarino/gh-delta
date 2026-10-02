@@ -50,7 +50,7 @@ const basePr = {
 // The prior-snapshot fingerprint the detector already holds for PR 42 (OPEN).
 const openFp = prFingerprint(basePr);
 
-// Same lock-stub rationale as test/cli.test.mjs: this suite is about delta
+// Same lock-stub rationale as test/helpers/cli-fixtures.mjs: this suite is about delta
 // identity, not lock behavior, and every run() call below shares the literal
 // state-file path '/tmp/x.json' -- a real fs-backed lock there would race
 // against other test files running concurrently.
@@ -74,7 +74,7 @@ const DEFAULT_OLD_META = {
   updatedAt: '2026-07-01T11:00:00.000Z',
 };
 
-// Minimal `run()` harness mirroring test/cli.test.mjs: no disk, no network.
+// Minimal `run()` harness mirroring test/helpers/cli-fixtures.mjs: no disk, no network.
 // `stored` persists across successive run() calls so the missing lifecycle can
 // advance tick by tick.
 const RATE_LIMIT = { cost: 1, remaining: 4999, resetAt: '2026-07-01T13:00:00.000Z' };
