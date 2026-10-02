@@ -440,7 +440,9 @@ falls back to the ordinary full fetch and ordinary snapshot; so does
 snapshot at every size. It batches PRs by ten, publishes only after every
 batch succeeds, and admits a floored batch only when remaining quota minus the
 floor covers the batches still needed. A finished last batch may drop below
-the floor. The stable configuration error is `--watch-strict requires an entity selection including pr`.
+the floor. A later batch failure or admission refusal still publishes nothing,
+but keeps already validated GraphQL costs in `results[].rateLimit`. The stable
+configuration error is `--watch-strict requires an entity selection including pr`.
 
 ```sh
 gh-delta --repo owner/repo --monitor-id scheduled --entities pr \
