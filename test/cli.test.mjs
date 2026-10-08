@@ -30,6 +30,114 @@ test('first run returns code 0 (baseline) and writes the snapshot', () => {
   assert.equal(d.writes, 1);
 });
 
+test('recent closed items stay quiet after startup but later updates and reopening are detected', () => {
+  const d = deps([]);
+  let at = '2026-07-01T12:00:00.000Z';
+  let pr = { ...basePr, state: 'closed', updatedAt: '2026-07-01T11:59:00.000Z' };
+  let issue = { number: 43, state: 'closed', updatedAt: pr.updatedAt, conversationComments: 0 };
+  const fetch = (row, cutoff) => ({
+    rows:
+      row.state === 'open' || (cutoff && Date.parse(row.updatedAt) >= Date.parse(cutoff))
+        ? [row]
+        : [],
+    rateLimit: RATE_LIMIT,
+  });
+  d.fetchPRs = (_repo, opts) => fetch(pr, opts.horizonCutoff);
+  d.fetchIssues = (_repo, opts) => fetch(issue, opts.horizonCutoff);
+  d.now = () => at;
+  const tick = () =>
+    run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
+  assert.equal(tick().code, 0);
+  at = '2026-07-01T12:01:00.000Z';
+  const unchanged = tick();
+  assert.equal(unchanged.code, 0);
+  assert.deepEqual(unchanged.report.deltas, []);
+
+  pr = { ...pr, updatedAt: '2026-07-01T12:01:30.000Z', conversationComments: 1 };
+  issue = { ...issue, updatedAt: pr.updatedAt, conversationComments: 1 };
+  at = '2026-07-01T12:02:00.000Z';
+  const updated = tick();
+  assert.equal(updated.code, 10);
+  assert.deepEqual(
+    updated.report.deltas.map((delta) => delta.classes),
+    [['first-seen'], ['first-seen']],
+  );
+  at = '2026-07-01T12:03:00.000Z';
+  assert.equal(tick().code, 0);
+
+  pr = { ...pr, state: 'open', updatedAt: '2026-07-01T12:03:30.000Z' };
+  at = '2026-07-01T12:04:00.000Z';
+  const reopened = tick();
+  assert.equal(reopened.code, 10);
+  assert.ok(reopened.report.deltas.some((delta) => delta.classes.includes('reopened')));
+});
+
+for (const offsetMs of [-30_000, 30_000]) {
+  test(`baseline calibrates GitHub offset ${offsetMs}ms and preserves it across ticks`, () => {
+    const d = deps([]);
+    let at = '2026-07-01T12:00:00.000Z';
+    const serverStart = Date.parse(at) + offsetMs;
+    const iso = (time) => new Date(time).toISOString();
+    let pr = { ...basePr, updatedAt: iso(serverStart - 60_000) };
+    let issue = { number: 7, state: 'open', updatedAt: pr.updatedAt, conversationComments: 0 };
+    const historical = { number: 43, state: 'closed', updatedAt: iso(serverStart - 10_000) };
+    let calibrations = 0;
+    const fetch = (rows, opts) => {
+      if (opts.onServerTime) {
+        calibrations++;
+        opts.onServerTime(iso(Date.parse(at) + offsetMs));
+      }
+      return {
+        rows: rows.filter(
+          (row) =>
+            row.state === 'open' || (opts.horizonCutoff && row.updatedAt >= opts.horizonCutoff),
+        ),
+        rateLimit: RATE_LIMIT,
+      };
+    };
+    d.fetchPRs = (_repo, opts) => fetch([pr], opts);
+    d.fetchIssues = (_repo, opts) => fetch([issue, historical], opts);
+    d.now = () => at;
+    const tick = () =>
+      run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
+    assert.equal(tick().code, 0);
+    assert.equal(d.stored.meta.horizon, iso(serverStart));
+    assert.equal(d.stored.meta.updatedAt, at);
+    at = '2026-07-01T12:01:00.000Z';
+    assert.equal(tick().code, 0);
+    assert.equal(d.stored.issue['43'], undefined);
+    assert.equal(d.stored.meta.horizon, iso(Date.parse(at) + offsetMs));
+
+    pr = { ...pr, state: 'closed', updatedAt: iso(serverStart + 70_000) };
+    issue = { ...issue, state: 'closed', updatedAt: pr.updatedAt };
+    at = '2026-07-01T12:02:00.000Z';
+    const closed = tick();
+    assert.equal(closed.code, 10);
+    assert.deepEqual(
+      closed.report.deltas.map((delta) => delta.classes),
+      [['closed'], ['closed']],
+    );
+    at = '2026-07-01T12:03:00.000Z';
+    assert.equal(tick().code, 0);
+    assert.equal(calibrations, 1);
+    assert.equal(d.stored.meta.horizon, iso(Date.parse(at) + offsetMs));
+  });
+}
+
+test('clock calibration adjusts the query start, not its response time', () => {
+  const d = deps([[]]);
+  const times = ['2026-07-01T12:00:00.000Z', '2026-07-01T12:00:10.000Z'];
+  d.now = () => times.shift();
+  d.fetchPRs = (_repo, opts) => {
+    opts.onServerTime('2026-07-01T12:00:40.000Z');
+    return { rows: [], rateLimit: RATE_LIMIT };
+  };
+  const { code } = run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
+  assert.equal(code, 0);
+  assert.equal(d.stored.meta.horizon, '2026-07-01T12:00:30.000Z');
+  assert.equal(d.stored.meta.updatedAt, '2026-07-01T12:00:00.000Z');
+});
+
 test('error reports carry schemaVersion and omit deltas', () => {
   const d = deps([[basePr]]);
   d.resolveRepo = () => ({ status: 'declined' });
@@ -496,7 +604,7 @@ test('the CLI threads the snapshot horizon into fetchers and stamps a new one', 
   };
   const { code } = run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
   assert.equal(code, 0);
-  assert.equal(receivedCutoff, '2026-07-01T10:55:00.000Z');
+  assert.equal(receivedCutoff, '2026-07-01T11:00:00.000Z');
   assert.equal(d.written.meta.horizon, '2026-07-01T12:00:00.000Z');
 });
 

@@ -72,6 +72,56 @@ function page(nodes, hasNextPage = false, endCursor = null, rateLimit = DEFAULT_
 // it overrides `rateLimit` explicitly.
 const DEFAULT_PAGE_RATE_LIMIT = { cost: 1, remaining: 4999, resetAt: '2026-07-01T13:00:00.000Z' };
 
+for (const fetch of [fetchPRs, fetchIssues]) {
+  test(`${fetch.name} captures the Date header only when requested`, () => {
+    const calls = [];
+    const dates = [];
+    const body = page([]);
+    const result = fetch('o/r', {
+      onServerTime: (date) => dates.push(date),
+      exec: (_cmd, args) => {
+        calls.push(args);
+        return `HTTP/2.0 200 OK\r\nDate: Wed, 01 Jul 2026 12:00:00 GMT\r\n\r\n${body}`;
+      },
+    });
+    assert.deepEqual(result.rows, []);
+    assert.ok(calls[0].includes('--include'));
+    assert.deepEqual(dates, ['2026-07-01T12:00:00.000Z']);
+  });
+}
+
+test('server clock capture adds headers only to the first open page', () => {
+  const calls = [];
+  const dates = [];
+  fetchPRs('o/r', {
+    horizonCutoff: '2026-07-01T11:00:00.000Z',
+    onServerTime: (date) => dates.push(date),
+    exec: (_cmd, args) => {
+      calls.push(args);
+      const body = page([], calls.length === 1, calls.length === 1 ? 'next' : null);
+      return calls.length === 1
+        ? `HTTP/2.0 200 OK\nDate: Wed, 01 Jul 2026 12:00:00 GMT\n\n${body}`
+        : body;
+    },
+  });
+  assert.equal(calls.length, 3);
+  assert.equal(calls.filter((args) => args.includes('--include')).length, 1);
+  assert.equal(dates.length, 1);
+});
+
+test('server clock calibration rejects missing or invalid Date headers', () => {
+  for (const header of ['', 'Date: invalid']) {
+    assert.throws(
+      () =>
+        fetchPRs('o/r', {
+          onServerTime: () => assert.fail('invalid clock must not be used'),
+          exec: () => `HTTP/2.0 200 OK\n${header}\n\n${page([])}`,
+        }),
+      /Date header/,
+    );
+  }
+});
+
 test('rate-limit fetch invokes the REST boundary once, reports progress, and normalizes resetAt', () => {
   const calls = [];
   const result = fetchRateLimit({

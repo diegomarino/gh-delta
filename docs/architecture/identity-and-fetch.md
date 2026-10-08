@@ -31,7 +31,7 @@ flowchart TD
     C -- yes --> X[fail closed]
     C -- no --> D{prior snapshot exists?}
     D -- no --> Z[normalize + fingerprint]
-    D -- yes --> E[updated-items phase from horizon overlap]
+    D -- yes --> E[updated-items phase from prior horizon]
     E --> F{updated page cap exceeded?}
     F -- yes --> X
     F -- no --> G[merge phases; open-items wins on duplicate]
