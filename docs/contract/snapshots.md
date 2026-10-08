@@ -10,7 +10,7 @@ the best-effort [run-registry](registry.md#run-registry) breadcrumb (an index fo
 
 **Incremental fetch contract:** open items are always fetched in full (the scope
 for missing detection). When a prior snapshot exists, `meta.horizon` (the
-timestamp of the previous run) minus a 5-minute overlap is used as a cutoff:
+timestamp of the previous run) is used as a cutoff, with no overlap by default:
 all-states items updated since that cutoff are also fetched to observe closed,
 merged, and relabeled transitions. Absent closed items are dormant memory, not a
 missing delta — only items the snapshot believes OPEN can vanish.

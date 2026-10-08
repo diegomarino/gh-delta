@@ -269,11 +269,15 @@ test('snapshots reject an invalid persisted item.meta.changedAt/seenAt', () => {
   assert.deepEqual(readSnapshot(valid), data);
 });
 
-test('horizonCutoff derives from meta.horizon and honors overlap', () => {
+test('horizonCutoff defaults to the prior horizon and honors explicit overlap', () => {
   assert.equal(horizonCutoff(null), null);
   assert.equal(
     horizonCutoff({ pr: {}, issue: {}, meta: meta({ horizon: '2026-07-01T12:05:00.000Z' }) }),
-    '2026-07-01T12:00:00.000Z', // default 5-minute overlap
+    '2026-07-01T12:05:00.000Z',
+  );
+  assert.equal(
+    horizonCutoff({ meta: meta({ horizon: '2026-07-01T12:05:00.000Z' }) }, 5 * 60 * 1000),
+    '2026-07-01T12:00:00.000Z',
   );
 });
 

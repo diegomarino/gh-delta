@@ -30,6 +30,48 @@ test('first run returns code 0 (baseline) and writes the snapshot', () => {
   assert.equal(d.writes, 1);
 });
 
+test('recent closed items stay quiet after startup but later updates and reopening are detected', () => {
+  const d = deps([]);
+  let at = '2026-07-01T12:00:00.000Z';
+  let pr = { ...basePr, state: 'closed', updatedAt: '2026-07-01T11:59:00.000Z' };
+  let issue = { number: 43, state: 'closed', updatedAt: pr.updatedAt, conversationComments: 0 };
+  const fetch = (row, cutoff) => ({
+    rows:
+      row.state === 'open' || (cutoff && Date.parse(row.updatedAt) >= Date.parse(cutoff))
+        ? [row]
+        : [],
+    rateLimit: RATE_LIMIT,
+  });
+  d.fetchPRs = (_repo, opts) => fetch(pr, opts.horizonCutoff);
+  d.fetchIssues = (_repo, opts) => fetch(issue, opts.horizonCutoff);
+  d.now = () => at;
+  const tick = () =>
+    run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
+  assert.equal(tick().code, 0);
+  at = '2026-07-01T12:01:00.000Z';
+  const unchanged = tick();
+  assert.equal(unchanged.code, 0);
+  assert.deepEqual(unchanged.report.deltas, []);
+
+  pr = { ...pr, updatedAt: '2026-07-01T12:01:30.000Z', conversationComments: 1 };
+  issue = { ...issue, updatedAt: pr.updatedAt, conversationComments: 1 };
+  at = '2026-07-01T12:02:00.000Z';
+  const updated = tick();
+  assert.equal(updated.code, 10);
+  assert.deepEqual(
+    updated.report.deltas.map((delta) => delta.classes),
+    [['first-seen'], ['first-seen']],
+  );
+  at = '2026-07-01T12:03:00.000Z';
+  assert.equal(tick().code, 0);
+
+  pr = { ...pr, state: 'open', updatedAt: '2026-07-01T12:03:30.000Z' };
+  at = '2026-07-01T12:04:00.000Z';
+  const reopened = tick();
+  assert.equal(reopened.code, 10);
+  assert.ok(reopened.report.deltas.some((delta) => delta.classes.includes('reopened')));
+});
+
 test('error reports carry schemaVersion and omit deltas', () => {
   const d = deps([[basePr]]);
   d.resolveRepo = () => ({ status: 'declined' });
@@ -496,7 +538,7 @@ test('the CLI threads the snapshot horizon into fetchers and stamps a new one', 
   };
   const { code } = run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d);
   assert.equal(code, 0);
-  assert.equal(receivedCutoff, '2026-07-01T10:55:00.000Z');
+  assert.equal(receivedCutoff, '2026-07-01T11:00:00.000Z');
   assert.equal(d.written.meta.horizon, '2026-07-01T12:00:00.000Z');
 });
 
