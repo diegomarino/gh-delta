@@ -17,24 +17,28 @@
 
 - One recurring producer owns one snapshot identity: repository,
   `--monitor-id`, entity selection, and state path. Keep all four stable.
-- Name a session-owned identity
+- The session quickstart owns a unique `/tmp/gh-delta.*` directory and derives
+  its identity from the allocated basename. It requires no runtime session ID.
+- Name an advanced session-owned identity
   `<agent-type>-<last8(session-id)>-<purpose>`. Resuming the same conversation
   keeps its identity; a new session gets a new scenario instead of silently
   adopting another session's snapshot.
 - An intentionally cross-session producer has no session owner. Give it an
   explicit stable role such as `coordinator-<purpose>` and manage it through
   its scheduler.
-- Store automation state in an explicit durable `--state-dir`; the default is
+- Store persistent automation state in an explicit durable `--state-dir`; the default is
   temporary and can silently re-baseline after cleanup or reboot.
 - Do not overlap ticks for the same identity. A busy lock is a reason to wait,
   not to create a second monitor or delete the lock blindly.
-- A scheduler owns recurring timing. `gh-delta` intentionally performs one
+- The quickstart shell owns its two-minute loop; persistent monitoring uses a
+  scheduler. `gh-delta` intentionally performs one
   observation and exits; `wait` is the bounded exception for one worker
   condition.
 
 ## Scope and cost
 
-- Ask whether the user wants PRs, issues, both, or a selected set before the
+- The session quickstart uses the requested entities, defaulting to PRs and
+  issues. For advanced monitoring, clarify a missing selection before the
   first baseline. Changing entities later changes monitor identity.
 - Prefer the smallest universe that answers the question. A PR-only watch list
   containing at most ten entries uses a targeted GraphQL query. `--watch-strict`

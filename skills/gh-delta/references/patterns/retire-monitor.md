@@ -4,6 +4,11 @@
 
 Before using this procedure, read [scenario ownership and repository discovery](ownership.md) for the variables and identity used below.
 
+For the [session quickstart](../../SKILL.md#quickstart-get-updates-from-remote-prs-issues-or-both),
+stop and wait for the exact process handle retained at launch. Leave its
+temporary root in place; the advanced naming and archival steps below do not
+apply to that process.
+
 Stop work at its actual owner before moving state: interrupt and wait for a
 foreground shell loop or `gh-delta wait`; disable the exact named scheduler job
 for cron, launchd, or systemd; or use the stop handle returned by another

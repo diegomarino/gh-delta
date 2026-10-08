@@ -2,7 +2,10 @@
 
 [Skill](../../SKILL.md) · [Choose an operating pattern](../patterns.md)
 
-Before using this procedure, read [scenario ownership and repository discovery](ownership.md) for the variables and identity used below.
+For an ordinary session monitor, use the bundled
+[quickstart](../../SKILL.md#quickstart-get-updates-from-remote-prs-issues-or-both).
+Use this procedure for scheduler-owned monitoring with durable state; first read
+[scenario ownership and repository discovery](ownership.md) for the variables and identity used below.
 
 Use one tick per scheduler invocation. The scheduler—not an LLM turn—owns the
 cadence:

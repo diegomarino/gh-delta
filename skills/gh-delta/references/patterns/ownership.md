@@ -2,7 +2,12 @@
 
 [Skill](../../SKILL.md) · [Choose an operating pattern](../patterns.md)
 
-Keep one session-owned scenario under one exact root named
+For the [session quickstart](../../SKILL.md#quickstart-get-updates-from-remote-prs-issues-or-both),
+the script allocates an exclusive `/tmp/gh-delta.*` root and derives its identity
+from that directory. No native session ID is needed. Reuse that root throughout
+the running process; do not adopt another process's state.
+
+For advanced monitors, keep one session-owned scenario under one exact root named
 `<agent-type>-<last8(session-id)>-<purpose>`. On resume, that conversation reuses
 the same scenario, while a new session creates a new scenario rather than
 silently adopting another session's snapshot. Use lowercase slugs; do not put a
