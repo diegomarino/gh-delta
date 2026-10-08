@@ -166,7 +166,7 @@ if (
   );
 }
 for (const key of blocked) {
-  if (settings[key] !== undefined && settings[key] !== false && settings[key] !== '') {
+  if (settings[key] !== undefined && !(boolean.has(key) && settings[key] === false)) {
     unavailable(
       `Inherited ${key} conflicts with the session quickstart; use the advanced monitoring workflow without changing existing configuration.`,
     );

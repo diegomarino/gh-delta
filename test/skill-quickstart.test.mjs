@@ -360,6 +360,94 @@ test('quickstart refuses conflicting inherited settings', (t) => {
   assert.equal(f.ticks().length, 0);
 });
 
+for (const source of ['project', 'user']) {
+  for (const key of ['state-file', 'watch-dir', 'only-classes']) {
+    for (const value of [false, '']) {
+      test(`quickstart rejects ${source} ${key}: ${JSON.stringify(value)} before launch`, (t) => {
+        const f = fixture(t, { actualCli: true });
+        const launcher = join(f.root, 'bin', 'gh-delta');
+        rmSync(launcher);
+        symlinkSync(new URL('../gh-delta.mjs', import.meta.url).pathname, launcher);
+        const configPath =
+          source === 'project'
+            ? join(f.checkout, '.gh-delta.json')
+            : join(f.root, '.config', 'gh-delta', 'config.json');
+        mkdirSync(join(f.root, '.config', 'gh-delta'), { recursive: true });
+        const config = JSON.stringify({ [key]: value });
+        writeFileSync(configPath, config);
+        // Record reservations to catch state creation even before a failed CLI tick.
+        writeFileSync(
+          join(f.root, 'bin', 'mktemp'),
+          '#!/bin/bash\ncapture=$(/usr/bin/mktemp "$@") || exit "$?"\nprintf "%s\\n" "$capture" >> "$QUICKSTART_ROOT/temp-paths"\nprintf "%s\\n" "$capture"\n',
+          { mode: 0o755 },
+        );
+        const check = f.run('--check');
+        const launch = f.run();
+        const paths = readFileSync(join(f.root, 'temp-paths'), 'utf8').trim().split('\n');
+        t.after(() => {
+          for (const path of paths) rmSync(path, { recursive: true, force: true });
+        });
+        assert.equal(check.status, 1, check.stdout + check.stderr + launch.stdout + launch.stderr);
+        assert.equal(launch.status, 1, launch.stdout + launch.stderr);
+        for (const result of [check, launch]) {
+          const report = JSON.parse(result.stdout);
+          assert.equal(report.ready, false);
+          assert.ok(report.reason.includes(key), report.reason);
+          assert.match(report.reason, /advanced monitoring workflow/);
+        }
+        assert.equal(f.ticks().length, 0);
+        assert.ok(!f.calls().some(({ args }) => args[0] === 'api'));
+        assert.ok(
+          paths.every((path) => /\/gh-delta-preflight\./.test(path)),
+          paths.join('\n'),
+        );
+        assert.ok(
+          paths.every((path) => !existsSync(path)),
+          'temporary captures removed',
+        );
+        assert.ok(!existsSync(f.env.XDG_STATE_HOME));
+        assert.equal(readFileSync(configPath, 'utf8'), config);
+      });
+    }
+  }
+
+  test(`quickstart accepts disabled supported boolean settings from ${source} config`, (t) => {
+    const f = fixture(t, { actualCli: true });
+    const launcher = join(f.root, 'bin', 'gh-delta');
+    rmSync(launcher);
+    symlinkSync(new URL('../gh-delta.mjs', import.meta.url).pathname, launcher);
+    const configPath =
+      source === 'project'
+        ? join(f.checkout, '.gh-delta.json')
+        : join(f.root, '.config', 'gh-delta', 'config.json');
+    mkdirSync(join(f.root, '.config', 'gh-delta'), { recursive: true });
+    const config = JSON.stringify({
+      'watch-strict': false,
+      detail: false,
+      summaries: false,
+      settled: false,
+      'baseline-emit-state': false,
+      'summary-line': false,
+      'no-registry': false,
+      log: false,
+      'omit-end': false,
+    });
+    writeFileSync(configPath, config);
+    const check = f.run('--check');
+    assert.equal(check.status, 0, check.stderr);
+    assert.equal(JSON.parse(check.stdout).ready, true);
+    assert.ok(!f.calls().some(({ args }) => args[0] === 'api'));
+    assert.ok(!existsSync(f.env.XDG_STATE_HOME));
+    const launch = f.run();
+    const state = /state: (\/tmp\/gh-delta\.[A-Za-z0-9]+)/.exec(launch.stderr)?.[1];
+    if (state) t.after(() => rmSync(state, { recursive: true, force: true }));
+    assert.equal(launch.status, 17, launch.stderr);
+    assert.ok(state, launch.stderr);
+    assert.ok(readdirSync(state).some((name) => name.endsWith('.json')));
+    assert.equal(readFileSync(configPath, 'utf8'), config);
+  });
+}
+
 test('quickstart checks user, project, and environment settings with CLI precedence', (t) => {
   const f = fixture(t);
   const userDir = join(f.root, '.config', 'gh-delta');
