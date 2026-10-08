@@ -10,13 +10,94 @@ license: MIT
 returns durable facts to its caller. It never grants permission to merge,
 comment, close, assign, or otherwise mutate GitHub.
 
-This guide targets gh-delta 0.7.0 and report schema v2. Before resuming a
+## Quickstart: get updates from remote PRs, issues, or both
+
+From the repository checkout, run the bundled
+[scripts/gh-delta-quickstart.sh](scripts/gh-delta-quickstart.sh) in check mode
+before offering monitoring. Resolve the script path relative to this skill
+directory, not the checkout:
+
+```bash
+bash /absolute/path/to/gh-delta/scripts/gh-delta-quickstart.sh --check
+```
+
+Exit `0` returns JSON with `ready: true`, `repo`, `host`, and `launcher`.
+Exit `1` returns `ready: false` and an actionable `reason`; exit `2` means
+invalid arguments. The check creates no state and starts no polling. It checks
+the CLI launcher, Node 22+, a GitHub remote, authentication for that host, and
+conflicting inherited configuration. Installing the skill does not install the
+CLI. If the check fails, skip an unsolicited offer; for an explicit monitoring
+request, explain the reason. Do not install dependencies or change existing
+authentication or configuration automatically.
+
+If monitoring would help because other users or agents are expected to create
+or update issues or PRs in the repository, and the user has not requested
+monitoring, offer once and wait for acceptance:
+
+> Would you like me to monitor `{owner/repo}` during this session? I'll check
+> PRs and issues every two minutes, starting with a silent check, and notify
+> you of differences I observe between checks.
+
+Substitute the checked repository and the requested scope in the offer. Once
+accepted—or if monitoring is explicitly requested—launch the script from the
+checkout in a session-owned process:
+
+```bash
+bash /absolute/path/to/gh-delta/scripts/gh-delta-quickstart.sh
+```
+
+Append `pr`, `issue`, or `pr,issue` according to the user's request; default to
+both without asking them to choose flags. The script checks prerequisites again,
+selects `gh-delta` or `gh delta`, uses `origin` then `upstream` with the CLI-style
+GitHub fallback, and fixes the repository and launcher for the process lifetime.
+It reserves an exclusive directory under `/tmp`, derives its monitor identity
+from that directory, disables the global registry, and never writes into the
+checkout. It does not need the runtime's session ID.
+
+The first successful tick establishes a quiet baseline. Later ticks compare
+observed state with the previous snapshot; polling does not replay every event
+between checks. The script then waits
+120 seconds after each completed tick without overlap. Stdout contains one
+template line per change, with item type, number, title, PR branch when present,
+change classes, and URL; quiet ticks emit nothing. Stderr carries diagnostics
+and a `Monitoring ...` message after the first successful tick. Template classes
+such as `ci-changed` do not by themselves tell you whether CI is green or red.
+
+Retain the process handle and collect its output while working. Forward changes
+to the conversation; do not claim monitoring is active until the first successful
+tick and an owned running process. If the runtime cannot collect process output,
+explain that limitation instead of starting an unattended process. Stop that
+exact process when the session ends. Interruption stops its active child;
+temporary state is left in place and can be lost to cleanup or reboot.
+
+Exit `0`/`10` from a tick continues polling, `1` retries after the next sleep,
+and other failures stop the script. A preflight failure starts no monitor.
+For persistent state, selected items, multiple consumers, or structured reports,
+use the advanced patterns below instead of rebuilding the quickstart loop.
+Read [references/quickstart.md](references/quickstart.md) for script interfaces,
+preflight decisions, output examples, configuration conflicts, and shutdown.
+
+## Skill update awareness
+
+Once per session, if installation metadata is available, check for gh-delta
+updates using a read-only lookup with a five-second total deadline and no
+retries. Do not delay the requested work or monitoring offer; defer the lookup
+if necessary. Missing metadata, failed requests, or a timeout leave status
+unknown. If the skill folder hash changed, offer to update only gh-delta in its
+existing scope and wait for acceptance. Never run `npx skills check`
+automatically: it can update installations. Read
+[the update lookup details](references/quickstart.md#skill-update-awareness)
+when applicable. Keep this outside both scripts and the polling loop.
+
+## Advanced monitoring
+
+This guide supports gh-delta 0.7.0+ and report schema v2. Before resuming a
 pre-0.7 monitor, read
 [references/troubleshooting.md](references/troubleshooting.md#upgrade-from-pre-07-state).
 Before parsing reports or adapting a consumer, read
 [references/patterns.md](references/patterns/consume-output.md#consume-schema-v2-output).
 
-## Check CLI availability
+### Check CLI availability
 
 Before starting monitoring, run `gh-delta --version`. If it exits `0`, use
 `gh-delta`. Otherwise, try `gh delta --version`; if it exits `0`, use the
@@ -29,9 +110,9 @@ If both probes fail, tell the user that the CLI availability check failed,
 include the actual errors, and stop before creating monitoring state or
 schedules. Installing this skill does not install the CLI.
 
-## Start with the monitoring intent
+### Start with the monitoring intent
 
-For the usual request—“monitor the repository I am working in”—resolve the
+For advanced monitoring outside the session quickstart, resolve the
 current GitHub repository with `gh repo view --json nameWithOwner --jq
 .nameWithOwner` and show it to the user. If `origin` and `upstream` differ, ask
 which repository is authoritative instead of guessing.
@@ -67,8 +148,9 @@ authentication, rate limits, page caps, locks, and snapshot recovery.
   `--entities pr` rejects issue entries. Issue-only state is `watch-issue`;
   a mixed list that contains an issue is a new `watch-pr-issue` baseline and
   does not replace an existing `watch-pr` snapshot.
-- Give every recurring producer an explicit `--monitor-id` and durable
-  `--state-dir`. Never overlap producers that own the same snapshot.
+- Give every recurring producer an explicit `--monitor-id` and `--state-dir`.
+  Use durable state for persistent monitors; the session quickstart deliberately
+  uses exclusive temporary state. Never overlap producers that own the same snapshot.
 - The first successful tick normally establishes a quiet baseline. Do not call
   pre-existing work new; use `--baseline-emit-state` only when that distinction
   is understood.
