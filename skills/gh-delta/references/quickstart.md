@@ -135,8 +135,13 @@ The quickstart refuses an inherited repository selecting a different remote,
 an explicit state file, watch-directory/strict-watch selection, item numbers,
 attention filters, settled-only reporting, baseline emission, outpost delivery,
 or template options incompatible with its output. It names the conflicting key
-without modifying it. False boolean settings and empty strings are inactive.
-Use the advanced monitoring workflow when those settings are intentional.
+without modifying it. Supported boolean settings set to `false` are inactive.
+For blocked keys in user or project configuration, empty strings are rejected;
+`false` is also rejected for non-boolean keys such as `state-file`, `watch-dir`,
+and `only-classes`. Both `--check` and launch report `ready: false` and exit `1`
+before allocating monitoring state. Empty environment values are ignored, so
+lower-precedence configuration still applies. Use the advanced monitoring
+workflow when conflicting settings are intentional.
 
 Its explicit flags safely select its own monitor identity, state directory,
 entity scope, format, inline template, and disabled registry. Other CLI validation
