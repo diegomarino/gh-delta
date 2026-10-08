@@ -65,6 +65,7 @@ if (name === 'git') {
     reviewThreads: { totalCount: 0, nodes: [], pageInfo: { hasNextPage: false } },
     labels: { nodes: [] }, assignees: { nodes: [] },
   };
+  if (args.includes('--include')) console.log('HTTP/2.0 200 OK\\nDate: ' + new Date().toUTCString() + '\\n');
   console.log(JSON.stringify({ data: { rateLimit: { cost: 1, remaining: 4999, resetAt: '2030-01-01T00:00:00Z' }, repository: { items: { nodes: [node], pageInfo: { hasNextPage: false, endCursor: null } } } } }));
 } else if (args.includes('--version')) {
   if (settings.blockVersion) {
