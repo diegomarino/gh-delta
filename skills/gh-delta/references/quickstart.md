@@ -155,7 +155,9 @@ The inline template is:
 Each detected change emits one line. PRs include their source branch; issues and
 PRs without a branch leave that field empty. Template escaping keeps newlines
 and other controls inside a field from creating extra notification lines.
-Classes name changes: `ci-changed` alone does not say whether CI is green or red.
+Classes describe observations: `ci-changed` alone does not say whether CI is green
+or red. `first-seen` means an item entered this monitor's memory, not that it was
+newly created or changed during the session; present it as a first observation.
 Do not infer omitted detail from a class or re-run a tick to recover the already
 consumed transition.
 

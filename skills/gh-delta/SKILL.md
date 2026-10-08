@@ -35,7 +35,8 @@ or update issues or PRs in the repository, and the user has not requested
 monitoring, offer once and wait for acceptance:
 
 > Would you like me to monitor `{owner/repo}` during this session? I'll check
-> PRs and issues every two minutes and notify you when I detect changes.
+> PRs and issues every two minutes, starting with a silent check, and notify
+> you of differences I observe between checks.
 
 Substitute the checked repository and the requested scope in the offer. Once
 accepted—or if monitoring is explicitly requested—launch the script from the
@@ -53,7 +54,9 @@ It reserves an exclusive directory under `/tmp`, derives its monitor identity
 from that directory, disables the global registry, and never writes into the
 checkout. It does not need the runtime's session ID.
 
-The first successful tick establishes a quiet baseline. The script then waits
+The first successful tick establishes a quiet baseline. Later ticks compare
+observed state with the previous snapshot; polling does not replay every event
+between checks. The script then waits
 120 seconds after each completed tick without overlap. Stdout contains one
 template line per change, with item type, number, title, PR branch when present,
 change classes, and URL; quiet ticks emit nothing. Stderr carries diagnostics
