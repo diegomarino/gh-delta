@@ -10,6 +10,19 @@ This project follows semantic versioning.
 
 - Add opt-in one-line per-delta templates to detector ticks and cursor reads, with local file sources and optional raw-byte SHA-256 verification (#95). Planned for the next minor release.
 
+## [0.11.0](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.10.1...gh-delta-v0.11.0) (2026-10-08)
+
+
+### Features
+
+* **skill:** add an isolated session monitoring quickstart ([#112](https://github.com/diegomarino/gh-delta/issues/112)) ([9af262f](https://github.com/diegomarino/gh-delta/commit/9af262f5ff6a82f11f8220d29277f34f794d6791))
+
+
+### Bug Fixes
+
+* **polling:** calibrate GitHub time and avoid pre-start notifications ([#111](https://github.com/diegomarino/gh-delta/issues/111)) ([af0d0c2](https://github.com/diegomarino/gh-delta/commit/af0d0c21dcfdf1062cb625aec3b663f222880066))
+* **quickstart:** reject false non-boolean settings ([#117](https://github.com/diegomarino/gh-delta/issues/117)) ([27a5989](https://github.com/diegomarino/gh-delta/commit/27a598956fd017c5649f8328f428a8d5e5825109))
+
 ## [0.10.1](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.10.0...gh-delta-v0.10.1) (2026-10-02)
 
 
