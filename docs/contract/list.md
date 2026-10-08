@@ -70,7 +70,7 @@ Success report (exit `0`; the shape is also available as `reportFields` /
 - `since` (string|null): the echoed `--since` value, or `null` when no window
   was given.
 - `monitors` (array): sorted by `lastRun`, newest first. `lastRun` is the
-  snapshot's `meta.horizon` when readable; the registry `lastRun` or file mtime
+  snapshot's `meta.updatedAt` when readable; the registry `lastRun` or file mtime
   otherwise (corrupt or unreadable snapshots). A corrupt snapshot keeps its
   entry with an `error` string and `null` counts instead of failing the
   listing. A registered monitor whose snapshot file no longer exists keeps its

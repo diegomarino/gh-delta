@@ -10,10 +10,20 @@ the best-effort [run-registry](registry.md#run-registry) breadcrumb (an index fo
 
 **Incremental fetch contract:** open items are always fetched in full (the scope
 for missing detection). When a prior snapshot exists, `meta.horizon` (the
-timestamp of the previous run) is used as a cutoff, with no overlap by default:
+start of the previous run in the GitHub clock domain) is used as a cutoff,
+with no overlap by default:
 all-states items updated since that cutoff are also fetched to observe closed,
 merged, and relabeled transitions. Absent closed items are dormant memory, not a
 missing delta — only items the snapshot believes OPEN can vanish.
+
+A new broad monitor calibrates its clock from the HTTP `Date` header on the
+first baseline response, without an extra request. The offset is applied to
+the local start time when storing `meta.horizon`. `meta.updatedAt` remains that
+start time in the local clock domain; `horizon - updatedAt` preserves the offset
+for subsequent ticks without adding snapshot fields. The baseline remains
+open-only and silent. Existing snapshots retain their stored offset (zero for
+uncalibrated snapshots); starting a fresh baseline obtains a new calibration.
+Targeted watches do not use the broad incremental cutoff and keep local horizons.
 
 ## Fetch limits (page caps)
 

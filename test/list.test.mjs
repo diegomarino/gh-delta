@@ -28,8 +28,7 @@ const item = (fingerprint = { state: 'OPEN' }) => ({
 });
 
 // Schema v2 snapshot-wide meta is mandatory -- see lib/snapshot.mjs's
-// validateSnapshotMeta. horizon/createdAt/updatedAt default to NOW so callers
-// below only need to override what a given test actually cares about.
+// validateSnapshotMeta. Fixtures use aligned clocks unless updatedAt is explicit.
 function META(overrides = {}) {
   return {
     schemaVersion: 2,
@@ -40,7 +39,7 @@ function META(overrides = {}) {
     scope: 'poll',
     horizon: NOW,
     createdAt: NOW,
-    updatedAt: NOW,
+    updatedAt: overrides.horizon ?? NOW,
     ...overrides,
   };
 }
@@ -54,6 +53,42 @@ function seed(dir, repo, monitorId, entities, snapshot) {
   });
   return path;
 }
+
+test('inventory age and since filters use local time despite a calibrated GitHub horizon', () => {
+  for (const offsetMs of [-30_000, 30_000]) {
+    for (const registered of [false, true]) {
+      const dir = mkdtempSync(join(tmpdir(), 'gd-list-clock-'));
+      const registryDir = registered ? mkdtempSync(join(tmpdir(), 'gd-reg-clock-')) : null;
+      const path = seed(dir, 'o/r', 'clock', 'pr', {
+        pr: {},
+        issue: {},
+        meta: {
+          horizon: new Date(Date.parse(NOW) + offsetMs).toISOString(),
+          updatedAt: NOW,
+        },
+      });
+      if (registered)
+        registerMonitor({
+          repo: 'o/r',
+          monitorId: 'clock',
+          entities: ['pr'],
+          stateFile: path,
+          status: 'ok',
+          at: '2026-07-08T11:00:00.000Z',
+          env: { GH_DELTA_REGISTRY_DIR: registryDir },
+        });
+      const { monitors } = listMonitors(dir, {
+        registryDir,
+        sinceMs: 10_000,
+        now: () => '2026-07-08T12:00:01.000Z',
+      });
+      assert.equal(monitors.length, 1);
+      assert.equal(monitors[0].lastRun, NOW);
+      assert.equal(monitors[0].lastOkAt, NOW);
+      assert.equal(monitors[0].observationAgeMs, 1000);
+    }
+  }
+});
 
 test('parseSnapshotFilename round-trips snapshotPath for hostile identifiers', () => {
   const cases = [
