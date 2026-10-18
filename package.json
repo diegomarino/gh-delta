@@ -100,6 +100,8 @@
     "schema",
     "skills",
     ".claude-plugin",
+    ".cursor-plugin",
+    "plugin.json",
     "README.md",
     "RUNBOOK.md",
     "CHANGELOG.md",

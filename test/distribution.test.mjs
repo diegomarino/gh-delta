@@ -34,6 +34,8 @@ test('agent skill has valid structured frontmatter and generated flags in the pa
   const pkg = JSON.parse(readFileSync(path('package.json'), 'utf8'));
   assert.ok(pkg.files.includes('skills'));
   assert.ok(pkg.files.includes('.claude-plugin'));
+  assert.ok(pkg.files.includes('.cursor-plugin'));
+  assert.ok(pkg.files.includes('plugin.json'));
 });
 
 test('generated skill flags are synchronized with help metadata', () => {
@@ -167,6 +169,8 @@ test('release metadata and CI enforce distributable agent and extension installs
   const releasePlease = JSON.parse(readFileSync(path('release-please-config.json'), 'utf8'));
   assert.deepEqual(releasePlease.packages['.']['extra-files'], [
     { type: 'json', path: '.claude-plugin/plugin.json', jsonpath: '$.version' },
+    { type: 'json', path: 'plugin.json', jsonpath: '$.version' },
+    { type: 'json', path: '.cursor-plugin/plugin.json', jsonpath: '$.version' },
   ]);
   const ci = readFileSync(path('.github/workflows/ci.yml'), 'utf8');
   assert.match(ci, /name: Verify skill discovery\n\s+if: matrix\.node-version == '24\.x'/);
