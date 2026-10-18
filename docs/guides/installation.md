@@ -16,6 +16,12 @@ Run without installing:
 npx gh-delta --repo owner/repo
 ```
 
+The agent skill in `skills/gh-delta/` installs with `npx skills add
+diegomarino/gh-delta --skill gh-delta`, or as a plugin: Claude Code
+(`.claude-plugin/`), Agent Plugins 1.0 clients such as Codex, Copilot, VS Code
+and Cursor (`plugin.json`), and Cursor/Grok Bot (`.cursor-plugin/`). All share
+the same `skills/` directory.
+
 ## Zero-config repo
 
 Inside a checkout with a GitHub `origin` (or `upstream`) remote, `--repo` can be
