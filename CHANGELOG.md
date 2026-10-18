@@ -10,6 +10,29 @@ This project follows semantic versioning.
 
 - Add opt-in one-line per-delta templates to detector ticks and cursor reads, with local file sources and optional raw-byte SHA-256 verification (#95). Planned for the next minor release.
 
+## [0.12.0](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.11.0...gh-delta-v0.12.0) (2026-10-18)
+
+
+### Features
+
+* **cli:** autodetect --repo for reset like a run does ([#122](https://github.com/diegomarino/gh-delta/issues/122)) ([11d14c8](https://github.com/diegomarino/gh-delta/commit/11d14c8a0c993d876a00bba0186d9ca3c5c52872))
+* **plugin:** add Agent Plugins 1.0 and Cursor manifests sharing skills/ ([4ff83d7](https://github.com/diegomarino/gh-delta/commit/4ff83d7d5a24db287e6f3c2b01c06f14cf71eb5a))
+* **quickstart:** add a one-shot --once mode for schedulers ([9124295](https://github.com/diegomarino/gh-delta/commit/9124295b6460c17e6e9594631fa3ea5cf29745c5))
+
+
+### Bug Fixes
+
+* **polling:** fall back when the token cannot read team reviewers ([116abd5](https://github.com/diegomarino/gh-delta/commit/116abd574fb861607cf3b4dac6548cb735033de1))
+* **polling:** recalibrate GitHub clock offset on every broad tick ([#118](https://github.com/diegomarino/gh-delta/issues/118)) ([5dbc42f](https://github.com/diegomarino/gh-delta/commit/5dbc42fbf083ba65be932f1a0ad6be2826b7bc45))
+* **quickstart:** probe repository read access in the readiness check ([#121](https://github.com/diegomarino/gh-delta/issues/121)) ([b674734](https://github.com/diegomarino/gh-delta/commit/b674734efae4cbab6c6855ed9638a9daa6d3c8c5))
+
+
+### Documentation
+
+* describe the team-reviewers-unavailable warning ([b3c1444](https://github.com/diegomarino/gh-delta/commit/b3c1444e2e5c67e44b5403d07c138712b5549efe))
+* **install:** mention Agent Plugins and Cursor install targets ([75a3e69](https://github.com/diegomarino/gh-delta/commit/75a3e69abd48d48cbe892ad9543bacc1f30d678e))
+* **skill:** document one-shot scheduled runs and cloud-agent setup ([c50388e](https://github.com/diegomarino/gh-delta/commit/c50388e82933f163460f031d75a8bfbde803214b))
+
 ## [0.11.0](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.10.1...gh-delta-v0.11.0) (2026-10-08)
 
 
