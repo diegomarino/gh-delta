@@ -61,6 +61,18 @@ fetches to the `gh` CLI. If `gh` is not authenticated or lacks read access to
 the repository, the detector exits `1` and does not touch the snapshot. Fix
 authentication first, then retry.
 
+**`warning [team-reviewers-unavailable]` — team reviewers show as `?`.**
+The classic token lacks `read:org`, which reading organization teams needs.
+PR fetches retry without team reviewer names instead of failing, so team
+review requests are recorded as `?`. Run `gh auth refresh -s read:org` to see
+them. The first tick after the scope changes emits one
+`review-requests-changed` per PR with a pending team request, as `?` becomes
+`org/slug` (or the reverse).
+
+Fine-grained and GitHub App tokens are not covered by this fallback: on an
+organization repository with team review requests they can still fail with
+`FORBIDDEN` on `requestedReviewer`; grant organization Members: read.
+
 **"exceeded N pages — narrow the monitor scope or re-seed the baseline".**
 The tool fails closed (exit `1`) rather than silently truncating results.
 Open items are limited to 1 000 per family (10 pages × 100). Updated items per
