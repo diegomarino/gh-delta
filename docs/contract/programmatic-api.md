@@ -62,8 +62,8 @@ Behavioral notes for consumers:
   (`meta.horizon` minus the optional `overlapMs`, which defaults to `0`); a `null` snapshot yields `null`
   (open-items-only fetch). Broad `fetchPRs` and `fetchIssues` calls may supply
   `onServerTime(isoTimestamp)` to capture the HTTP `Date` header from their first
-  open-page response. Without that callback, their response and request shapes
-  remain unchanged.
+  open-page response; a missing or invalid header is passed as `null`. Without
+  that callback, their response and request shapes remain unchanged.
 - `prFingerprint`/`issueFingerprint` build the compared subset directly from an
   already-normalized PR/issue row (see [Fingerprint fields](fingerprints.md#fingerprint-fields-from--to)
   for the exact shape `lib/gh.mjs` normalizes into); there is no drop-list —
