@@ -4,13 +4,14 @@
 // observe a half-deleted monitor.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { run } from '../lib/cli.mjs';
 import { RESET_REPORT_FIELDS, RESET_TARGET_FIELDS } from '../lib/contract.mjs';
 import { economicalSnapshotPath, writeSnapshotAtomic } from '../lib/snapshot.mjs';
 import { appendDeltaLog } from '../lib/deltalog.mjs';
+import { resolveRepoFromGit } from '../lib/repo-source.mjs';
 
 const REPO = 'o/r';
 const MONITOR = 'm';
@@ -313,4 +314,170 @@ test('a tick contending for the lock during reset gets busy; once reset complete
   );
   assert.equal(after.code, 0);
   assert.equal(after.report.results[0].baseline, true);
+});
+
+// --repo autodetect: reset resolves an omitted --repo exactly like a run.
+const gitExec = (remotes) => (cmd, args) => {
+  if (cmd === 'git' && args[0] === 'remote' && remotes[args[2]]) return remotes[args[2]];
+  throw Object.assign(new Error('fatal: not a git repository'), {
+    stderr: 'fatal: not a git repository',
+  });
+};
+const resolveWith = (remotes) => (opts) => resolveRepoFromGit({ ...opts, exec: gitExec(remotes) });
+
+test('reset without --repo derives it from the git remote and targets the same state as a run', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-reset-auto-'));
+  const stateFile = economicalSnapshotPath(REPO, MONITOR, 'pr', dir);
+  const logFile = seedMonitor(stateFile);
+  const result = run(
+    ['reset', '--monitor-id', MONITOR, '--state-dir', dir, '--entities', 'pr', '--yes'],
+    {
+      resolveRepo: resolveWith({ origin: 'git@github.com:O/R.git\n' }),
+      now: () => '2026-09-20T12:00:00.000Z',
+    },
+  );
+  assert.equal(result.code, 0);
+  assert.equal(existsSync(stateFile), false);
+  assert.equal(existsSync(logFile), false);
+});
+
+test('reset falls back to upstream when origin is absent', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-reset-auto-'));
+  const result = run(['reset', '--monitor-id', MONITOR, '--state-dir', dir, '--yes'], {
+    resolveRepo: resolveWith({ upstream: 'https://github.com/acme/proj.git' }),
+    now: () => '2026-09-20T12:00:00.000Z',
+  });
+  assert.equal(result.code, 0);
+  assert.match(result.report.stateFile, /acme/);
+});
+
+test('reset with explicit --repo never calls the resolver', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-reset-auto-'));
+  const result = run(
+    ['reset', '--repo', REPO, '--monitor-id', MONITOR, '--state-dir', dir, '--yes'],
+    {
+      resolveRepo: () => assert.fail('explicit --repo must win'),
+      now: () => '2026-09-20T12:00:00.000Z',
+    },
+  );
+  assert.equal(result.code, 0);
+});
+
+test('reset autodetect declined gives the same config error as a run', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-reset-auto-'));
+  const deps = {
+    resolveRepo: () => ({ status: 'declined' }),
+    now: () => '2026-09-20T12:00:00.000Z',
+  };
+  const result = run(['reset', '--monitor-id', MONITOR, '--state-dir', dir, '--yes'], deps);
+  const runResult = run(['--monitor-id', MONITOR, '--state-dir', dir], deps);
+  assert.equal(result.code, 2);
+  assert.equal(result.report.kind, 'config');
+  assert.equal(result.report.error, runResult.report.error);
+  assert.match(result.report.error, /missing --repo and could not derive/);
+});
+
+test('reset autodetect transient failure gives the same github error as a run', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-reset-auto-'));
+  const result = run(['reset', '--monitor-id', MONITOR, '--state-dir', dir, '--yes'], {
+    resolveRepo: () => ({ status: 'failed', reason: 'timed out' }),
+    now: () => '2026-09-20T12:00:00.000Z',
+  });
+  assert.equal(result.code, 1);
+  assert.equal(result.report.kind, 'github');
+  assert.match(result.report.error, /could not derive --repo: timed out/);
+});
+
+test('reset still requires --yes when --repo is omitted', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-reset-auto-'));
+  const result = run(['reset', '--monitor-id', MONITOR, '--state-dir', dir], {
+    resolveRepo: () => assert.fail('--yes is checked before repo derivation'),
+  });
+  assert.equal(result.code, 2);
+  assert.match(result.report.error, /--yes/);
+});
+
+// Configured repo (env / project config) outranks the checkout's remote, as in a run.
+const configEnv = (dir, files = {}) => ({
+  homedir: () => join(dir, 'home'),
+  cwd: () => join(dir, 'cwd'),
+  env: {},
+  configReadFileSync: (path, enc) => {
+    if (path in files) return files[path];
+    return readFileSync(path, enc);
+  },
+});
+
+test('reset prefers GH_DELTA_REPO over the checkout remote', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-reset-cfg-'));
+  const target = economicalSnapshotPath('conf/repo', MONITOR, 'pr', dir);
+  const other = economicalSnapshotPath('o/r', MONITOR, 'pr', dir);
+  seedMonitor(target);
+  seedMonitor(other);
+  const result = run(
+    ['reset', '--monitor-id', MONITOR, '--state-dir', dir, '--entities', 'pr', '--yes'],
+    {
+      ...configEnv(dir),
+      env: { GH_DELTA_REPO: 'conf/repo' },
+      resolveRepo: resolveWith({ origin: 'git@github.com:o/r.git' }),
+      now: () => '2026-09-20T12:00:00.000Z',
+    },
+  );
+  assert.equal(result.code, 0);
+  assert.equal(existsSync(target), false);
+  assert.equal(existsSync(other), true);
+});
+
+test('reset prefers project config repo over the checkout remote', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-reset-cfg-'));
+  const target = economicalSnapshotPath('conf/repo', 'cfgmon', 'pr', dir);
+  const other = economicalSnapshotPath('o/r', 'cfgmon', 'pr', dir);
+  seedMonitor(target);
+  seedMonitor(other);
+  const projectPath = join(dir, 'cwd', '.gh-delta.json');
+  const result = run(['reset', '--state-dir', dir, '--yes'], {
+    ...configEnv(dir, {
+      [projectPath]: JSON.stringify({
+        repo: 'conf/repo',
+        'monitor-id': 'cfgmon',
+        entities: 'pr',
+      }),
+    }),
+    resolveRepo: resolveWith({ origin: 'git@github.com:o/r.git' }),
+    now: () => '2026-09-20T12:00:00.000Z',
+  });
+  assert.equal(result.code, 0);
+  assert.equal(existsSync(target), false);
+  assert.equal(existsSync(other), true);
+});
+
+test('reset explicit --repo wins over env and project config', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gd-reset-cfg-'));
+  const target = economicalSnapshotPath('flag/repo', MONITOR, 'pr', dir);
+  const configured = economicalSnapshotPath('conf/repo', MONITOR, 'pr', dir);
+  seedMonitor(target);
+  seedMonitor(configured);
+  const result = run(
+    [
+      'reset',
+      '--repo',
+      'flag/repo',
+      '--monitor-id',
+      MONITOR,
+      '--state-dir',
+      dir,
+      '--entities',
+      'pr',
+      '--yes',
+    ],
+    {
+      ...configEnv(dir),
+      env: { GH_DELTA_REPO: 'conf/repo' },
+      resolveRepo: () => assert.fail('explicit --repo must win'),
+      now: () => '2026-09-20T12:00:00.000Z',
+    },
+  );
+  assert.equal(result.code, 0);
+  assert.equal(existsSync(target), false);
+  assert.equal(existsSync(configured), true);
 });
