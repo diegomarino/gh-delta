@@ -4,6 +4,8 @@
 # Usage (run from the repository checkout, not from this script's directory):
 #   bash /path/to/gh-delta/scripts/gh-delta-quickstart.sh --check [scope]
 #   bash /path/to/gh-delta/scripts/gh-delta-quickstart.sh [scope]
+#   bash /path/to/gh-delta/scripts/gh-delta-quickstart.sh --once \
+#     --state-dir DIR --monitor-id ID [scope]
 # Scope is pr, issue, or pr,issue (default). Polling sleeps 120 seconds AFTER
 # each completed tick; it does not promise a fixed wall-clock schedule.
 #
@@ -13,6 +15,13 @@
 # Stdout carries template change lines; stderr carries errors and the readiness
 # announcement after a successful baseline. No registry/config is written.
 # Tick statuses 0/10 continue, 1 retries, and other statuses stop unchanged.
+#
+# --once is for schedulers (cron, CI, routines). After the same preflight it runs
+# exactly one tick, prints the same template lines, and exits with gh-delta's
+# status: 0 no change or silent baseline, 10 changes, 1 retryable, else unchanged.
+# --state-dir and --monitor-id are required: state must outlive the process and
+# the identity must be constant, or every run silently re-baselines. No sleep,
+# no loop, no /tmp state; the caller owns DIR and runs one invocation at a time.
 #
 # Run in a foreground process whose output the agent can collect. SIGINT and
 # SIGTERM stop its active process group (launcher descendants or sleep), reap
@@ -38,13 +47,36 @@ trap 'stop 130' INT
 trap 'stop 143' TERM
 
 check=false
+once=false
+once_state_dir=''
+once_monitor_id=''
 if [ "${1:-}" = '--check' ]; then
   check=true
   shift
+elif [ "${1:-}" = '--once' ]; then
+  once=true
+  shift
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --state-dir | --monitor-id)
+        if [ "$#" -lt 2 ] || [ -z "$2" ]; then
+          printf '%s needs a value.\n' "$1" >&2
+          exit 2
+        fi
+        if [ "$1" = '--state-dir' ]; then once_state_dir=$2; else once_monitor_id=$2; fi
+        shift 2
+        ;;
+      *) break ;;
+    esac
+  done
+  if [ -z "$once_state_dir" ] || [ -z "$once_monitor_id" ]; then
+    printf 'Usage: gh-delta-quickstart.sh --once --state-dir DIR --monitor-id ID [pr|issue|pr,issue]\n' >&2
+    exit 2
+  fi
 fi
 scope=${1-pr,issue}
 if [ "$#" -gt 1 ]; then
-  printf 'Usage: gh-delta-quickstart.sh [--check] [pr|issue|pr,issue]\n' >&2
+  printf 'Usage: gh-delta-quickstart.sh [--check | --once --state-dir DIR --monitor-id ID] [pr|issue|pr,issue]\n' >&2
   exit 2
 fi
 case "$scope" in
@@ -85,6 +117,22 @@ process.stdin.on("end", () => {
 ')"
 cli=(gh-delta)
 if [ "$launcher" = 'gh delta' ]; then cli=(gh delta); fi
+if [ "$once" = true ]; then
+  mkdir -p -- "$once_state_dir" || exit 1
+  GH_HOST="$host" "${cli[@]}" \
+    --repo "$repo" \
+    --monitor-id "$once_monitor_id" \
+    --state-dir "$once_state_dir" \
+    --entities "$scope" \
+    --no-registry \
+    --format template \
+    --template '{entity} #{number}: {context.title} {context.headRefName} [{classes}] {context.url}' &
+  child_pid=$!
+  rc=0
+  wait "$child_pid" || rc=$?
+  child_pid=''
+  exit "$rc"
+fi
 # Atomic reservation supplies both private state and a collision-free live ID.
 state_dir=$(mktemp -d /tmp/gh-delta.XXXXXXXXXX) || exit 1
 monitor_id=${state_dir##*/}

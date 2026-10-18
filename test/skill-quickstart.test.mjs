@@ -128,6 +128,7 @@ if (name === 'git') {
   t.after(() => {
     for (const tick of ticks()) {
       const state = tick.args[tick.args.indexOf('--state-dir') + 1];
+      if (state.startsWith(root)) continue;
       assert.match(state, /^\/tmp\/gh-delta\.[A-Za-z0-9]+$/);
       rmSync(state, { recursive: true, force: true });
     }
@@ -683,3 +684,86 @@ test(
     assert.equal(f.ticks().length, 1);
   },
 );
+
+test('--once runs one tick with the caller state dir and identity', (t) => {
+  const f = fixture(t, { codes: [0] });
+  const state = join(f.root, 'persistent', 'state');
+  const result = f.run('--once', '--state-dir', state, '--monitor-id', 'bot-1', 'pr');
+  assert.equal(result.status, 0, result.stderr);
+  const ticks = f.ticks();
+  assert.equal(ticks.length, 1);
+  const { args } = ticks[0];
+  const value = (flag) => args[args.indexOf(flag) + 1];
+  assert.equal(value('--repo'), 'acme/widgets');
+  assert.equal(value('--monitor-id'), 'bot-1');
+  assert.equal(value('--state-dir'), state);
+  assert.equal(value('--entities'), 'pr');
+  assert.ok(args.includes('--no-registry'));
+  assert.equal(value('--format'), 'template');
+  assert.ok(existsSync(join(state, 'snapshot.json')));
+  assert.ok(!f.calls().some(({ name }) => name === 'sleep'));
+});
+
+test('--once propagates the tick exit status and output unchanged', (t) => {
+  for (const [code, stdout] of [
+    [0, ''],
+    [10, 'pr #42: Update widget'],
+    [1, ''],
+    [2, ''],
+  ]) {
+    const f = fixture(t, { codes: [code] });
+    const state = join(f.root, 'state');
+    const result = f.run('--once', '--monitor-id', 'bot-1', '--state-dir', state);
+    assert.equal(result.status, code, result.stderr);
+    assert.ok(result.stdout.startsWith(stdout));
+    assert.equal(result.stdout.trim().split('\n').filter(Boolean).length, code === 10 ? 1 : 0);
+    assert.equal(f.ticks().length, 1);
+    assert.equal(f.ticks()[0].args[f.ticks()[0].args.indexOf('--entities') + 1], 'pr,issue');
+  }
+});
+
+test('--once requires state dir and monitor id', (t) => {
+  const cases = [
+    ['--once'],
+    ['--once', '--state-dir', '/x/state'],
+    ['--once', '--monitor-id', 'bot-1'],
+    ['--once', '--state-dir', '--monitor-id', 'bot-1'],
+    ['--once', '--state-dir', '/x/state', '--monitor-id', 'bot-1', 'bogus'],
+    ['--once', '--state-dir', '/x/state', '--monitor-id', 'bot-1', 'pr', 'issue'],
+  ];
+  for (const args of cases) {
+    const f = fixture(t);
+    const result = f.run(...args);
+    assert.equal(result.status, 2, args.join(' '));
+    assert.match(result.stderr, /Usage|needs a value|Scope/);
+    assert.equal(f.calls().length, 0);
+  }
+});
+
+test('--once preflight failure exits 1 without a tick or state', (t) => {
+  const f = fixture(t, { noAuth: true });
+  const state = join(f.root, 'state');
+  const result = f.run('--once', '--state-dir', state, '--monitor-id', 'bot-1');
+  assert.equal(result.status, 1);
+  assert.equal(JSON.parse(result.stdout).ready, false);
+  assert.equal(f.ticks().length, 0);
+  assert.ok(!existsSync(state));
+});
+
+test('a second --once on the same state dir reuses the snapshot', (t) => {
+  const f = fixture(t, { actualCli: true });
+  const launcher = join(f.root, 'bin', 'gh-delta');
+  rmSync(launcher);
+  symlinkSync(new URL('../gh-delta.mjs', import.meta.url).pathname, launcher);
+  const state = join(f.root, 'persistent');
+  const once = () => f.run('--once', '--state-dir', state, '--monitor-id', 'bot-1', 'pr');
+  const first = once();
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(first.stdout, '');
+  writeFileSync(join(f.root, 'stage'), '1');
+  const second = once();
+  assert.equal(second.status, 10, second.stderr);
+  assert.match(second.stdout, /pr #42: Demo PR\\nsafe feature\/demo \[new-comments\]/);
+  assert.ok(!existsSync(join(f.env.XDG_STATE_HOME, 'gh-delta', 'registry')));
+  assert.deepEqual(readdirSync(f.checkout), []);
+});
