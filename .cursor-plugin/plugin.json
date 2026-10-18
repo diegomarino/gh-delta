@@ -1,11 +1,21 @@
 {
   "name": "gh-delta",
   "displayName": "gh-delta",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "description": "Decision guide for observing GitHub PR and issue deltas with gh-delta.",
-  "author": { "name": "Diego Marino" },
+  "author": {
+    "name": "Diego Marino"
+  },
   "license": "MIT",
-  "keywords": ["github", "pull-requests", "issues", "monitoring", "ci", "cli", "skills"],
+  "keywords": [
+    "github",
+    "pull-requests",
+    "issues",
+    "monitoring",
+    "ci",
+    "cli",
+    "skills"
+  ],
   "logo": "assets/logo.svg",
   "skills": "./skills/"
 }

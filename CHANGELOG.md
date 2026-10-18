@@ -10,6 +10,14 @@ This project follows semantic versioning.
 
 - Add opt-in one-line per-delta templates to detector ticks and cursor reads, with local file sources and optional raw-byte SHA-256 verification (#95). Planned for the next minor release.
 
+## [0.12.1](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.12.0...gh-delta-v0.12.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* **plugin:** add Cursor marketplace metadata and logo ([#125](https://github.com/diegomarino/gh-delta/issues/125)) ([660778a](https://github.com/diegomarino/gh-delta/commit/660778adfa6a104483b3f091db1c2c286621ed64))
+* **skill:** clarify how scheduled --once runs resolve, fail and stay quiet ([#126](https://github.com/diegomarino/gh-delta/issues/126)) ([a6141c7](https://github.com/diegomarino/gh-delta/commit/a6141c7e0f6441a6c3a8ae1b21b4b722eeb403f9))
+
 ## [0.12.0](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.11.0...gh-delta-v0.12.0) (2026-10-18)
 
 
