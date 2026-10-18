@@ -20,6 +20,9 @@ Use the runtime's native session identifier:
   ID. Pass that value into the setup as `SESSION_ID`.
 - For another agent, use its documented persistent conversation/session ID.
 
+Hosts without a stable session ID (Grok Bot) use a constant owner/monitor ID
+from the routine prompt.
+
 Do not infer an ID from a transcript filename or invent one. If a session ID is
 not available, ask the user. For a deliberately shared cross-session producer,
 use a stable role such as `coordinator` instead of pretending it belongs to one
