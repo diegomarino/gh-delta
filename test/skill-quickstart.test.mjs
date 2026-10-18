@@ -45,6 +45,11 @@ if (name === 'git') {
 } else if (name === 'gh' && args[0] === 'repo') {
   if (!settings.resolvedRepo) process.exit(1);
   console.log(JSON.stringify(process.env.GH_REPO ? { nameWithOwner: 'other/repo', url: 'https://github.com/other/repo' } : settings.resolvedRepo));
+} else if (name === 'gh' && args[0] === 'api' && args.some(arg => arg.startsWith('query=') && arg.endsWith('{id}}'))) {
+  if (settings.noRepoAccess === 'exit') { console.error('HTTP 401: Bad credentials\\nretry later'); process.exit(1); }
+  if (settings.noRepoAccess === 'errors') { console.log(JSON.stringify({ data: { repository: null }, errors: [{ message: 'Could not resolve to a Repository' }] })); process.exit(0); }
+  if (settings.noRepoAccess === 'null') { console.log(JSON.stringify({ data: { repository: null } })); process.exit(0); }
+  console.log(JSON.stringify({ data: { repository: { id: 'R_1' } } }));
 } else if (name === 'gh' && args[0] === 'api' && settings.actualCli) {
   const stagePath = path.join(process.env.QUICKSTART_ROOT, 'stage');
   const stage = Number(fs.existsSync(stagePath) ? fs.readFileSync(stagePath, 'utf8') : 0);
@@ -236,6 +241,30 @@ test('quickstart readiness failures explain missing prerequisites without ticks'
     assert.equal(report.ready, false);
     assert.ok(report.reason.length > 0);
     assert.equal(f.ticks().length, 0);
+  }
+});
+
+test('quickstart check probes repository access and stays read-only', (t) => {
+  const f = fixture(t);
+  const ok = f.run('--check');
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.equal(JSON.parse(ok.stdout).ready, true);
+  const probes = f.calls().filter(({ args }) => args[0] === 'api');
+  assert.equal(probes.length, 1);
+  assert.deepEqual(probes[0].args.slice(0, 4), ['api', 'graphql', '--hostname', 'github.com']);
+  assert.ok(probes[0].args.includes('owner=acme') && probes[0].args.includes('name=widgets'));
+  for (const mode of ['exit', 'errors', 'null']) {
+    const bad = fixture(t, { noRepoAccess: mode });
+    const result = bad.run('--check');
+    assert.equal(result.status, 1, result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.ready, false);
+    assert.equal(report.repo, 'acme/widgets');
+    assert.match(report.reason, /cannot read acme\/widgets on github\.com/);
+    assert.ok(!report.reason.includes('\n'));
+    assert.equal(bad.ticks().length, 0);
+    assert.ok(!existsSync(join(bad.checkout, '.gh-delta.json')));
+    assert.ok(!existsSync(bad.env.XDG_STATE_HOME));
   }
 });
 
@@ -436,7 +465,7 @@ for (const source of ['project', 'user']) {
     const check = f.run('--check');
     assert.equal(check.status, 0, check.stderr);
     assert.equal(JSON.parse(check.stdout).ready, true);
-    assert.ok(!f.calls().some(({ args }) => args[0] === 'api'));
+    assert.ok(f.calls().every(({ args }) => args[0] !== 'api' || args[1] === 'graphql'));
     assert.ok(!existsSync(f.env.XDG_STATE_HOME));
     const launch = f.run();
     const state = /state: (\/tmp\/gh-delta\.[A-Za-z0-9]+)/.exec(launch.stderr)?.[1];
