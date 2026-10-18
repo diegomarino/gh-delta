@@ -109,6 +109,11 @@ Field guarantees:
   empty. An outpost POST that timed out or returned an error, or
   `origin`/`upstream` resolving to different repos while deriving `--repo`
   (`label: "repo"`; see the `--repo` bullet in [CLI](cli.md#cli)) both land here.
+  So does `label: "team-reviewers-unavailable"`: the classic token lacks
+  `read:org`, so PR fetches dropped the team selection and report team review
+  requests as `?` instead of failing. It repeats on every tick until the token
+  gains the scope. In a multi-repository run every label is prefixed with its
+  repository, as in `"o/r: team-reviewers-unavailable"`.
   Does not appear in text output as a `warnings` array — each entry is instead
   printed inline as `warning [<label>]: <reason>`. Does not affect the exit
   code.
