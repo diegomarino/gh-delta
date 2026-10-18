@@ -15,6 +15,7 @@ Read the page for your task. The links below also preserve earlier section bookm
 | <a id="strict-issues-and-mixed-membership"></a>Strict issues and mixed membership                        | [Read](patterns/watch-selection.md#strict-issues-and-mixed-membership)              |
 | <a id="pattern-4-one-producer-many-consumers"></a>Pattern 4: one producer, many consumers                | [Read](patterns/log-consumers.md#pattern-4-one-producer-many-consumers)             |
 | <a id="pattern-5-find-inactive-work"></a>Pattern 5: find inactive work                                   | [Read](patterns/inactive-work.md#pattern-5-find-inactive-work)                      |
+| <a id="pattern-6-one-shot-runs-from-a-scheduler"></a>Pattern 6: one-shot runs from a scheduler           | [Read](patterns/scheduled-runs.md#pattern-6-one-shot-runs-from-a-scheduler)         |
 | <a id="retire-or-clean-one-scenario-safely"></a>Retire or clean one scenario safely                      | [Read](patterns/retire-monitor.md#retire-or-clean-one-scenario-safely)              |
 | <a id="consume-schema-v2-output"></a>Consume schema v2 output                                            | [Read](patterns/consume-output.md#consume-schema-v2-output)                         |
 | <a id="output-choice"></a>Output choice                                                                  | [Read](patterns/consume-output.md#output-choice)                                    |

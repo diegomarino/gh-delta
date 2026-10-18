@@ -68,6 +68,19 @@ detected changes to the conversation. A shell background job alone does not
 deliver chat notifications. If the runtime cannot collect process output, do
 not offer automatic notification delivery.
 
+### One-shot mode for schedulers
+
+```bash
+bash /absolute/path/to/gh-delta/scripts/gh-delta-quickstart.sh --once \
+  --state-dir DIR --monitor-id ID [pr|issue|pr,issue]
+```
+
+Same preflight and template as monitor mode, then one tick and exit with the
+tick's status (`0`, `10`, `1`, other unchanged). `--state-dir` and `--monitor-id`
+are required (exit `2` otherwise): state must persist and the identity stay
+constant, or every run re-baselines silently. The script creates `DIR` if
+absent. See [scheduled runs](patterns/scheduled-runs.md).
+
 ## Readiness helper
 
 [gh-delta-preflight.mjs](../scripts/gh-delta-preflight.mjs) is an internal Node

@@ -75,6 +75,8 @@ Exit `0`/`10` from a tick continues polling, `1` retries after the next sleep,
 and other failures stop the script. A preflight failure starts no monitor.
 For persistent state, selected items, multiple consumers, or structured reports,
 use the advanced patterns below instead of rebuilding the quickstart loop.
+For a scheduler or routine that runs one invocation per tick, use `--once`; see
+[scheduled runs](references/patterns/scheduled-runs.md) (Grok Bot and cloud-agent setup included).
 Read [references/quickstart.md](references/quickstart.md) for script interfaces,
 preflight decisions, output examples, configuration conflicts, and shutdown.
 
@@ -131,6 +133,7 @@ the answer changes the design; do not make the user choose CLI flags.
 | [A search or up to ten selected PRs](references/patterns/watch-selection.md)   | Resolve the selection, persist it with `watch add` or `watch sync`, then tick with `--watch-dir` |
 | [Several independent consumers](references/patterns/log-consumers.md)          | One producer with `--log`; one durable cursor per consumer                                       |
 | [Inactive work](references/patterns/inactive-work.md)                          | Normal ticks with `--stale-after`, then local `status`                                           |
+| [Cron, CI, routines, scheduled agents](references/patterns/scheduled-runs.md)  | One `--once` tick per invocation with a persistent state dir and constant monitor id             |
 | Explain an old notification                                                    | Local `explain` using the report or delta log                                                    |
 
 Read [references/patterns.md](references/patterns.md) to choose a procedure, and
