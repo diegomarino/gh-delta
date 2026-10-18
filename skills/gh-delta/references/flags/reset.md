@@ -4,7 +4,7 @@
 
 [All commands](../flags.md) · [Skill](../../SKILL.md)
 
-`gh-delta reset --repo <owner/name> --monitor-id <id> (--state-file <path>|--state-dir <dir>) --yes [--entities pr,issue] [--format json|text]`
+`gh-delta reset [--repo <owner/name>] --monitor-id <id> (--state-file <path>|--state-dir <dir>) --yes [--entities pr,issue] [--format json|text]`
 
 <!-- toc -->
 
@@ -27,7 +27,7 @@
 
 Default: ``
 
-GitHub repository in owner/name form for the producer identity.
+GitHub repository in owner/name form for the producer identity. Optional: when omitted, derived exactly like a run (the current directory’s git remote, origin then upstream, github.com only, with a `gh repo view` fallback), so the flags of a working run can be reused for reset. Pass --repo to choose explicitly.
 
 ## `--monitor-id <id>`
 
