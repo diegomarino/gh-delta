@@ -29,7 +29,8 @@ This is the end-to-end flow that ships a release, from commit to npm:
    [`googleapis/release-please-action`](https://github.com/googleapis/release-please-action),
    which maintains a standing "chore(main): release gh-delta X.Y.Z" PR. That
    PR's diff is entirely generated: it bumps the `version` fields in
-   `package.json` and `.claude-plugin/plugin.json`, and prepends the new
+   `package.json`, `.claude-plugin/plugin.json`, `plugin.json` and
+   `.cursor-plugin/plugin.json`, and prepends the new
    section to `CHANGELOG.md`. Never hand-edit either version field or the
    changelog directly — release-please owns them, and a manual edit will be
    overwritten or cause a merge conflict on the next run.
@@ -128,7 +129,8 @@ not the other way around):
 - `gh-delta.mjs`;
 - `gh-delta` (GitHub CLI extension shim);
 - `skills/gh-delta/` (including generated `references/flags.md`);
-- `.claude-plugin/` marketplace and plugin metadata;
+- `.claude-plugin/` marketplace and plugin metadata, plus `plugin.json` (Agent
+  Plugins 1.0) and `.cursor-plugin/` (Cursor);
 - `lib/*.mjs`;
 - `schema/` (published JSON Schema copies checked by `npm run schema:check`);
 - `docs/architecture.md`, `docs/contract.md`, `docs/usage.md`, `docs/recipes.md`, `docs/watch-loop-prompt.md`, `docs/release-checklist.md`, `docs/alternatives.md`, `docs/troubleshooting.md`;
