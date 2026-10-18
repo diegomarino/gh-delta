@@ -22,7 +22,9 @@ is applied to the local start time when storing `meta.horizon`, so a host clock
 correction, manual adjustment, or resume between ticks cannot leave the next
 cutoff ahead of or behind GitHub. `meta.updatedAt` remains that start time in
 the local clock domain; `horizon - updatedAt` records the offset without adding
-snapshot fields. The baseline remains open-only and silent.
+snapshot fields. If that header is missing or invalid, a continuing tick
+reuses the previous offset, while a baseline fails rather than guess one. The
+baseline remains open-only and silent.
 Targeted watches do not use the broad incremental cutoff and keep local horizons.
 
 ## Fetch limits (page caps)

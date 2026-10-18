@@ -73,7 +73,7 @@ test('recent closed items stay quiet after startup but later updates and reopeni
 });
 
 for (const offsetMs of [-30_000, 30_000]) {
-  test(`baseline calibrates GitHub offset ${offsetMs}ms and preserves it across ticks`, () => {
+  test(`baseline calibrates GitHub offset ${offsetMs}ms and recalibrates it on every tick`, () => {
     const d = deps([]);
     let at = '2026-07-01T12:00:00.000Z';
     const serverStart = Date.parse(at) + offsetMs;
@@ -193,6 +193,38 @@ for (const [label, baselineLagMs, laterLagMs] of [
     );
   });
 }
+
+test('a baseline without a usable Date header fails instead of guessing the offset', () => {
+  const d = deps([]);
+  d.fetchPRs = (_repo, opts) => {
+    opts.onServerTime(null);
+    return { rows: [], rateLimit: RATE_LIMIT };
+  };
+  const { code, report } = run(
+    ['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'],
+    d,
+  );
+  assert.equal(code, 1);
+  assert.match(report.results[0].error.message, /Date header/);
+  assert.equal(d.writes, 0);
+});
+
+test('a continuing tick without a usable Date header reuses the previous offset', () => {
+  const { d, tick } = clockChangeMonitor(() => ({ pr: [], issue: [] }));
+  assert.equal(tick('2026-07-01T12:00:00.000Z', 30_000).code, 0);
+  d.fetchPRs = (_repo, opts) => {
+    opts.onServerTime(null);
+    return { rows: [], rateLimit: RATE_LIMIT };
+  };
+  d.fetchIssues = () => ({ rows: [], rateLimit: RATE_LIMIT });
+  d.now = () => '2026-07-01T12:00:30.000Z';
+  assert.equal(
+    run(['--repo', 'o/r', '--monitor-id', 'main', '--state-file', '/tmp/x.json'], d).code,
+    0,
+  );
+  assert.equal(d.stored.meta.updatedAt, '2026-07-01T12:00:30.000Z');
+  assert.equal(d.stored.meta.horizon, '2026-07-01T12:01:00.000Z');
+});
 
 test('continuing monitor recalibrates after the host clock moves back without rereading history', () => {
   const historical = {

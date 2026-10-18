@@ -109,16 +109,15 @@ test('server clock capture adds headers only to the first open page', () => {
   assert.equal(dates.length, 1);
 });
 
-test('server clock calibration rejects missing or invalid Date headers', () => {
+test('server clock capture reports missing or invalid Date headers as null', () => {
   for (const header of ['', 'Date: invalid']) {
-    assert.throws(
-      () =>
-        fetchPRs('o/r', {
-          onServerTime: () => assert.fail('invalid clock must not be used'),
-          exec: () => `HTTP/2.0 200 OK\n${header}\n\n${page([])}`,
-        }),
-      /Date header/,
-    );
+    const dates = [];
+    const result = fetchPRs('o/r', {
+      onServerTime: (date) => dates.push(date),
+      exec: () => `HTTP/2.0 200 OK\n${header}\n\n${page([])}`,
+    });
+    assert.deepEqual(result.rows, []);
+    assert.deepEqual(dates, [null]);
   }
 });
 
