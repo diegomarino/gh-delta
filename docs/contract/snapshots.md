@@ -16,13 +16,13 @@ all-states items updated since that cutoff are also fetched to observe closed,
 merged, and relabeled transitions. Absent closed items are dormant memory, not a
 missing delta — only items the snapshot believes OPEN can vanish.
 
-A new broad monitor calibrates its clock from the HTTP `Date` header on the
-first baseline response, without an extra request. The offset is applied to
-the local start time when storing `meta.horizon`. `meta.updatedAt` remains that
-start time in the local clock domain; `horizon - updatedAt` preserves the offset
-for subsequent ticks without adding snapshot fields. The baseline remains
-open-only and silent. Existing snapshots retain their stored offset (zero for
-uncalibrated snapshots); starting a fresh baseline obtains a new calibration.
+Every broad polling tick calibrates its clock from the HTTP `Date` header on
+the first GraphQL response of that tick, without an extra request. The offset
+is applied to the local start time when storing `meta.horizon`, so a host clock
+correction, manual adjustment, or resume between ticks cannot leave the next
+cutoff ahead of or behind GitHub. `meta.updatedAt` remains that start time in
+the local clock domain; `horizon - updatedAt` records the offset without adding
+snapshot fields. The baseline remains open-only and silent.
 Targeted watches do not use the broad incremental cutoff and keep local horizons.
 
 ## Fetch limits (page caps)
