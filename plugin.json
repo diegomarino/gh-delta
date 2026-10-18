@@ -1,9 +1,11 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "gh-delta",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Decision guide for observing GitHub PR and issue deltas with gh-delta.",
-  "author": { "name": "Diego Marino" },
+  "author": {
+    "name": "Diego Marino"
+  },
   "homepage": "https://github.com/diegomarino/gh-delta#readme",
   "repository": "https://github.com/diegomarino/gh-delta",
   "license": "MIT"
