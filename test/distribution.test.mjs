@@ -36,6 +36,7 @@ test('agent skill has valid structured frontmatter and generated flags in the pa
   assert.ok(pkg.files.includes('.claude-plugin'));
   assert.ok(pkg.files.includes('.cursor-plugin'));
   assert.ok(pkg.files.includes('plugin.json'));
+  assert.ok(pkg.files.includes('assets/logo.svg'));
 });
 
 test('generated skill flags are synchronized with help metadata', () => {

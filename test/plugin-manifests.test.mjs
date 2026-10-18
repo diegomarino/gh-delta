@@ -43,3 +43,13 @@ test('.cursor-plugin skills path points at an existing directory', () => {
   const dir = resolve(import.meta.dirname, '..', m.skills);
   assert.ok(existsSync(dir) && statSync(dir).isDirectory(), m.skills);
 });
+
+test('.cursor-plugin logo is a committed SVG referenced by relative path', () => {
+  const m = read('.cursor-plugin/plugin.json');
+  assert.equal(m.logo, 'assets/logo.svg');
+  const file = resolve(import.meta.dirname, '..', m.logo);
+  assert.ok(existsSync(file) && statSync(file).isFile(), m.logo);
+  const svg = readFileSync(file, 'utf8');
+  assert.match(svg, /^<svg[^>]*viewBox="0 0 128 128"/);
+  assert.doesNotMatch(svg, /<text|<image|@font-face|href=/, 'logo must be self-contained paths');
+});

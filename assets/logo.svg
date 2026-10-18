@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"
+     role="img" aria-labelledby="gh-delta-title gh-delta-desc">
+  <title id="gh-delta-title">gh-delta</title>
+  <desc id="gh-delta-desc">Logo de gh-delta: una delta invertida e inclinada diez grados a la izquierda, en violeta, junto a una h clara con terminales oblicuos, sobre fondo oscuro.</desc>
+  <!--
+    gh-delta / CUT / Rose Pine / v1.0 / 2026-10-18
+    Standalone SVG: solid fills, two outlined glyphs, no font dependencies.
+
+    PALETTE: Rose Pine Main
+    Background #191724 | delta #C4A7E7 | h #E0DEF4 | border #524F67.
+
+    GEOMETRY
+    128-unit square; corner radius 20; inset 0.5-unit border of width 1.
+    Delta is a bespoke redraw of an inverted serif delta, thickened and
+    rotated -10 degrees about (42.25, 73.85). Transform baked into path.
+    h stem width 10; x-height 42.5; baseline 79; ascender starts at y=23.
+    h terminal cuts share slope 0.6 (6 units down per 10 units across).
+    Preserve relative paths and spacing; scale the entire viewBox uniformly.
+
+    PROVENANCE
+    Initial study: TeX Gyre Termes Regular (texgyretermes-regular.otf)
+    and TeX Gyre Heros Bold (texgyreheros-bold.otf), GUST Font License.
+    https://www.ctan.org/pkg/tex-gyre-termes
+    https://www.ctan.org/pkg/tex-gyre-heros
+    Final contours manually redrawn; not unmodified font glyph outlines.
+    Image-generated concepts informed the CUT treatment; this is a manual
+    vector interpretation, not an automatic trace of a raster preview.
+    No font files embedded. No license for the gh-delta brand is assigned here.
+  -->
+  <!-- Inset border remains completely within the square canvas. -->
+  <rect id="background" x="0.5" y="0.5" width="127" height="127" rx="20"
+        fill="#191724" stroke="#524F67" stroke-width="1"/>
+  <!-- Custom delta: counter is a reverse-wound subpath, not a background patch. -->
+  <path id="delta" fill="#C4A7E7" fill-rule="nonzero"
+        d="M16.28 63.35C18.63 76.64 28.94 80.41 40.06 83.02C47.47 84.76 51.77 87.25 52.69 92.47C53.7 98.18 50.46 101.7 44.55 102.74C39.23 103.68 34.76 101.93 30.9 97.33L23.31 103.23C28.93 110.88 37.42 114.15 46.29 112.59C58.4 110.45 64.98 101.68 63.03 90.65C61.71 83.16 56.11 78.46 49.93 76.2C59.39 71.69 64.33 64.02 62.77 55.15C60.4 41.76 48.99 34.03 35.4 36.42C21.81 38.82 13.92 49.96 16.28 63.35ZM27.31 61.4C25.94 53.62 29.52 48.02 37.2 46.66C44.88 45.31 50.17 49.35 51.54 57.13C52.79 64.22 48.88 69.69 39.65 72.63C32.5 70.65 28.35 67.31 27.31 61.4Z"/>
+  <!-- Custom h: matching 10-unit stem weight and coordinated CUT terminals. -->
+  <path id="h" fill="#E0DEF4" d="M108 81V52C108 42 102.2 36.5 94 36.5C88.8 36.5 85 38.6 82 43V29L72 23V79H82V54.5C82 49 85.3 45.5 90.5 45.5C95.2 45.5 98 48.3 98 54V75Z"/>
+</svg>
