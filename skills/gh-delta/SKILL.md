@@ -24,8 +24,9 @@ bash /absolute/path/to/gh-delta/scripts/gh-delta-quickstart.sh --check
 Exit `0` returns JSON with `ready: true`, `repo`, `host`, and `launcher`.
 Exit `1` returns `ready: false` and an actionable `reason`; exit `2` means
 invalid arguments. The check creates no state and starts no polling. It checks
-the CLI launcher, Node 22+, a GitHub remote, authentication for that host, and
-conflicting inherited configuration. Installing the skill does not install the
+the CLI launcher, Node 22+, a GitHub remote, authentication for that host, a minimal
+GraphQL read of the repository (read:org is not required), and conflicting
+inherited configuration. Installing the skill does not install the
 CLI. If the check fails, skip an unsolicited offer; for an explicit monitoring
 request, explain the reason. Do not install dependencies or change existing
 authentication or configuration automatically.

@@ -11,6 +11,8 @@
  * on failure when known. launcher is an argv array, never executable text.
  * Each prerequisite subprocess has a ten-second deadline and no stdin.
  * Authentication output is captured but never printed, to avoid credentials.
+ * After configuration checks, one GraphQL request (repository id only) proves
+ * the token can read the repository; read:org is deliberately not required.
  *
  * Standalone by design: installed skills do not include CLI internal modules.
  * Keep remote selection and configuration precedence aligned with repo-source
@@ -171,6 +173,38 @@ for (const key of blocked) {
       `Inherited ${key} conflicts with the session quickstart; use the advanced monitoring workflow without changing existing configuration.`,
     );
   }
+}
+
+// `gh auth status` can pass for a token that cannot read the repository, so
+// prove access with the cheapest GraphQL query. Only the repository id is read.
+const [owner, name] = report.repo.split('/');
+const probe = command('gh', [
+  'api',
+  'graphql',
+  '--hostname',
+  report.host,
+  '-f',
+  `owner=${owner}`,
+  '-f',
+  `name=${name}`,
+  '-f',
+  'query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){id}}',
+]);
+let accessible = false;
+let detail = probe.error?.message || probe.stderr?.trim() || `exit ${probe.status}`;
+if (probe.status === 0) {
+  try {
+    const body = JSON.parse(probe.stdout);
+    accessible = Boolean(body?.data?.repository?.id) && !body.errors?.length;
+    if (!accessible) detail = body?.errors?.[0]?.message || 'repository not returned';
+  } catch {
+    detail = 'unreadable GraphQL response';
+  }
+}
+if (!accessible) {
+  unavailable(
+    `GitHub token cannot read ${report.repo} on ${report.host}: ${detail.replace(/\s+/g, ' ').slice(0, 200)}. Check gh auth status --hostname ${report.host}.`,
+  );
 }
 report.ready = true;
 report.scope = scope;

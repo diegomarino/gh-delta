@@ -93,9 +93,11 @@ repository from a directory name. It validates the resolved repository and host
 before passing them to subprocesses.
 
 `gh auth status --active --hostname <resolved-host>` must succeed. The helper
-captures authentication output without forwarding it. Authentication is a
-prerequisite, not proof that the token can read every repository field; the first
-detector tick establishes actual access. Each preflight subprocess has a
+captures authentication output without forwarding it. Because that status can
+pass for a token that cannot read the repository, a final one-field GraphQL
+request (`repository { id }`, same host) must also succeed; otherwise the check
+reports `ready: false` with a reason naming the repository. `read:org` is not
+probed. Each preflight subprocess has a
 ten-second deadline. Remote fallback can make a read-only GitHub request.
 
 Example successful check output:
