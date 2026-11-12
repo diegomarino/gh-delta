@@ -103,8 +103,24 @@ test('all maintained topic pages and indexes ship in npm', () => {
   }
 });
 
-// Agents copy shell blocks and run them whole, so a prose sentence inside one
-// executes as a command (and aborts the recipe under `set -e`).
+// Agents copy shell blocks and run them whole, so a prose line inside one
+// executes as a command (and aborts the recipe under `set -e`). Prose can start
+// with anything, so every command line must instead start with a known word:
+// extend this list when a shell block legitimately runs a new command.
+const SHELL_WORDS = new Set([
+  ...['if', 'then', 'else', 'elif', 'fi', 'for', 'while', 'do', 'done', 'case', 'esac'],
+  ...['[', ':', 'cd', 'cp', 'mv', 'mkdir', 'find', 'exit', 'export', 'set', 'trap', 'sleep'],
+  ...['printf', 'bash', 'git', 'gh', 'gh-delta', 'node', 'npm', 'npx', 'jq', 'rg'],
+  ...['systemctl', 'journalctl', 'rsvg-convert', '$EDITOR'],
+]);
+
+function proseInShell(line) {
+  const text = line.trim();
+  if (text === '' || text.startsWith('#') || text.startsWith('--')) return false;
+  if (/^[A-Za-z_]\w*=/.test(text) || /^\S+\)(\s|$)/.test(text)) return false; // assignment, case label
+  return !SHELL_WORDS.has(text.split(/\s+/)[0]);
+}
+
 test('shell code blocks contain no prose lines', () => {
   const failures = [];
   for (const path of markdown) {
@@ -120,9 +136,8 @@ test('shell code blocks contain no prose lines', () => {
           return;
         }
         if (!shell) return;
-        if (!continued && /^[A-Z][a-z]+ [a-z]+ /.test(line))
-          failures.push(`${path}:${index + 1}: ${line}`);
-        continued = /\\$/.test(line);
+        if (!continued && proseInShell(line)) failures.push(`${path}:${index + 1}: ${line}`);
+        continued = /\\\s*$/.test(line);
       });
   }
   assert.deepEqual(failures, []);
