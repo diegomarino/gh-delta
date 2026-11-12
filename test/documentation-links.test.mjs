@@ -102,3 +102,28 @@ test('all maintained topic pages and indexes ship in npm', () => {
     assert.ok(published(path), `${path} is missing from package.json files`);
   }
 });
+
+// Agents copy shell blocks and run them whole, so a prose sentence inside one
+// executes as a command (and aborts the recipe under `set -e`).
+test('shell code blocks contain no prose lines', () => {
+  const failures = [];
+  for (const path of markdown) {
+    let shell = false;
+    let continued = false;
+    readFileSync(resolve(root, path), 'utf8')
+      .split('\n')
+      .forEach((line, index) => {
+        const fence = /^\s*```(\w*)/.exec(line);
+        if (fence) {
+          shell = !shell && ['bash', 'sh', 'shell', 'zsh'].includes(fence[1]);
+          continued = false;
+          return;
+        }
+        if (!shell) return;
+        if (!continued && /^[A-Z][a-z]+ [a-z]+ /.test(line))
+          failures.push(`${path}:${index + 1}: ${line}`);
+        continued = /\\$/.test(line);
+      });
+  }
+  assert.deepEqual(failures, []);
+});
