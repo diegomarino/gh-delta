@@ -10,6 +10,13 @@ This project follows semantic versioning.
 
 - Add opt-in one-line per-delta templates to detector ticks and cursor reads, with local file sources and optional raw-byte SHA-256 verification (#95). Planned for the next minor release.
 
+## [0.12.2](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.12.1...gh-delta-v0.12.2) (2026-11-12)
+
+
+### Bug Fixes
+
+* **skill:** keep explanatory prose out of the wait-for-pr shell block ([#130](https://github.com/diegomarino/gh-delta/issues/130)) ([b84e7af](https://github.com/diegomarino/gh-delta/commit/b84e7afff8348ed58876a33818856cc5cfc70c25))
+
 ## [0.12.1](https://github.com/diegomarino/gh-delta/compare/gh-delta-v0.12.0...gh-delta-v0.12.1) (2026-10-18)
 
 
